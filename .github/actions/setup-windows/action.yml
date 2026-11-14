@@ -4,7 +4,8 @@ description: >
   workflow (WINDOWS-X86-64-MILESTONE-1.md, section 7): runs
   tests/platform/setup-windows.ps1 -- this repository's baseline Tcl 9.0.1,
   built once from its pinned source release with MSVC's nmake and cached
-  here, and the stable Rust toolchain for x86_64-pc-windows-msvc -- and puts
+  here, and the pinned Rust toolchain (rust-toolchain.toml) for
+  x86_64-pc-windows-msvc, made the default -- and puts
   Tcl on PATH for the job's later steps.
 
 runs:
@@ -22,7 +23,7 @@ runs:
         path: C:\botlish-tcl
         key: tcl-9.0.1-msvc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tests/platform/setup-windows.ps1') }}
 
-    - name: Install Tcl 9.0.1 and stable Rust (x86_64-pc-windows-msvc)
+    - name: Install Tcl 9.0.1 and the pinned Rust (x86_64-pc-windows-msvc)
       shell: pwsh
       run: tests/platform/setup-windows.ps1 -Prefix C:\botlish-tcl -PathFile $env:GITHUB_PATH
 

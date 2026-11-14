@@ -2960,13 +2960,23 @@ pub extern "C" fn rt_str_append_char(p: *mut Vm, s: Value, c: Value) -> Value {
 // (which also admits No/Nl, not just Nd) -- see NATIVE-TCL-UNICODE.md for
 // the full edge-case corpus both were checked against.
 //
-// `unicode-general-category` (Cargo.toml) supplies General_Category from
-// Unicode 16.0 data, which matches Tcl 9.0.1's own table exactly on every
-// corpus case tested, including code points assigned only as of Unicode
-// 15.0/15.1/16.0 (see NATIVE-TCL-UNICODE.md's Unicode-version-skew section)
-// -- chosen over hand-rolling a category table (spec's "avoid large
-// hand-maintained tables") and over a heavier general-purpose regex/ICU
-// dependency this reference runtime does not otherwise need.
+// `unicode-general-category` (Cargo.toml, exactly 1.1.0) supplies
+// General_Category from Unicode 16.0 data, which matches Tcl 9.0.1's own
+// classes on every scalar (tests/native-tcl-unicode.test's
+// native-tcl-unicode-classes-all-scalars) -- chosen over hand-rolling a
+// category table (spec's "avoid large hand-maintained tables") and over a
+// heavier general-purpose regex/ICU dependency this reference runtime does
+// not otherwise need. Its Unicode version is Botlish's: a release of the
+// crate with other tables fails to build here, never ships a different
+// classification (MAIN-CI-FAILURES-2026-11-13.md, "Option A").
+const _: () = {
+    let (major, minor, update) = unicode_general_category::UNICODE_VERSION;
+    assert!(
+        major == 16 && minor == 0 && update == 0,
+        "unicode-general-category must be Unicode 16.0.0, the Tcl reference's (Cargo.toml)"
+    );
+};
+
 fn tcl_alpha_char(c: char) -> bool {
     matches!(
         get_general_category(c),

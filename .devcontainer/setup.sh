@@ -4,6 +4,8 @@ set -euxo pipefail
 export LANG=C.utf8
 export LC_ALL=C.utf8
 
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
 if [[ ${EUID} -eq 0 ]]; then
   SUDO=""
 else
@@ -42,8 +44,8 @@ if ! command -v tclsh9.0 >/dev/null 2>&1; then
 fi
 
 export PATH="$HOME/.cargo/bin:$PATH"
-if ! command -v rustc >/dev/null 2>&1; then
-  curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+if ! command -v rustup >/dev/null 2>&1; then
+  curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain none
 fi
 
 if ! command -v python3 >/dev/null 2>&1; then
@@ -51,8 +53,10 @@ if ! command -v python3 >/dev/null 2>&1; then
   $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3
 fi
 
-rustup toolchain install stable --profile minimal
-rustup default stable
+# The pinned toolchain (rust-toolchain.toml), installed and made the
+# default: never `stable`, which moves under the repository (rustc 1.100:
+# MAIN-CI-FAILURES-2026-11-13.md).
+bash "$root/tools/rust-toolchain.sh" install
 
 if ! command -v go >/dev/null 2>&1; then
   $SUDO apt-get update

@@ -23,6 +23,8 @@ Windows are for CI to confirm.
 5. [Proposed changes to the canary](#5-proposed-changes-to-the-canary)
 6. [Proposed changes to AGENTS.md](#6-proposed-changes-to-agentsmd)
 7. [Left open](#7-left-open)
+8. [Tcl 9.1 and rustc 1.100](#8-tcl-91-and-rustc-1100)
+9. [Option A: what this change pins](#9-option-a-what-this-change-pins)
 
 ## 1. Summary
 
@@ -348,12 +350,13 @@ much of this window each would have caught before main.
 
 ## 6. Proposed changes to AGENTS.md
 
-Ready-to-apply text, by section. None is applied here.
+Ready-to-apply text, by section. A1 and A2 were applied afterwards, in the
+form section 9 describes; A3 to A5 are proposals.
 
 **A1. "Building the native (Cranelift) backend": pin the toolchain.**
 Replace the `rustup toolchain install stable` advice with:
 
-> The Rust toolchain is pinned: `native/rust-toolchain.toml` names the
+> The Rust toolchain is pinned: `rust-toolchain.toml` (the root) names the
 > release every build uses (`.devcontainer/setup.sh`, every workflow, the
 > package author image), so a new stable Rust reaches the repository only
 > as a commit. A toolchain bump is a change of its own, on a branch: every
@@ -427,4 +430,77 @@ rule:
   native-tcl-unicode.test are cause 2, which this change fixes. Anything
   else is new and not described here.
 - **The queued ghost runs at 73c32da8** (section 2.7).
-- **The proposals of sections 5 and 6.**
+- **The proposals of section 5, and A3 to A5 of section 6.**
+
+## 8. Tcl 9.1 and rustc 1.100
+
+rustc 1.100's tables are Unicode 18.0.0 (`char::UNICODE_VERSION`), and Tcl
+9.1.0 (released 2026-09-28) is too: its release notes say so, and its
+character data is now the bundled utf8proc 2.12.0's (`utf8proc_unicode_version`
+"18.0.0"). Whether pinning both would let Botlish follow Unicode 18 more
+simply was checked on 2026-11-14, with Tcl 9.1.0 built from its `core-9-1-0`
+tag (amd64, and arm64 cross-built and run under qemu):
+
+- **`string tolower` against rustc 1.100's `to_lowercase`:** equal on every
+  scalar but three. U+0130 is the simple mapping in Tcl and the full one
+  in Rust, as before. U+023A and U+023E are left unchanged by Tcl, although
+  utf8proc's data maps them: `string tolower` does not grow a string in
+  place, and their lowercase is longer in UTF-8. core::strings::lowercase's
+  patch for them would stay.
+- **Against today's reference (Tcl 9.0.1 and the patch):** Tcl 9.1 adds the
+  48 mappings of Unicode 17 and 18 and removes none.
+- **Classes:** Tcl 9.1's `string is alpha`/`alnum` classify 17,154 more
+  scalars than 9.0.1 and none fewer, consistent with rustc 1.100 (every
+  letter alphabetic, every Nd numeric, nothing rustc classifies unassigned
+  in Tcl 9.1). The `unicode-general-category` crate has no Unicode 18
+  release (1.1.0, Unicode 16, is its newest), so the native classes would
+  need a generated table.
+- **Packages:** Ubuntu's and Debian's `tcl9.1 9.1.0+dfsg` builds need
+  `libc6 >= 2.44`; 24.04 (2.39) has none, nor does any PPA. A vendored
+  submodule and a .deb of our own were built and work, but a rebuild was
+  not yet byte-identical.
+- **The compiled `incr` bug** (AGENTS.md) is still in 9.1.0 on both
+  architectures.
+
+So pinning Tcl 9.1 would change the language (Unicode 16 to 18) and
+simplify nothing: the patch stays, the lowercase table stays (otherwise
+Botlish's Unicode version moves with rustc's again), and the classes need a
+table of their own. The one simplification available -- native lowercase
+from rustc 1.100's `to_lowercase` with U+0130 special-cased, equal to the
+patched Tcl 9.1 reference today -- would couple Botlish's Unicode version to
+rustc's again. Option A was chosen instead: Tcl stays at 9.0.1 and Unicode
+16, and rustc is pinned (section 9).
+
+## 9. Option A: what this change pins
+
+- **rustc 1.100.0**, in `rust-toolchain.toml` at the root, installed and
+  made rustup's default by `tools/rust-toolchain.sh install`. The default
+  matters as much as the file: the rustc linker compiles each executable's
+  startup crate in a temporary directory, outside the checkout. Every setup
+  and workflow that installed `stable` now runs the script:
+  `.devcontainer/setup.sh`, `tests/platform/setup-macos.sh`,
+  `tests/platform/setup-windows.ps1` (MSVC's build, by the same file),
+  single-executable.yml, tasks-app.yml, raven-cleanroom.yml and the three
+  Windows probes. windows-probe.yml's GNU leg sets `RUSTUP_TOOLCHAIN`.
+- **The package author image keeps Rust 1.97.0.** Its Dockerfile sets
+  `RUSTUP_TOOLCHAIN=1.97.0`, which wins over the root file, so recorded
+  releases still reproduce with the toolchain that built them.
+- **The character-class crate:** `unicode-general-category = "=1.1.0"`, and
+  runtime/ops.rs asserts at compile time that its `UNICODE_VERSION` is
+  16.0.0. A build with another version fails; that was checked by
+  expecting 17 instead.
+- **A test of every scalar's classes** on the native backends against the
+  reference: `native-tcl-unicode-classes-all-scalars`, 25 s. Each scalar is
+  an argument of its own: `char_at(i)` of a long non-ASCII String walks
+  from its start, so one String per plane took 9 s a run.
+  audit/char-classifiers' new mutant `rs-classes-unicode-15` models a crate
+  a Unicode version behind: Ol Onal, letters since Unicode 16.0, is left
+  unassigned. Only this test kills it; no corpus character is one.
+- **The mutation harnesses' tree copies now include `tools/`**
+  (audit/golden/tools/tree.tcl). Without it, the lowercase table's
+  generator check failed in every copy, and the char-classifiers harness
+  would have counted every mutant killed by it.
+- **AGENTS.md:** "Building the native (Cranelift) backend" (the pin, the
+  default, how to bump it) and a new section, "Unicode data is the
+  reference's, never the toolchain's"; the `incr` section records 9.1.0
+  and the 9.1 packages.
