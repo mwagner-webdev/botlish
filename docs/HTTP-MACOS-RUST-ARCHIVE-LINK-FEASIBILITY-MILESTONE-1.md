@@ -757,4 +757,53 @@ library.
 
 ## 18. Implications for the next HTTP macOS milestone
 
-PENDING.
+What this milestone settles, and what it leaves to the port
+(HTTP-MACOS-AND-SSE-ESTIMATE.md):
+
+1. **The native linkage model works on macOS** [CI]. A Rust unit
+   localized by `rustunit::localize` links beside the Botlish runtime with
+   both linkers, through the package manager, in a consumer without Rust.
+   No new mechanism is needed: the port's release recipe calls the same
+   procedure with `-format macho`.
+2. **Localization is mandatory, and more so on macOS** [CI]. Apple's ld
+   reports no duplicate definition at all; an unlocalized unit links
+   silently with either a rebound allocator or a shared personality
+   routine (section 5.2). The port must ship only the localized archive
+   and keep `rustunit::check` in its recipe.
+3. **tools/http-package.tcl needs a macOS branch** [inspection]. Today it
+   refuses any host but Linux (`httppkg::Host`). The port adds: BoringSSL
+   built by upstream's CMake for arm64 and macOS 11.0 (http-unit.tcl's
+   recipe, which worked); the provider's identity object in an archive of
+   its own or merged with `libtool -static` (not decided here: the probe
+   linked three archives); the unit localized as above; and a macOS target
+   in both packages' `botlish.json`, made by `native add` (F-16's fix makes
+   its `-symbol` checks possible).
+4. **One source change, so far** [CI]. net.rs's socket flags
+   (`SOCK_NONBLOCK | SOCK_CLOEXEC`) are Linux's; setting them with `fcntl`
+   after `socket()` is the portable spelling and changes nothing on Linux.
+   That is the only change the unit needed to compile; what runs once a
+   driver exists (readiness, timeouts, `MSG_NOSIGNAL` semantics against
+   `SO_NOSIGPIPE`) was not exercised.
+5. **The integration point stays as it is, with a condition** [CI]. http's
+   weak reference to `botlish_event_post2` links on macOS whenever the
+   driver (its provider) is linked, which every http program does; only a
+   program that links the unit without a driver fails, at link time, on
+   that one symbol. If the port wants the unit linkable without a driver
+   (a test probe, a tool), notify.c becomes a weak *definition* (section
+   7): the same ABI, no linker flag, both platforms -- and the package
+   manager now accepts it beside the driver's strong one (section 8.2).
+6. **The driver is the real work** [inference]. A kqueue (or
+   CFRunLoop-integrated) driver package implementing the same integration
+   ABI (`botlish_event_loop.h`, version 2) is out of scope here and
+   untouched. Nothing found here constrains its design beyond providing
+   `botlish_event_post2` strongly.
+7. **Tooling hazards to carry over** [CI]. Read Mach-O symbols with
+   `--no-llvm-bc`; give every `ld -r` output a platform load command;
+   check the build version and the surface in the recipe; expect about
+   80% of a localized unit to be the standard library's bitcode (strip it
+   if size matters, after measuring that a link never reads it).
+8. **Reproducibility carries over** [CI]. The fixture's macOS unit is
+   reproducible across two runners of one image with one Xcode; the port
+   should pin the Xcode version its releases are built with, as the
+   author image pins Linux's tools, since Apple's ld and libtool versions
+   are in the bytes.
