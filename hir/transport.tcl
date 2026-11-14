@@ -46,11 +46,13 @@ namespace eval hir::transport {
     # no call boundary, so no transport score applies; its cost is register
     # pressure, code and backend time inside one function. Measured (the
     # report's width section): faster at run time at every width up to 256
-    # fields; code smaller up to 8 fields and 4-15% larger beyond; Cranelift's
-    # compile time neutral up to 16 fields, up to +39% at 32-64, and more than
-    # doubled at 128-256 for a gain per iteration that stays near 1.2x. The
+    # fields; code smaller up to 8 fields and up to 15% larger beyond;
+    # Cranelift's compile time neutral up to 16 fields, up to +39% at 32-64,
+    # and more than doubled at 128-256 for a gain per iteration that stays
+    # near 1.2x. The
     # ceiling (64) is that compile-time bound -- not the local ceiling (16),
-    # which would decline 17-64-field folds that run 1.25-1.9x faster.
+    # which would decline 17-64-field folds that run 1.2-1.5x faster (over
+    # 20x when one field changes per iteration).
     variable defaults {
         policy transport
         localWidth 16

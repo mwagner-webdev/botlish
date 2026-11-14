@@ -55,13 +55,16 @@ FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md (the implementation: fold slots in
 hir/escape.tcl, native lowering's `vfold` mode) adds:
 
 * `width/` -- the milestone's width inputs (`tools/gen-width.tcl` writes
-  them): `few-W`, `most-W`, `branch-W`, `ret-W`, `nested-W` at 2-64 fields,
-  `most-W` and `spill-W` up to 256;
+  them): `few-W`, `most-W`, `branch-W`, `ret-W`, `nested-W` and `spill-W`
+  at 2-64 fields, `most-W` and `spill-W` also at 128 and 256;
 * `tools/`:
   - `fuzz.tcl` -- the differential fuzzer: random folds over a struct
-    intermediate (scalar, history and vector templates), values on eight
-    configurations, the fold slot's decision against the fuzzer's own model,
-    and no program building more structs with fold slots than without;
+    intermediate (scalar, history, vector and nested templates), values on
+    eight configurations, the fold slot's decision against the fuzzer's own
+    model, no program building more structs with fold slots than without,
+    and every NIR register defined on every path to its reads;
+  - `defined.tcl` -- the definedness check of NIR text (a forward
+    must-analysis with error edges), independent of the driver's validator;
   - `mutate.tcl` and `mutants.txt` -- the mutation catalog of the
     milestone's rules, each mutant killed by the tests its `!!` line names;
   - `golden-port.tcl` -- writes tests/golden/fold-virtual-struct-state.bot,
@@ -69,7 +72,11 @@ hir/escape.tcl, native lowering's `vfold` mode) adds:
   - `corpus.tcl` and `corpus-compare.py` -- a corpus's NIR digests, struct
     census classes, fold slots and Struct allocations under several lowering
     configurations, compared with another checkout's (`-root DIR`);
-  - `gen-width.tcl` -- writes `width/`.
+  - `gen-width.tcl` -- writes `width/`;
+  - `width-facts.tcl` -- per width input and configuration: the fold-slot
+    decision, the fold function's NIR registers, safepoints, roots, frame
+    size, frame-addressing instructions and (`-compile-runs N`) Cranelift's
+    compile time.
 * `results/` -- the milestone's evidence: `m1-*.txt` (the report's section
   17 regenerates them).
 

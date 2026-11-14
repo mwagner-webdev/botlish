@@ -41,7 +41,7 @@ def main():
     bad = 0
     changed = []
     more = []
-    totals = {"programs": 0, "same": 0, "fold": 0, "refjoin": 0, "both": 0}
+    totals = {"programs": 0, "same": 0, "fold": 0, "refjoin": 0, "both": 0, "?": 0}
     sb = sm = 0
     for n in names:
         b = base.get((n, "default"))
@@ -61,7 +61,12 @@ def main():
             fold = foldoff is not None and foldoff.get("nir") != d["nir"]
             ref = refoff is not None and refoff.get("nir") != d["nir"]
             kind = "both" if fold and ref else "fold" if fold else "refjoin" if ref else "?"
-            totals[kind if kind != "?" else "both"] += 1
+            # "?": neither feature alone changes it (a difference of the
+            # two trees unrelated to the milestone): reported, and fails.
+            totals[kind] += 1
+            if kind == "?":
+                print(f"CHANGED BY NEITHER FEATURE: {n}")
+                bad += 1
             changed.append((n, kind, b, d))
         try:
             x, y = int(b.get("structs", "-")), int(d.get("structs", "-"))
@@ -76,7 +81,7 @@ def main():
         print(f"    census {b.get('census')}")
         print(f"        -> {d.get('census')}")
     print(f"\n{totals['programs']} programs: NIR unchanged {totals['same']}, changed by fold slots {totals['fold']}, "
-          f"by reference joins {totals['refjoin']}, by both {totals['both']}")
+          f"by reference joins {totals['refjoin']}, by both {totals['both']}, by neither {totals['?']}")
     print(f"Struct allocations over the programs that ran on both: {sb} -> {sm}")
     for n, x, y in more:
         print(f"MORE STRUCTS: {n}: {x} -> {y}")

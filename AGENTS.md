@@ -1371,8 +1371,15 @@ Keep it so:
   Ownership stays hir/mutvec.tcl's, decided before representation: never add
   or drop a share, and never share an unlisted field.
 * A fold slot's representation class is opaque (`NestingPlan`'s `opq`): no
-  cut is chosen for it or for any class it touches; an inner struct stays one
+  cut is chosen for it or for any class it touches -- an exact call's result
+  entering it included, so its class is unioned after the result members
+  exist (`fvs-exact-call-nested-result`) -- and an inner struct stays one
   carried field.
+* Every register the lowering reads is defined on every path to the read:
+  `audit/fold-virtual-struct-state/tools/defined.tcl` checks NIR text for
+  it, independently of the driver's validator (which does not); the tests
+  (`fvs-nir-defined`) and the fuzzer run it. Keep a new lowering path under
+  it.
 * Options: `-struct-fold 0` and `-struct-ref-joins 0` (or
   `BOTLISH_NATIVE_STRUCT_FOLD`, `BOTLISH_NATIVE_STRUCT_REF_JOINS`) turn the
   two features off; with both off the NIR is the lowering before the
@@ -1394,14 +1401,15 @@ from the Tcl tests' own programs), `tests/fold-loops.test`,
 `audit/fold-virtual-struct-state/tools/fuzz.tcl` (several seeds, once with
 `-gc-stress 1`: values on eight configurations, decisions against the
 fuzzer's own model, no program building more structs than without fold
-slots), `audit/fold-virtual-struct-state/tools/mutate.tcl` (every mutant in
+slots, every NIR register defined), `audit/fold-virtual-struct-state/tools/mutate.tcl` (every mutant in
 its `mutants.txt` must still apply and be killed by a test its `!!` line
 names: update a mutant's text when you change the code it mutates, keeping
 it a mutant of the same rule) and the census's probes
 (`audit/fold-virtual-struct-state/tools/probes.tcl`). `corpus.tcl` with
 `corpus-compare.py` compares a corpus's NIR, census and Struct allocations
-with another checkout (`-root DIR`); `measure.tcl` and `gen-width.tcl`
-regenerate the report's tables.
+with another checkout (`-root DIR`); `measure.tcl`, `gen-width.tcl` and
+`width-facts.tcl` (registers, roots, frame, stack traffic and Cranelift's
+compile time per width) regenerate the report's tables.
 
 ## Flattening Lists (std::list::flat)
 

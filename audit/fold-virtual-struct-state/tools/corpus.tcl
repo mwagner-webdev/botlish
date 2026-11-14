@@ -15,7 +15,9 @@
 #
 #   FILE CONFIG nir=CRC32-LENGTH census=CLASS:N,... slots=V/D structs=N
 #
-# A program that does not compile or lower prints its error instead.
+# The NIR is digested with the program's path mapped to PROGRAM and the
+# checkout's directory to ROOT (a diagnostic a program embeds names files). A program
+# that does not compile or lower prints its error instead.
 # Comparing two outputs line by line (same FILE and CONFIG) shows which
 # programs' NIR changed and how their representation changed.
 
@@ -52,7 +54,11 @@ foreach path $files {
             puts "$name $config error: [lindex [split $lowered \n] 0]"
             continue
         }
-        set bytes [encoding convertto utf-8 [dict get $lowered text]]
+        # The program's path and the checkout's directory appear in
+        # diagnostics a program embeds as strings (its own and the standard
+        # library's files): mapped out, so two checkouts' NIR compare by
+        # what they compile, not where.
+        set bytes [encoding convertto utf-8 [string map [list $path PROGRAM $root ROOT] [dict get $lowered text]]]
         set digest [format %08x-%d [zlib crc32 $bytes] [string length $bytes]]
         set classes [dict create]
         foreach rec [dict get $lowered structCensus] {
