@@ -558,13 +558,13 @@ toolchain), whose runs were queued.
 The four test workflows are dispatched again on the fix's commit
 `e63466e8` (superseding the runs above where they were unfinished): tests
 43505390208, tests (linux arm64) 43505394990, tests (macos arm64)
-43505400374, tests (windows x86-64) 43505405543. Read at 07:55 UTC on
-2026-11-14 (**CI**); macOS and Windows have finished:
+43505400374, tests (windows x86-64) 43505405543. Read at 09:47 UTC on
+2026-11-14 (**CI**); every run has finished but tests' cranelift coverage job:
 
 | Workflow | Passed | Failed | Pending |
 |---|---|---|---|
-| tests | canary, native Rust unit tests, the method-call decision's reference audit, golden shards 1-4 | interp (2 of 12,367: `argv-focused-valid-fuzz`, `native-tcl-unicode-lowercase-all-scalars`; `nl-no-string-ternary` passes); system-linked executables (1 of 4,615: argv's fuzz); stub-linked executables (1 of 4,244: argv's fuzz) | compile, cranelift and cranelift-generic coverage (all three running) |
-| tests (linux arm64) | canary, native Rust unit tests, golden shards 1-4 | interp and compile (2 of 12,367 each: the same two); system-linked executables (1 of 4,615: argv's fuzz); cranelift and cranelift-generic coverage (their "native backend bugs": the same two and nothing else); native GC-stress, interp (2 of 12,367: the same two) | native GC-stress, compile |
+| tests | canary, native Rust unit tests, the method-call decision's reference audit, golden shards 1-4 | interp (2 of 12,367: `argv-focused-valid-fuzz`, `native-tcl-unicode-lowercase-all-scalars`; `nl-no-string-ternary` passes); system-linked executables (1 of 4,615: argv's fuzz); stub-linked executables (1 of 4,244: argv's fuzz); compile (2 of 12,367: the same two); cranelift-generic coverage (its "native backend bugs": the same two and nothing else) | cranelift coverage (running) |
+| tests (linux arm64), finished | canary, native Rust unit tests, golden shards 1-4 | interp and compile (2 of 12,367 each: the same two); system-linked executables (1 of 4,615: argv's fuzz); cranelift and cranelift-generic coverage (their "native backend bugs": the same two and nothing else); both GC-stress jobs, interp and compile (2 of 12,367 each: the same two) | -- |
 | tests (macos arm64), finished | smoke, the Linux control, acceptance shards 1-4, Botlish.app, Botlish.app without developer tools, main-thread startup, static SDL3 through Botlish.app | acceptance shard 5 (1 of 2,415: argv's fuzz), shard 6 (1 of 2,255: lowercase); system linker (its own tests 15/15, then 1 of 4,615 system-linked: argv's fuzz) | -- |
 | tests (windows x86-64), finished | canary, root plans, acceptance shards 2-4, every smoke check but one (C calls and libraries, filesystem and variadic C calls under GC stress included) | smoke (argv's fuzz, 1 of 1,287 on each pass); acceptance shard 1 (2 of 2,820: argv's fuzz and lowercase); system linker (its own tests 15/15 and under GC stress 181/181; argv's fuzz 1 of 401 on each pass; the runtime archive's system-library check: rustc now names `synchronization.lib`, which `runtime_system_libraries` lacks) | -- |
 
