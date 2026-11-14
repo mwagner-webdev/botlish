@@ -369,7 +369,7 @@ writes no HIR field while it is typed (`MatchSyntax` writes the constants at
 resolution; the selections' types are pure functions of them and the
 registry), so there is nothing to undo. **(observed)**
 tests/exhaustive-match.test passes under `BOTLISH_SEMANTIC_ROLLBACK_AUDIT=1`
-(23 of 23 when run; `em-rollback-audit` enables the audit for nested
+(38 of 38; `em-rollback-audit` enables the audit for nested
 matches calling a generic helper with values of two enums), and
 tests/semantic-instances.test passes (96).
 
@@ -384,7 +384,12 @@ was needed. **(observed)** `em-scheduler-parity` decides an accepted block
 and blocks rejected for a missing case, a duplicate and an untyped
 scrutinee identically under the batched scheduler and the sequential
 reference; the golden suite puts every test in a `static compile:` block.
-The CI comparison over every golden suite is in section 15.
+**(CI)** The static-decisions workflow, dispatched on the branch at
+32211f9f (run 43499634980), compiled every golden suite under both
+schedulers and found no disagreement in any of its six jobs;
+exhaustive-match.bot took 3 rounds and 4 builds batched against the
+sequential reference's 10 rounds and 19 builds (one typed rejection per
+build: the suite's rejected blocks).
 
 ## 12. Diagnostics
 
@@ -505,7 +510,68 @@ every existing mutant still applies after this milestone's edits.
 
 ## 15. Regression and CI
 
-REGRESSION-RESULTS
+**(observed)** In this container, after merging main at 14937461:
+
+* `tclsh9.0 tests/local.tcl` (every Tcl test file on interp and compile,
+  every golden suite on the four backends through the front-end cache):
+  703 of 705 items reported before the run reached the container's
+  two-hour limit for one background task; the two left were
+  warning-gate.test on its two backends, and the warning gate itself
+  (`audit/refactor/tools/gate.tcl`) passed when run directly: 89 corpus
+  programs and 43 library loaders, the observed warnings exactly the
+  manifest. The run found four failures this milestone caused, all fixed
+  and re-run with tests/local.tcl narrowed to their files (all pass):
+  - ct-source-audit (tests/context-traits.test) forbids the word
+    "selections" below HIR, where it means a context trait's selection:
+    three of this milestone's comments used it;
+  - oc-synthesized-string-consts-enumerated (tests/one-char-string-
+    literal.test) lists every place the front end builds a String
+    constant: the selections' two (both marked `synthesized`, so a
+    one-letter case name draws no warning: `em-no-synthesized-warning`);
+  - actor-static-copy-inbox (tests/actor.test): an Inbox moved into an
+    actor inside an inject block is now USE-AFTER-MOVE for a second
+    actor, where it was AFFINE-NOT-DEFINITELY-LIVE -- section 7's
+    constant-condition precision, applied to the `if true:` an inject
+    block is. The specimen's header and SAME-THREAD-ACTORS-MILESTONE-1.md
+    record the change;
+  - the census rows of three new tests lacked a column.
+  One failure was not this milestone's: process-linux.test failed once on
+  the compile pass under the full run's load and passed on both passes
+  when run again.
+* tests/exhaustive-match.test: 38 of 38; the golden suite 22 of 22 on
+  each of the four backends. tests/payload-enums.test 41, tests/enums.test
+  66, tests/affine.test 48, tests/coroutines.test 81,
+  tests/static-compile.test 83, tests/golden-framework.test 42,
+  tests/semantic-instances.test 96, tests/depth-safe-nesting.test 52,
+  tests/syntax-highlighting.test 26 (1 skipped for Neovim) -- all passing.
+* `tools/compilerpedia.tcl check`: 0 problems; `tools/mutant-catalogs.tcl`:
+  109 catalogs, 3,743 mutants, 0 problems; `tools/editor-grammars.tcl
+  check`; `cargo test --release --lib enum`: 8 passed.
+
+**(observed)** The harnesses AGENTS.md names for a change to
+hir/affine.tcl (section 7's constant condition), at 02b188e9:
+
+* `audit/affine/tools/mutate.tcl`: 69 of 69 mutants killed (three `-only`
+  batches); `audit/coroutines/tools/mutate.tcl`: 52 of 52 killed (two
+  batches, the native mutants each rebuilding a private native tree);
+* `audit/affine/tools/fuzz.tcl` seeds 1, 2 and 3: 90 programs each
+  (ownership, applications, written applications), 0 disagreements;
+  `audit/coroutines/tools/fuzz.tcl` seeds 1 and 2: 50 programs each, 0
+  disagreements; `audit/lexical-cleanup/tools/fuzz.tcl` seeds 1 and 2: 25
+  programs each, 0 disagreements;
+* tests/affine-applications.test, tests/written-affine-applications.test,
+  tests/resources.test, tests/restricted-injection.test,
+  tests/context-affine.test and tests/static-economics.test passed in the
+  full local run.
+
+The neighbouring catalogs whose mutants edit the files this milestone
+changed (hir/affine.tcl, hir/types.tcl, hir/structs.tcl, hir/resolve.tcl,
+core/enums.tcl) were run whole as well: `audit/payload-enums/tools/
+mutate.tcl` 25 of 25 killed, `audit/enums/tools/mutate.tcl` 26 of 26,
+`audit/lexical-cleanup/tools/mutate.tcl` 24 of 24,
+`audit/context-affine/tools/mutate.tcl` 18 of 18.
+
+CI-RESULTS
 
 ## 16. The mid-end kernel with payload-bearing nodes
 
