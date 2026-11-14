@@ -41,6 +41,7 @@ set kept {
     fvs-legacy-policy KEEP-INTERNAL native {-struct-policy legacy: no fold slot, one struct per iteration} - INTERNAL,NATIVE-ONLY {a lowering option}
     fvs-struct-opt-off KEEP-INTERNAL native {-struct-opt 0: no fold slot, one struct per iteration} - INTERNAL,NATIVE-ONLY {a lowering option}
     fvs-explain KEEP-INTERNAL hir-core-nir {hir::escape::explain names the virtual fold intermediate} - INTERNAL {the analysis' own report}
+    fvs-nir-defined KEEP-INTERNAL native {every register the NIR reads, over every program of the file and three lowering options, is defined on every path to the read (tools/defined.tcl)} - INTERNAL,NATIVE-ONLY {compiler representation}
 }
 
 proc readText {path} {

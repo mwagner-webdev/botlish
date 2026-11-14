@@ -51,6 +51,10 @@ struct Chunks:
     done: List[List[int]]
     current: List[int]
 
+struct Inner:
+    a: int
+    b: int
+
 struct Number:
     pos: int
     value: int
@@ -59,6 +63,10 @@ struct One:
     v: int
 
 struct Outer:
+    inner: Inner
+    n: int
+
+struct Outer2:
     inner: P
     n: int
 
@@ -839,6 +847,82 @@ fn register_fold_virtual_struct_state_tests():
             record(5).length()
     std::test::value("fvs-no-loss-constructing-path", 3, t_no_loss_constructing_path)
 
+    fn t_no_loss_return() errors std::compiler::CompilerError:
+        static compile:
+            fn early(xs: List[int]) -> P:
+                fold x in xs with intermediate s P {a: 0, b: 0}:
+                    if x == 4:
+                        return s
+                    if x.mod(2) == 0:
+                        s
+                    else:
+                        P {a: s.a + x, b: s.b + 1}
+
+            fn late(xs: List[int]) -> P:
+                fold x in xs with intermediate s P {a: 0, b: 0}:
+                    if x == 9:
+                        return s
+                    t = s == P {a: 4, b: 2}
+                    if t:
+                        s
+                    else:
+                        P {a: s.a + x, b: s.b + 1}
+
+            e = early([1, 2, 3, 4, 5])
+            f = early([1, 2, 3])
+            g = late([1, 2, 3, 5])
+            [e.a, e.b, f.a, f.b, g.a, g.b]
+    std::test::value("fvs-no-loss-return", [4, 2, 4, 2, 11, 4], t_no_loss_return)
+
+    fn t_source_falls() errors std::compiler::CompilerError:
+        static compile:
+            fn run(xs: List[int]) -> P:
+                fold x in xs with intermediate s P {a: 0, b: 0}:
+                    n = P {a: s.a + x, b: s.b + 1}
+                    ws = loop y in [1, 2]:
+                        [n, n].length() + y
+                    if x > 100:
+                        P {a: ws.length(), b: 0}
+                    else:
+                        n
+
+            r = run([1, 2, 3])
+            [r.a, r.b]
+    std::test::value("fvs-source-falls", [6, 3], t_source_falls)
+
+    fn t_param_initial() errors std::compiler::CompilerError:
+        static compile:
+            fn run(p: P, n: int) -> P:
+                fold i from 0 to n with intermediate s p:
+                    P {a: s.a + i, b: s.b + 1}
+
+            fn twice(n: int) -> P:
+                run(P {a: n, b: n}, n)
+
+            r = twice(4)
+            [r.a, r.b]
+    std::test::value("fvs-param-initial", [10, 8], t_param_initial)
+
+    fn t_unrecognized_completion() errors std::compiler::CompilerError:
+        static compile:
+            fn step(p: P) -> P:
+                P {a: p.b, b: p.a + 1}
+
+            fn back(p: P) -> P:
+                P {a: p.a + 1, b: p.b}
+
+            fn run(n: int, k: int) -> P:
+                g = if k > 0:
+                    step
+                else:
+                    back
+                fold i from 0 to n with intermediate s P {a: 0, b: 0}:
+                    g(s)
+
+            r = run(5, 1)
+            [r.a, r.b]
+    std::test::value("fvs-unrecognized-completion", [2, 3], t_unrecognized_completion)
+
     fn t_exact_call() errors std::compiler::CompilerError:
         static compile:
             fn weight(p: P) -> int:
@@ -854,6 +938,22 @@ fn register_fold_virtual_struct_state_tests():
             r = run(100)
             [r.a, r.b]
     std::test::value("fvs-exact-call", [45, 991], t_exact_call)
+
+    fn t_exact_call_nested_result() errors std::compiler::CompilerError:
+        static compile:
+            fn start(k: int) -> Outer:
+                Outer {inner: Inner {a: k, b: k + 1}, n: 0}
+
+            fn step(o: Outer, i: int) -> Outer:
+                Outer {inner: Inner {a: o.inner.b, b: o.inner.a + i}, n: o.n + 1}
+
+            fn run(n: int) -> int:
+                t = fold i from 0 to n with intermediate s start(3):
+                    step(s, i)
+                t.inner.a * 10000 + t.inner.b * 100 + t.n
+
+            run(10)
+    std::test::value("fvs-exact-call-nested-result", 232910, t_exact_call_nested_result)
 
     fn t_exit_materialized() errors std::compiler::CompilerError:
         static compile:
@@ -900,8 +1000,8 @@ fn register_fold_virtual_struct_state_tests():
                 [t.a, t.b]
 
             fn nested(xs: List[int]) -> List[int]:
-                t = fold x in xs with intermediate s Outer {inner: P {a: 0, b: 0}, n: 0}:
-                    Outer {inner: P {a: s.inner.a + x, b: s.inner.b + 1}, n: s.n + 1}
+                t = fold x in xs with intermediate s Outer2 {inner: P {a: 0, b: 0}, n: 0}:
+                    Outer2 {inner: P {a: s.inner.a + x, b: s.inner.b + 1}, n: s.n + 1}
                 [t.inner.a, t.inner.b, t.n]
 
             fn generic(xs: List[int]) -> List[int]:
@@ -936,9 +1036,9 @@ fn register_fold_virtual_struct_state_tests():
 
     fn t_nested_closed() errors std::compiler::CompilerError:
         static compile:
-            fn run(n: int) -> Outer:
-                fold i from 0 to n with intermediate s Outer {inner: P {a: 0, b: 0}, n: 0}:
-                    Outer {inner: P {a: s.inner.a + i, b: s.inner.b + 1}, n: s.n + 1}
+            fn run(n: int) -> Outer2:
+                fold i from 0 to n with intermediate s Outer2 {inner: P {a: 0, b: 0}, n: 0}:
+                    Outer2 {inner: P {a: s.inner.a + i, b: s.inner.b + 1}, n: s.n + 1}
 
             o = run(10)
             [o.inner.a, o.inner.b, o.n]

@@ -2677,10 +2677,18 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
         }
         UfFind uf $k
     }
+    dict for {id desc} $arity {
+        if {[lindex $desc 1] ne ""} {
+            UfFind uf [list res $id]
+        }
+    }
     # A fold slot (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md) carries its
     # descriptor's own fields: its class -- every construction and slot a
     # value entering it comes from, and every slot its value goes to -- is
-    # opaque ({opq ...}: no cut is chosen for it).
+    # opaque ({opq ...}: no cut is chosen for it). After the result members
+    # exist: an exact call entering the slot (an initial value `start(k)`, a
+    # completion `step(s)`) puts its callee's result in the class, which
+    # UnionOrigins only does for a member it already has.
     dict for {key e} $foldExprs {
         lassign $key id b
         set member [list fold $id $b]
@@ -2693,11 +2701,6 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
             } else {
                 UnionOrigins uf $member [Origins $view [dict get $info instance] $arity $id $v $structOpts]
             }
-        }
-    }
-    dict for {id desc} $arity {
-        if {[lindex $desc 1] ne ""} {
-            UfFind uf [list res $id]
         }
     }
     set bindValues [dict create]

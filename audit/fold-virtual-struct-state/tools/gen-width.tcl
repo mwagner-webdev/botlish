@@ -17,7 +17,8 @@
 #                 recursive function (every field live across a call: the
 #                 census's spill-W shape, extended past its 64)
 #
-# W = 2 4 6 8 16 32 64 for the first five, and 128 256 for most and spill.
+# W = 2 4 6 8 16 32 64 for the first five and spill, and 128 256 for most
+# and spill.
 #
 #   tclsh9.0 audit/fold-virtual-struct-state/tools/gen-width.tcl
 
@@ -141,7 +142,7 @@ n = 1000
 f(n)
 "
 }
-foreach w {2 16 64 128 256} {
+foreach w {2 4 6 8 16 32 64 128 256} {
     set last [expr {$w - 1}]
     set head "import std::list\n\n"
     set init "S {[fields $w 0]}"

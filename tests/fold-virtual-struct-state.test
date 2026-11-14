@@ -68,7 +68,10 @@ proc fvsHir {text} {
 
 # The outcome of TEXT ({value V} or {error CODE}), the same on every
 # configuration; else what differs.
+set ::fvsPrograms {}
+
 proc fvsValue {text} {
+    lappend ::fvsPrograms $text
     set hir [fvsHir $text]
     set outcomes {}
     foreach {backend env} $::fvsConfigs {
@@ -643,6 +646,31 @@ r = run(100)
     list [fvsValue $text] [fvsStructs $text] [fvsSlots $text]
 } -result {{value {[45, 991]}} 0 {{run s virtual}}}
 
+test fvs-exact-call-nested-result {exact calls whose nested-struct results enter the slot (its initial value and its completion): their callee's results are in the slot's class, carried uncut} -constraints nativeBuilt -body {
+    set text {struct Inner:
+    a: int
+    b: int
+
+struct Outer:
+    inner: Inner
+    n: int
+
+fn start(k: int) -> Outer:
+    Outer {inner: Inner {a: k, b: k + 1}, n: 0}
+
+fn step(o: Outer, i: int) -> Outer:
+    Outer {inner: Inner {a: o.inner.b, b: o.inner.a + i}, n: o.n + 1}
+
+fn run(n: int) -> int:
+    t = fold i from 0 to n with intermediate s start(3):
+        step(s, i)
+    t.inner.a * 10000 + t.inner.b * 100 + t.n
+
+run(10)
+}
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0] [fvsSlots $text]
+} -result {{value 232910} 11 22 {{run s virtual}}}
+
 test fvs-exit-materialized {a fold value stored whole is built once, after the loop} -constraints nativeBuilt -body {
     set text "$::fvsP
 fn many(n: int) -> List\[P\]:
@@ -889,5 +917,31 @@ r = run(10)
     regexp {virtual fold intermediate \S+: struct P\{a, b\} \(2 fields\), carried as field registers} \
         [hir::escape::explain $hir $spec $analysis]
 } -result 1
+
+# Every register the lowering reads is defined on every path to the read
+# (section 13 of the report): the independent check of NIR text,
+# audit/fold-virtual-struct-state/tools/defined.tcl, over every program the
+# tests above ran (the workloads when a -match ran none), with fold slots
+# and reference joins on, and each off alone.
+test fvs-nir-defined {every register the fold-slot lowering reads is defined on every path to it} -constraints nativeBuilt -body {
+    set ::definedLibrary 1
+    source [file join $::projectRoot audit fold-virtual-struct-state tools defined.tcl]
+    set programs [lsort -unique $::fvsPrograms]
+    if {$programs eq ""} {
+        foreach path [glob [file join $::projectRoot audit fold-virtual-struct-state workloads d-*.bot]] {
+            lappend programs [core::ReadFile $path]
+        }
+    }
+    set bad {}
+    foreach text $programs {
+        set hir [fvsHir $text]
+        foreach options {{} {-struct-fold 0} {-struct-ref-joins 0}} {
+            foreach v [defined::check [dict get [native::lowered $hir {*}$options] text]] {
+                lappend bad [list $options {*}[lrange $v 0 2]]
+            }
+        }
+    }
+    list [expr {[llength $programs] > 5}] $bad
+} -result {1 {}}
 
 cleanupTests

@@ -24,6 +24,10 @@
 #   vector   a struct of a count and a MutableVector pushed every iteration,
 #            with or without a `continue` after the push (consumed, or
 #            copied at every iteration's entry).
+#   nested   an {inner: Inner, n} struct whose initial value and completions
+#            are exact calls returning one (start(k), step(s, x)), literals
+#            rebuilding or keeping the inner struct, or the intermediate,
+#            under a `continue` or a bare `break`.
 #
 # For each program it checks:
 #
@@ -39,7 +43,9 @@
 #     a `continue`, an identity leaf -- declines it, no loss; anything else
 #     is carried). The model knows nothing of hir/escape.tcl's predicates;
 #   * no loss -- the native run's Struct allocations with fold slots are at
-#     most those without (native::allocationReport, no GC stress).
+#     most those without (native::allocationReport, no GC stress);
+#   * definedness -- every register the NIR reads, with fold slots and
+#     without, is defined on every path to the read (tools/defined.tcl).
 #
 # Exits 1 on any difference; -keep DIR keeps each failing program there.
 # Its scratch files live in a `file tempdir` directory, removed at the end.
@@ -68,6 +74,8 @@ unset -nocomplain env(BOTLISH_NATIVE_GC_STRESS) env(BOTLISH_HIR_CACHE)
 set argv {}
 source [file join $root tests helpers.tcl]
 source [file join $root native native.tcl]
+set ::definedLibrary 1
+source [file join $root audit fold-virtual-struct-state tools defined.tcl]
 core::useProgramRecursionLimit
 expr {srand($seed)}
 
@@ -352,6 +360,60 @@ fn run(n: int) -> List\[int\]:
     return [list $text virtual [expr {$copying ? "a#entry" : "a"}] run<int>]
 }
 
+# A nested template: an {inner: Inner, n} struct whose initial value and
+# completions may be exact calls returning one (their callees' results enter
+# the slot's class: carried uncut), literals rebuilding or keeping the inner
+# struct, or the intermediate itself; a `continue` or a bare `break` under a
+# condition. Nothing in it needs the whole object on a path that keeps the
+# intermediate, and nothing captures it: the model predicts a carried slot.
+proc nestedInner {var} {
+    pick [list \
+        "Inner {a: $var.inner.b, b: $var.inner.a + x}" \
+        "Inner {a: $var.inner.a + [rnd 1 3], b: $var.inner.b}" \
+        "$var.inner" \
+        "Inner {a: x, b: $var.n}"]
+}
+proc nestedProgram {} {
+    set text "import std::list
+
+struct Inner:
+    a: int
+    b: int
+
+struct Outer:
+    inner: Inner
+    n: int
+
+fn start(k: int) -> Outer:
+    Outer {inner: Inner {a: k, b: k + [rnd 1 4]}, n: 0}
+
+fn step(o: Outer, x: int) -> Outer:
+    Outer {inner: [nestedInner o], n: o.n + [rnd 1 2]}
+
+fn run(xs: List\[int\]) -> List\[int\]:
+"
+    set init [pick [list "start([rnd 0 9])" "Outer {inner: Inner {a: [rnd 0 5], b: [rnd 0 5]}, n: 0}"]]
+    append text "    t = fold x in xs with intermediate s $init:\n"
+    if {[chance 0.4]} {
+        append text "        if x.mod([rnd 3 5]) == [rnd 0 2]:\n            [pick {continue break}]\n"
+    }
+    set leaves [list "step(s, x)" "start(x)" "Outer {inner: [nestedInner s], n: s.n + 1}" "s"]
+    set n [rnd 1 3]
+    # A chain of N leaves as nested if/else, the innermost a constructing one.
+    set chain [pick [lrange $leaves 0 2]]
+    for {set k 1} {$k < $n} {incr k} {
+        set chain "if x.mod([rnd 2 4]) == [rnd 0 1]:\n[indent [pick $leaves] 4]\nelse:\n[indent $chain 4]"
+    }
+    append text "[indent $chain 8]\n"
+    set xs [listLiteral]
+    if {$xs eq "\[\]"} { set xs "\[[rnd 1 7]\]" }
+    append text "    \[t.inner.a, t.inner.b, t.n\]
+
+\[run(\[\]), run($xs)\]
+"
+    return [list $text virtual s {run<List[int]>}]
+}
+
 # ---------------------------------------------------------------------------
 # Checking
 
@@ -397,7 +459,7 @@ set failures 0
 set tally [dict create]
 try {
     for {set i 0} {$i < $count} {incr i} {
-        set template [pick {scalar scalar scalar history vector}]
+        set template [pick {scalar scalar scalar history vector nested}]
         lassign [${template}Program] text model name label
         set problems {}
         if {[catch {surface::compile $text fuzz.bot -warnings off} hir]} {
@@ -419,21 +481,30 @@ try {
             } elseif {[lindex $distinct 0 0] ne "value"} {
                 lappend problems "not a value: [lindex $distinct 0]"
             }
-            set slot {}
-            foreach rec [native::foldSlots $hir] {
-                # (The instance whose body runs: an empty List literal's
-                # List[never] instance never runs its fold's body.)
-                if {[dict get $rec label] eq $label && [dict get $rec name] eq $name} {
-                    set slot [expr {[dict get $rec status] eq "virtual" ? "virtual" : [list dropped [dict get $rec reason]]}]
+            if {[catch {
+                set slot {}
+                foreach rec [native::foldSlots $hir] {
+                    # (The instance whose body runs: an empty List literal's
+                    # List[never] instance never runs its fold's body.)
+                    if {[dict get $rec label] eq $label && [dict get $rec name] eq $name} {
+                        set slot [expr {[dict get $rec status] eq "virtual" ? "virtual" : [list dropped [dict get $rec reason]]}]
+                    }
                 }
-            }
-            if {$slot ne $model} {
-                lappend problems "decision: the model predicts {$model}, the compiler {$slot}"
-            }
-            set with [structs $hir]
-            set without [structs $hir -struct-fold 0]
-            if {$with > $without} {
-                lappend problems "loss: $with structs with fold slots, $without without"
+                if {$slot ne $model} {
+                    lappend problems "decision: the model predicts {$model}, the compiler {$slot}"
+                }
+                foreach options {{} {-struct-fold 0}} {
+                    foreach v [defined::check [dict get [native::lowered $hir {*}$options] text]] {
+                        lappend problems "undefined read ($options): [lrange $v 0 2]"
+                    }
+                }
+                set with [structs $hir]
+                set without [structs $hir -struct-fold 0]
+                if {$with > $without} {
+                    lappend problems "loss: $with structs with fold slots, $without without"
+                }
+            } err]} {
+                lappend problems "native lowering fails: [lindex [split $err \n] 0]"
             }
             dict incr tally "$template [lindex $model 0]"
         }

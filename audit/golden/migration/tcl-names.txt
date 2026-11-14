@@ -11670,7 +11670,12 @@ tests/fold-virtual-struct-state.test fvs-history-independent pass
 tests/fold-virtual-struct-state.test fvs-no-loss-open-call pass
 tests/fold-virtual-struct-state.test fvs-no-loss-continue pass
 tests/fold-virtual-struct-state.test fvs-no-loss-constructing-path pass
+tests/fold-virtual-struct-state.test fvs-no-loss-return pass
+tests/fold-virtual-struct-state.test fvs-source-falls pass
+tests/fold-virtual-struct-state.test fvs-param-initial pass
+tests/fold-virtual-struct-state.test fvs-unrecognized-completion pass
 tests/fold-virtual-struct-state.test fvs-exact-call pass
+tests/fold-virtual-struct-state.test fvs-exact-call-nested-result pass
 tests/fold-virtual-struct-state.test fvs-exit-materialized pass
 tests/fold-virtual-struct-state.test fvs-discarded pass
 tests/fold-virtual-struct-state.test fvs-fold-argument pass
@@ -11687,6 +11692,7 @@ tests/fold-virtual-struct-state.test fvs-ref-join-materialized-source pass
 tests/fold-virtual-struct-state.test fvs-legacy-policy pass
 tests/fold-virtual-struct-state.test fvs-struct-opt-off pass
 tests/fold-virtual-struct-state.test fvs-explain pass
+tests/fold-virtual-struct-state.test fvs-nir-defined pass
 tests/csv-emission.test csv-quote-ambiguity pass
 tests/csv-emission.test csv-record-structure pass
 tests/csv-emission.test csv-stream-forms pass

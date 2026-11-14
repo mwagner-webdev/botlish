@@ -194,6 +194,15 @@
 # ---------------------------------------------------------------------------
 # The fold as a construction, joins with a reference branch, the share
 
+@@ result-outside-slot-class a mismatched descriptor accepted: an exact call entering a slot (its initial value, a completion) is left out of the slot's class, so its callee's result is opened into a cut the slot's descriptor does not carry
+!! fvs-exact-call-nested-result
+## hir/escape.tcl
+<<<<
+                UnionOrigins uf $member [Origins $view [dict get $info instance] $arity $id $v $structOpts]
+====
+                UnionOrigins uf $member [lsearch -all -inline -not -index 0 [Origins $view [dict get $info instance] $arity $id $v $structOpts] res]
+>>>>
+
 @@ fold-not-construction a fold is never a recognized construction: a fold-valued function returns an object (no retmulti), a local bound to a fold takes it whole
 !! fvs-scanner fvs-scanner-result-transport fvs-fold-argument
 ## hir/escape.tcl
