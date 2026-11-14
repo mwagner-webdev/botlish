@@ -947,5 +947,36 @@ Not run: the native Rust tests that AGENTS.md lists for the transfer codec
 (`cargo test ... transfer`): no Rust file changed, and the codecs are
 untouched.
 
-QFULL-PLACEHOLDER
+**The whole local suite on this code (Executed, `tests/local.tcl`, four
+jobs, in three parts under the two-hour limit).** The golden layer: all 119
+suites on interp, compile, cranelift-generic and cranelift (453 s). The
+Tcl test files in two halves: 290 of 290 runs, and 291 of 292, the one
+failure `syntax-highlighting.test`'s `sh-grammar-vim-corpus` on compile --
+`vim -es` exiting with status 1, as in the milestone's run (section M),
+again only under four parallel jobs; it passed alone on this code twice
+(six times in all). It reads no file this change touches. Why Vim fails
+under load is not established (forcing Vim's `redrawtime` to 1 ms did not
+reproduce it).
+
+The whole mutation catalog of the milestone, run on this code: 26 mutants,
+26 killed, each by a test its `!!` line names.
+
+**CI on this code (as of 2026-11-14, 18:15 UTC).** `static-decisions`,
+dispatched at `75c8d597` (this change's code): **succeeded**. `tests` and
+`tests (linux arm64)`, dispatched at `25045ef0` (the same code; only this
+report after it):
+
+| job | x86-64 | arm64 |
+|---|---|---|
+| canary | succeeded | succeeded |
+| golden suites, four shards | succeeded | succeeded |
+| native Rust unit tests (arm64: also under GC stress) | succeeded | succeeded |
+| method-call decision (oracle, reference audit) | succeeded | -- |
+| stub-linked executables | failed: `argv-focused-valid-fuzz` only | -- |
+| system-linked executables | failed: `argv-focused-valid-fuzz` only | failed: `argv-focused-valid-fuzz` only |
+| interp, compile, the two native coverage jobs (arm64: and both GC-stress jobs) | pending (running) | pending (running) |
+
+`argv-focused-valid-fuzz` fails on `main` too (section M); nothing has
+failed that `main` does not fail. The pending jobs are not reported as
+passed.
 
