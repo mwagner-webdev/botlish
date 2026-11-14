@@ -49,7 +49,9 @@ native unit built on macOS AArch64, localized into a Mach-O static archive
 by `tools/rust-unit.tcl`, packaged in one multi-target `.botpkg` with its
 Linux build and installed by the package manager links into an
 independently compiled Botlish executable beside the runtime's own Rust,
-with both Botlish linkers, on both hosts [CI]. The executables hold one
+with both Botlish linkers, on both hosts [CI] (the clean-room consumer of
+the packaged artifacts: Linux [CI]; macOS PENDING, section 10). The
+executables hold one
 global `rust_eh_personality` and allocator shim (the runtime's), the
 unit's own as local symbols, no global symbol of the unit's standard
 library, and nothing of it exported. The real http unit takes the same
