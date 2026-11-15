@@ -1130,6 +1130,7 @@ Three repairs outside the milestone's own files, each found on the way:
 | react-native 2048 | 43737218482 | bc31909c | **success**: the facade over game2048_play, the generated package, the APK on both emulators; no later commit changes what it builds |
 | package reproducibility | 43739295688 | bbd5a750 | both builds succeeded (they had failed on main since a3c32d66: section 24's first repair) |
 | package reproducibility | 43748311615 | 609ce6b0 | **success**: both builds in the pinned author image and the comparison of their artifacts and provenance records (the recorded releases reproduce) |
+| ci tools (the evidence directory left out of the Android workflow's trigger) | 43770715042 | 7b2d7b9e | **success**: the workflow tests, the release gate, pruning and deferral read-only, the canary's records recomputed |
 | tests (canary, Linux x86-64) | 43760740691 | a1256dd1 | **success** |
 | tests (linux arm64), canary | 43760740696 | a1256dd1 | **success** |
 | tests (macos arm64), smoke | 43760740707 | a1256dd1 | **success** |
