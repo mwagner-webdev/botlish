@@ -531,7 +531,10 @@ proc core::transfer::MinSizes {nodes} {
                     set least ""
                     foreach p [lindex $node 2] {
                         set child [lindex $p 1]
-                        set m [expr {$child eq "" ? 0 : [lindex $sizes $child]}]
+                        set m 0
+                        if {$child ne ""} {
+                            set m [lindex $sizes $child]
+                        }
                         if {$least eq "" || $m < $least} {
                             set least $m
                         }

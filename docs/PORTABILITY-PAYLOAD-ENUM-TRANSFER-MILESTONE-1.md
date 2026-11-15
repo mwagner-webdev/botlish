@@ -534,8 +534,9 @@ Native lowering validates a `penum` against the receiving program's
 declaration (section 8); the Tcl backends read the schema constant of the
 HIR they run, which only a front end writes (interchange text is accepted
 only from the front end that wrote it, HIR-INTERCHANGE.md) **[inspection]**. The static decisions read no schema: `hir/staticdeps.tcl` is
-unchanged, and the batched and sequential schedulers' comparison runs in
-CI (section 18) **[inspection]**.
+unchanged **[inspection]**, and the batched and sequential schedulers'
+comparison over every golden suite agrees on this branch (section 18)
+**[CI]**.
 
 ## 14. The independent oracle and the fuzzer
 
