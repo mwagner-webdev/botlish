@@ -571,31 +571,36 @@ mutate.tcl` 25 of 25 killed, `audit/enums/tools/mutate.tcl` 26 of 26,
 `audit/lexical-cleanup/tools/mutate.tcl` 24 of 24,
 `audit/context-affine/tools/mutate.tcl` 18 of 18.
 
-**(CI)** On the branch at 02b188e9 (workflows dispatched as AGENTS.md
-asks; state at 2026-11-14 00:40 UTC):
+**(CI)** On the branch at 02b188e9 (the four test workflows dispatched
+as AGENTS.md asks): every canary succeeded (Linux x86-64: every mutant
+applies, the warning gate, the changed test files first; Linux arm64;
+Windows; the macOS workflow's Linux control), and static-decisions
+succeeded (run 43499634980, at 32211f9f: no disagreement in any suite,
+section 11). The four full runs (43521515930, 43521520591, 43521524495,
+43521528557) then **failed**, every failure sampled in main's own cause 2
+of MAIN-CI-FAILURES-2026-11-13.md: argv-focused-valid-fuzz and
+native-tcl-unicode-lowercase-all-scalars, because CI's unpinned stable
+rustc 1.100 gave the native `std::str::lowercase` Unicode 18's case tables
+(Linux x86-64 interp: exactly argv.test and native-tcl-unicode.test, as
+main's own run at 14937461; macOS acceptance shard 5: argv.test; Windows
+acceptance shard 1: those two tests). None of them is in this milestone's
+files.
 
-| workflow | run | state |
-|---|---|---|
-| tests (linux x86-64) | 43521515930 | canary **succeeded** (every mutant applies, the warning gate, the changed test files first); the interp, compile, coverage, linker, golden and Rust jobs **pending** (queued) |
-| tests (linux arm64) | 43521520591 | canary **succeeded**; the other jobs **pending** |
-| tests (macos arm64) | 43521524495 | Linux control **succeeded**; the macOS smoke job and everything after it **pending** |
-| tests (windows x86-64) | 43521528557 | canary **succeeded**; smoke and root plans **pending** |
-| static-decisions | 43499634980 (at 32211f9f) | **succeeded**: no disagreement in any suite (section 11) |
-
-The shared runner pool was backed up for hours (main's own run at
-14937461 waited over an hour for its first expensive job), so the pending
-jobs are reported as pending, not passed. 32211f9f differs from 02b188e9
-only in comments, tests and documents, none of which a static decision
-reads.
-
-**Main's own state.** Main's latest tests run (43489783150, at 14937461,
-before this branch merged it) is red independently of this milestone:
-tests (compile) fails in argv.test and native-tcl-unicode.test (2 of 12,403
-tests), and the cranelift and cranelift-generic coverage, stub- and
-system-linked executable and GC-stress jobs fail as well. Both files pass
-in this container (rustc 1.97.0, section 15's local run); CI builds with
-the newer stable rustc. A failure this branch's runs show beyond main's
-list would be this milestone's to fix before a merge.
+Main fixed them at aa19036c (rustc 1.100.0 pinned, the lowercase table
+generated from the Tcl reference, the Windows system linker's
+synchronization.lib), and its four test workflows were green there.
+**(observed)** After merging main into the branch, with the pinned rustc
+1.100.0: `tests/local.tcl` narrowed to this milestone's files and main's
+fixed ones (exhaustive-match, payload-enums, enums, argv,
+native-tcl-unicode, affine, coroutines, static-compile, stdlib-namespaces,
+one-char-string-literal, context-traits, golden-framework,
+syntax-highlighting, restricted-injection, resources and their golden
+suites): 675 Tcl tests on each pass and 975 golden tests on each backend,
+0 failed; `cargo test --release --lib enum` 8 passed;
+`tools/mutant-catalogs.tcl` 0 problems; `tools/compilerpedia.tcl check`,
+`tools/editor-grammars.tcl check` and `tools/unicode-lowercase.tcl check`
+clean. The branch was then merged into main (the user's go-ahead), whose
+push runs every test workflow on the merged commit.
 
 ## 16. The mid-end kernel with payload-bearing nodes
 
