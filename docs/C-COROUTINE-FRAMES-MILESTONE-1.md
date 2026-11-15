@@ -1079,6 +1079,20 @@ mutants) 0 problems, the golden manifest regenerated unchanged (merge.tcl's
 nine pre-existing problems, as on main). The two macOS fixes are checked on
 Linux here; their macOS evidence is main's next macos-arm64 run.
 
+Main moved twice more before the push, and both merged without a conflict:
+FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1 (`hir/escape.tcl`,
+`hir/transport.tcl`, `native/lower.tcl`: native lowering's, none of which
+the C backend reads) and audits; then the typed coroutine source census
+(documentation) and the Rust archive link on macOS (`tools/`, `pm/`). On
+the tree after the first [run]: `tests/c-compile.test` 91 of 91,
+`tests/coroutines.test` 81 of 81, `tests/main-cli.test` 72 of 72,
+`tests/golden.test` 9 of 9, `tests/compilerpedia.test` 43 of 43,
+`tests/numeric-looking-names.test` 5 of 5, Compilerpedia's check and the
+mutant catalogs 0 problems; after the second, the regenerated golden
+manifest equal to the merged one, the mutant catalogs (110, 0 problems) and
+the kiosk and coroutine tests again. Main's latest finished test runs were
+aa19036c's, green; the later merges' runs were queued.
+
 ## 22. Known limitations
 
 * **Recursive yielding chains** are refused (section 20): a coroutine whose
