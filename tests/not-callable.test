@@ -215,9 +215,13 @@ test nc-core-ir-runtime {core IR text is past the source boundary: its call of a
 test nc-method-binding-not-a-candidate {a non-callable local named like a visible function is no applicable candidate of a method-style call: s.length() beside length = 3 applies std::str::length (it was AMBIGUOUS-METHOD-CALL), on every backend} -body {
     set text "import std::str\n\nfn g(s: str) -> int:\n    length = 3\n    s.length() + length\n\ng(\"ab\")\n"
     set hir [ncCompile $text]
+    # The entry program's own method calls (file f1): std::str's encode_utf8
+    # contract loads std::byte, whose functions make method calls of their
+    # own (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md).
     set callees {}
     dict for {e node} [dict get $hir exprs] {
-        if {[dict get $node kind] eq "call" && [dict getdef [dict getdef $node written {}] form ""] eq "method"} {
+        if {[dict get $node kind] eq "call" && [dict getdef [dict getdef $node written {}] form ""] eq "method"
+                && [lindex [dict getdef $node origin {}] 1] eq "f1"} {
             lappend callees [dict get $hir exprs [dict get $node callee] name]
         }
     }

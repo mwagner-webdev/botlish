@@ -296,17 +296,25 @@ test direct-hir-compile-main-code-is-the-code-that-runs {main.tcl -backend compi
     }
     set hir [surface::compile $text t.bot -warnings off]
     set unit [core::compiler::compileHir $hir]
+    # The checks size's own code adds: counted against the same program
+    # without it, since std::str's encode_utf8 contract loads std::byte,
+    # whose functions are compiled too (STDLIB-ENCODE-UTF8-RESULT-TYPE-
+    # STABILITY-MILESTONE-1.md); and block ids, which they shift, left out.
+    set base [surface::compile "import std::str\n1\n" t.bot -warnings off]
+    set checks {apply {{code} {regexp -all {AssertCanonical} $code}}}
+    set noIds {apply {{text} {regsub -all {block\(e[0-9]+\)} $text block}}}
     # Generated names carry a per-process counter.
     set normalize {apply {{code} {regsub -all {([a-z_])[0-9]+} $code {\1N}}}}
     set lines [split $out \n]
     set valueAt [lsearch -glob $lines {   value: *}]
     set printed [join [lrange $lines 1 $valueAt-1] \n]
     list [expr {[{*}$normalize $printed] eq [{*}$normalize [dict get $unit code]]}] \
-        [regexp -all {AssertCanonical} $printed] \
-        [regexp -all {AssertCanonical} [core::compiler::generatedCode [hir::lower $hir]]] \
-        [lrange $lines $valueAt end] \
-        [dict map {name type} [dict get $unit types] {hir::types::show $type}]
-} -result {1 1 2 {{   value: 3} {   type:  size : block(e2)/1 -> int} {   type:  length : int}} {size {block(e2)/1 -> int} length int}}
+        [expr {[{*}$checks $printed] - [{*}$checks [dict get [core::compiler::compileHir $base] code]]}] \
+        [expr {[{*}$checks [core::compiler::generatedCode [hir::lower $hir]]]
+            - [{*}$checks [core::compiler::generatedCode [hir::lower $base]]]}] \
+        [{*}$noIds [lrange $lines $valueAt end]] \
+        [{*}$noIds [dict map {name type} [dict get $unit types] {hir::types::show $type}]]
+} -result {1 1 2 {{   value: 3} {   type:  size : block/1 -> int} {   type:  length : int}} {size {block/1 -> int} length int}}
 
 # ---------------------------------------------------------------------------
 # Binding identity: native lowering reads resolved bindings, not spellings.

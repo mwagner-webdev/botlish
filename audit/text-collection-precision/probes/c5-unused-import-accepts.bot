@@ -1,6 +1,9 @@
-# probe: c4 plus `import std::byte`, which nothing names: accepted (C).
+# probe: c4 plus `import std::byte`, which nothing names: accepted, with
+# c4's value and types -- the import changes nothing since
+# STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md (C).
 # outcome: accept
 # value: [105, 196, 170, 109, 109, 112]
+# binding: 14 b int[std::byte::Byte]
 import std::str
 import std::list
 import std::byte

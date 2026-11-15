@@ -872,9 +872,17 @@ test method-result-type-is-the-functions {the type of a method call is the selec
     set prelude "import std::str\nfn to_text(n) -> str:\n    std::str::substring(\"abcdef\", 0, n)\nfn size(s):\n    std::str::length(s)\n"
     set m [hirOf "${prelude}a = 3.to_text()\nb = a.size()\n\[a, b\]"]
     set f [hirOf "${prelude}a = to_text(3)\nb = size(a)\n\[a, b\]"]
-    list [lmap e [hirFind $m bind] {hir::types::show [hir::typeOf $m $e]}] [lmap e [hirFind $f bind] {hir::types::show [hir::typeOf $f $e]}] \
-        [expr {[hir::format $m] eq [hir::format $f]}]
-} -result {{{block(e2)/1 -> str} {block(e9)/1 -> int} str int} {{block(e2)/1 -> str} {block(e9)/1 -> int} str int} 1}
+    # (The entry program's -- file f1's -- bindings, their blocks' ids left
+    # out: std::str's encode_utf8 contract loads std::byte, whose module has
+    # bindings and expressions of its own.)
+    proc entryBinds {h} {
+        lmap e [hirFind $h bind] {
+            if {[lindex [dict get [hir::node $h $e] origin] 1] ne "f1"} continue
+            regsub -all {block\(e[0-9]+\)} [hir::types::show [hir::typeOf $h $e]] block
+        }
+    }
+    list [entryBinds $m] [entryBinds $f] [expr {[hir::format $m] eq [hir::format $f]}]
+} -result {{{block/1 -> str} {block/1 -> int} str int} {{block/1 -> str} {block/1 -> int} str int} 1}
 
 test method-callee-is-an-ordinary-use {the name after the dot is a real reference to the visible binding: same binding, same capture by an enclosing function, same call target} -body {
     set prelude "k = 10\nfn inc(a):\n    a + 1\nfn add_k(a, b):\n    a + b\n"

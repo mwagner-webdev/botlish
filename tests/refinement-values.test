@@ -156,7 +156,7 @@ test refinement-registry-metadata {the registry keeps canonical identity, carrie
     set hir [surface::compile "$prelude\n1\n" -warnings off]
     set meta [core::type::refinementOf Encoded]
     list [core::type::isRefinement Mail] [dict get $meta carrier] [dict get $meta owner] \
-         [dict get $meta span line] [lsearch -inline -index 1 [lmap e [hir::sourceTypes $hir] {list [dict get $e kind] [dict get $e name]}] Encoded]
+         [dict get $meta span line] [lsearch -inline -index 1 [lmap e [hir::sourceTypes $hir] {list [dict getdef $e kind domain] [dict get $e name]}] Encoded]
 } -result {1 {refined str Query} {} 6 {refined Encoded}}
 
 # ===========================================================================

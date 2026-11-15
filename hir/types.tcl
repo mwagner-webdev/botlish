@@ -1513,6 +1513,29 @@ proc hir::types::CallableErrors {hir type} {
     return {}
 }
 
+# The result every call of the native whose registry entry is META has,
+# whatever the call's arguments: what its -result-shape gives when the shape
+# reads no argument (core::native::argumentIndependent: std::str::
+# encode_utf8's List[std::byte::Byte], argv's List[str], std::binary::emit's
+# std::abi::bytes::Bytes), else its declared -result-type, the kind each
+# call's own shape refines (ShapeResult). It is the result of the native's
+# function type (structuralOf below), so the native taken as a value, its
+# hover and a call of it agree: a Fn{args: [str], return:
+# List[std::byte::Byte]} parameter admits std::str::encode_utf8, and one
+# returning List[int] still rejects it (applied collections are invariant).
+# The shape's own rules decide: a named-struct declaration the program does
+# not have, or a typed NAME no loader declared, gives the -result-type, as
+# for a call (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md, "The
+# native as a function value").
+proc hir::types::NativeResult {meta} {
+    set result [dict get $meta resultType]
+    set shape [dict getdef $meta resultShape ""]
+    if {[core::native::argumentIndependent $shape]} {
+        return [ShapeResult "" $shape {} {} $result]
+    }
+    return $result
+}
+
 proc hir::types::structuralOf {type} {
     if {[IsFn $type]} {
         return $type
@@ -1525,7 +1548,7 @@ proc hir::types::structuralOf {type} {
         if {$arity eq "*"} {
             return ""
         }
-        return [MakeFn [lrepeat $arity any] [dict get $meta resultType] [dict get $meta errors]]
+        return [MakeFn [lrepeat $arity any] [NativeResult $meta] [dict get $meta errors]]
     }
     if {[IsExactBlock $type]} {
         lassign $type _ e arity result contract
@@ -4286,38 +4309,40 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
             # std::str::encode_utf8's every UTF-8 code unit is definitionally in
             # 0..255, STATIC-COMPLETION-PROOFS.md), not something derived
             # from this call's own arguments the way `element`/`append`/
-            # `immutable-set` above are. NAME is resolved here, lazily,
-            # against whatever the compiling program's own source-defined-
-            # type registry currently holds (core/native.tcl's ValidShape
-            # comment): if the compiling program never declared NAME (e.g.
-            # it never loaded the library module that does), this falls
-            # back to the native's own plain declared -result-type, never a
-            # false claim.
+            # `immutable-set` above are -- and its elements are of NAME, a
+            # standard-library integer domain (core/native.tcl's ValidShape).
+            # The contract is the native's, so it does not depend on what the
+            # program imports: every compilation the loader builds that can
+            # reach the native has NAME's module loaded, by the program's own
+            # imports or else by the loader for the contract
+            # (surface/modules.tcl's ContractTypes;
+            # STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md). Only a
+            # program no loader built (core IR text, which declares no type),
+            # or one built on a standard library without NAME's module (a
+            # test's scratch library, where no import could declare it
+            # either), has NAME undeclared: its result is the native's plain
+            # declared -result-type, never a claim about a type that does not
+            # exist.
             #
-            # Resolving the name is not, by itself, proof that the
-            # native's elements inhabit it: the same spelling can validly
-            # denote an unrelated or narrower domain in a different
-            # compiling program (SYMBOLIC-TYPE-IDENTITY.md's own
-            # motivating example: a program-local `type Byte = Int in
-            # 0..15` must not make std::str::encode_utf8's result List[Byte] just
-            # because "Byte" happens to resolve). So NAME's resolved type
-            # is validated against the native's own LO..HI guarantee with
-            # hir::range::ProvesType -- the same admissibility check a
-            # declared function result type is already held to
-            # (hir/range.tcl's verifyDeclaredResults) -- and the result
-            # narrows to NAME only when that proof succeeds; otherwise this
-            # falls back to the native's own plain declared -result-type,
-            # exactly as when NAME is not registered at all. The target
-            # type's own domain always comes from the registry (via
-            # ProvesType/core::type::integerFacts); no domain is ever
-            # hardcoded here for any particular NAME.
+            # Declaring NAME is not, by itself, proof that the native's
+            # elements inhabit it: NAME's resolved type is validated against
+            # the native's own LO..HI guarantee with hir::range::ProvesType --
+            # the same admissibility check a declared function result type
+            # is held to (hir/range.tcl's verifyDeclaredResults). NAME's domain
+            # comes from its declaration (via ProvesType/
+            # core::type::integerFacts); no domain is ever hardcoded here for
+            # any particular NAME. A declaration that does not admit LO..HI
+            # is the standard library contradicting its own native: the
+            # compilation fails (COMPILER-INTERNAL), and the result neither
+            # claims NAME nor quietly loses it.
             lassign $shape _ name lo hi
             if {![core::type::isNamed $name]} {
                 return $result
             }
             set resolved [core::type::normalize $name]
             if {![hir::range::ProvesType [dict create min $lo max $hi] $resolved]} {
-                return $result
+                return -code error -errorcode {CORE SEMANTIC COMPILER-INTERNAL} \
+                    "internal compiler error: the result contract {$shape} names $name, whose declaration does not admit every value in $lo..$hi: the standard library contradicts its own native"
             }
             # MakeList must fold in the *resolved* semantic type, not the
             # bare symbolic NAME: MakeList/Bound/Unshaped treat their ELEM
