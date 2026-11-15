@@ -59,7 +59,9 @@ defaults:
 
 env:
   # The unit's pinned toolchain: the author image's (tools/package-build/
-  # Dockerfile). The runners' stable toolchain builds the Botlish runtime.
+  # Dockerfile). The repository's pinned toolchain (rust-toolchain.toml,
+  # which the setup steps install and make the default) builds the Botlish
+  # runtime.
   UNIT_RUST: "1.97.0"
 
 jobs:
@@ -410,7 +412,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust)
         uses: ./.github/actions/setup-macos
       - name: Build native (Cranelift) backend
         uses: ./.github/actions/build-native

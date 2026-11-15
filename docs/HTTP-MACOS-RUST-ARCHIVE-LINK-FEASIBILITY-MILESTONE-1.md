@@ -97,7 +97,7 @@ Section 16 lists what this does not establish.
 | SQLite package repository | `mwagner-webdev/sqlite-botpkg` at `1848ad87` (2026-11-13 19:24 +0100), read only |
 | Local host | Linux x86-64 container; rustc 1.97.0 (2d8144b78 2026-07-07) and 1.100.0 (0ef1bc386 2026-11-09); cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0; GNU ld and objcopy 2.42; Tcl 9.0.1 |
 | The unit's pinned toolchain | rustc 1.97.0, the pinned author image's (tools/package-build/Dockerfile) |
-| CI runners | `ubuntu-24.04` (x86-64) and `macos-15` (arm64); the Botlish runtime there built by the runners' stable rustc, the unit by 1.97.0 |
+| CI runners | `ubuntu-24.04` (x86-64) and `macos-15` (arm64); the Botlish runtime there built by the runners' stable rustc (1.100.0, rust-toolchain.toml's pin since main's aa19036c), the unit by 1.97.0 |
 
 **Main's CI when the branch was cut** [CI]. At `ae2cb861` the four test
 workflows (tests, tests (linux arm64), tests (macos arm64), tests
@@ -170,7 +170,7 @@ script refuses any host but Linux (`httppkg::Host`).
 
 | # | Party | Owns | Built by | Platform-specific parts |
 |---|---|---|---|---|
-| 1 | Botlish native runtime | its copy of std, the allocator shim (System allocator; no `#[global_allocator]`), `rust_eh_personality`, the GC, the callback transition | the consumer's compiler distribution, its rustc (CI: stable) | none for this question |
+| 1 | Botlish native runtime | its copy of std, the allocator shim (System allocator; no `#[global_allocator]`), `rust_eh_personality`, the GC, the callback transition | the consumer's compiler distribution, its rustc (CI: 1.100.0) | none for this question |
 | 2 | Rust native unit | its own copy of std and its allocator shim, its own personality routine and unwind tables, its global allocator if it has one | the package author, pinned rustc (1.97.0) | archive and object format |
 | 3 | Externally visible C symbols | the unit's C ABI (`bh_*`, `rl_*`), an interposable weak fallback if any | the unit | Mach-O's leading underscore |
 | 4 | Internal Rust symbols | std/core/alloc (v0-mangled with a crate hash), the allocator shim `__rustc::__rust_alloc` (mangled, its hash toolchain-specific), `rust_eh_personality` (**unmangled**), ELF's `DW.ref.rust_eh_personality` COMDAT group, compiler-builtins (weak) | the unit | ELF COMDAT vs Mach-O (none) |
@@ -899,8 +899,9 @@ both platforms; without one, Apple's ld refuses it.
   newer target than the consumer's link makes Apple's ld warn; nothing
   checks it at packing.
 * **Toolchain coverage** [CI]. The runtime is built by the runners'
-  stable rustc (1.100.0 on 2026-11-13), the unit by 1.97.0 and by the
-  stable one in the experiments; the same-toolchain case (the silent
+  stable rustc (1.100.0 on 2026-11-13; rust-toolchain.toml pins that
+  release since main's aa19036c, so the workflow now builds with it by
+  name), the unit by 1.97.0 and by 1.100.0 in the experiments; the same-toolchain case (the silent
   allocator rebinding when unlocalized) and the different-toolchain case
   are both covered on both hosts. One Xcode (16.4) and one macOS image.
 * **Dead stripping** [inference]. `ld -r` merges the unit into one object;
