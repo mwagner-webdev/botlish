@@ -634,7 +634,7 @@ catalog (114 catalogs, 3 866 mutants, 0 problems) **[observed]**;
 `audit/payload-enums/tools/mutants.txt`'s `payload-enums-sendable` --
 which planted "a payload enum is Sendable" against the old blanket
 refusal -- now plants "a payload enum is Sendable whatever its payloads
-hold" against the structural rule. VT-MUTANTS
+hold" against the structural rule. `audit/value-transfer/tools/mutate.tcl` kills all 29 of its mutants against this branch **[observed]**.
 
 ## 16. Fixed vectors and compatibility checks
 
@@ -654,11 +654,137 @@ hold" against the structural rule. VT-MUTANTS
 
 ## 17. Performance and allocations
 
-PERF-RESULTS
+`bench/payload-enum-transfer.tcl -runs 3`, in this container (four
+cores shared with nothing else during the run) **[observed]**. Times are
+one shared container's: compare them with each other, never as
+absolutes.
+
+### The codec
+
+One operation's cost, (time(K) - time(0)) / K; natively native::measure's
+best of three runs (compilation excluded), on the Tcl compiler a unit
+compiled once. Allocations are the K = 1 program's over the K = 0
+program's (native::allocationReport): every decode in this harness
+allocates one 24-byte object besides the value (the payload-free row's).
+
+| Workload | Bytes | Native enc us | Native dec us | Tcl enc us | Tcl dec us | Native dec allocs/bytes |
+|---|---:|---:|---:|---:|---:|---:|
+| payload-free case of a mixed enum | 14 | 0.195 | 0.079 | 22.7 | 25.0 | 1/24 |
+| payload case, one Int | 16 | 0.220 | 0.294 | 27.2 | 35.7 | 3/88 |
+| the same as a struct | 15 | 0.225 | 0.231 | 31.2 | 29.3 | 2/64 |
+| payload case, four fields | 26 | 0.280 | 0.533 | 35.9 | 48.7 | 4/143 |
+| the same as a struct | 25 | 0.285 | 0.406 | 33.4 | 43.5 | 3/119 |
+| nested enum (Wrap {inner: Number}) | 17 | 0.229 | 0.499 | 30.0 | 48.6 | 5/152 |
+| nested struct | 15 | 0.224 | 0.338 | 25.9 | 36.2 | 3/104 |
+| the 32nd of 33 cases, four fields | 22 | 0.260 | 0.407 | 33.6 | 101.1 | 4/139 |
+| List of 1000 mixed Messages | 4 673 | 32.8 | 183.8 | 5 752 | 15 253 | 2 002/73 020 |
+| List of 1000 one-Int structs | 4 008 | 14.0 | 126.8 | 3 665 | 12 799 | 1 002/48 048 |
+| binary Tree enum, depth 10 | 5 131 | 57.2 | 443.1 | 8 637 | 30 419 | 5 118/171 952 |
+| binary tree struct, depth 10 | 6 154 | 50.9 | 413.0 | 10 568 | 33 887 | 4 095/163 776 |
+| Neg chain, 10 000 deep | 10 016 | 177.8 | 1 641.1 | 23 250 | 91 644 | 20 003/640 088 |
+
+Reading it:
+
+* **Encoding allocates nothing per value.** Every encode allocates three
+  objects (its result) whatever it encodes; the walk writes into Rust
+  memory.
+* **A payload-free case decodes to its immediate word**: no allocation,
+  0.08 us natively.
+* **A payload-bearing case costs one object more than the equivalent
+  struct**: its `EnumCaseObj` (24 bytes) beside the payload struct --
+  3/88 against 2/64 for one Int, 4/143 against 3/119 for four fields; the
+  native decode is 0.06-0.13 us slower. The case index is one varuint
+  (the bytes are one larger than the struct's).
+* **Linear in the encoded value.** The 10 000-deep chain decodes in
+  1.6 ms with two objects per level (payload and case object) and its one
+  collection; the List of 1000 allocates exactly the payloads and case
+  objects of its 750 payload-bearing elements and the Strings and Lists
+  they hold (250 x 3 + 250 x 2 + 250 x 3 + the List).
+* **Many cases cost nothing natively** (the 33-case enum's last case
+  decodes as fast as a 2-case one's: the plan maps an index to a case in
+  O(1)). The Tcl compiler's decode of it is slower (101 us against 49) and
+  its encode finds the case name in the sorted list by a linear search,
+  as the existing `enum` node always has (the Tcl codec is the reference,
+  not the fast path).
+
+### Compile time
+
+`hir::transfer::Schema` (both walks: the nodes and the intent text) and
+`native::lower::TransferPlan` per type, median of 50 calls:
+
+| Type | Nodes | Schema us | Plan us |
+|---|---:|---:|---:|
+| Message (four cases) | 7 | 211 | 37 |
+| a one-Int struct | 2 | 64 | 9 |
+| Shape (four-field payload) | 5 | 153 | 25 |
+| its struct | 4 | 110 | 15 |
+| Outer (nested enum) | 9 | 277 | 50 |
+| Wide (33 cases of four fields) | 5 | 822 | 158 |
+| Tree | 5 | 151 | 29 |
+
+A schema's cost grows with its nodes and, for a payload-bearing enum,
+with its cases (each sorted, each payload's fields sorted): 0.8 ms for 33
+cases. It is computed once per transfer call site, at compile time; the
+plan checks the declaration once per call site and is parsed once per VM
+(cached by the constant's address). The intent walk (section 4) is a
+second walk: measured on origin/main and this branch, Schema of a
+four-field struct takes 76 against 125 us, of a tree struct 60 against
+99 us, of a List of it 67 against 97 us -- about 1.5 to 1.7 times, tens of
+microseconds per transfer call site.
+
+### The remote transport
+
+20 000 messages from a worker thread into a mailbox of the main VM
+(endpoint and mailbox of 64), best of three runs:
+
+| Message | us per message |
+|---|---:|
+| `Request::Calculate {requestId, x, y}` (payload enum) | 5.35 |
+| `Calc {stop, requestId, x, y}` (struct) | 5.38 |
+
+The transport (queues, the port, the pump task, the actor's resumption)
+dominates; a payload enum message costs what a struct message of the same
+content costs.
 
 ## 18. Regression and CI
 
-REGRESSION-RESULTS
+**[observed]** In this container (Linux x86-64, Tcl 9.0.1, rustc 1.100.0,
+the native backend built from this branch), each file run directly
+(every test of the file; the Tcl-backend files on their default backend,
+the transfer tests on all four backends by `sourceAgree`):
+
+| Test file / harness | Result |
+|---|---|
+| tests/payload-enum-transfer.test (remote messages and calls, GC stress included) | 127 of 127 |
+| tests/value-transfer.test | 76 of 76 |
+| tests/sendability.test | 82 of 82 |
+| tests/payload-enums.test | 41 of 41 |
+| tests/exhaustive-match.test | 38 of 38 |
+| tests/enums.test | 66 of 66 |
+| tests/threads.test (the transport: FIFO, backpressure, endpoints, calls) | 21 of 21 |
+| tests/actor.test | 67 of 67 |
+| tests/semantic-instances.test | 96 of 96 |
+| tests/traits.test | 112 of 112 |
+| tests/hashable.test | 48 of 48 |
+| tests/parameterized-declaration-summaries.test | 24 of 24 |
+| tests/encode-utf8-type-stability.test | 50 of 50 |
+| tests/hir-interchange.test | 11 of 11 |
+| tests/static-compile.test | 83 of 83 |
+| tests/static-economics.test | 94 of 94 |
+| tests/golden-framework.test | 42 of 42 |
+| tests/canary.test | 20 of 20 |
+| `cargo test --release --lib transfer` | 12 of 12 (four new) |
+| `oracle.py selftest` | 0 failures |
+| audit/payload-enum-transfer/tools/mutate.tcl | 26 of 26 killed |
+| audit/value-transfer/tools/mutate.tcl | 29 of 29 killed |
+| audit/payload-enums/tools/mutate.tcl `-only payload-enums-sendable` | killed |
+| tools/mutant-catalogs.tcl | 114 catalogs, 3 866 mutants, 0 problems |
+| tools/compilerpedia.tcl check | 1 306 topics, 789 examples, 0 problems |
+| audit/golden/migration/merge.tcl -check | no problem of this milestone (two of main's: c-bindgen census rows for Android tests that did not run here) |
+| tests/golden.test, tests/golden-duplicates.test (the regenerated manifest) | 9 of 9, 4 of 4 |
+| `cargo test --release --lib` (the whole native crate) | 359 of 359 |
+
+CI-RESULTS
 
 ## 19. Unsupported transfers
 

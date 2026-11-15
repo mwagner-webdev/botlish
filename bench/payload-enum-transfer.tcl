@@ -194,7 +194,7 @@ proc bestTime {backend hir runs} {
 proc allocations {hir} {
     set report [native::allocationReport $hir summary]
     set total [dict get $report total]
-    return [list [dict get $total allocations] [dict get $total allocatedBytes] [dict get $total peakLiveBytes] [dict get $total collections]]
+    return [list [dict get $total allocations] [dict get $total allocatedBytes] [dict get $total peakLiveBytes] [dict get $report gc cycles]]
 }
 
 set runs [dict get $options -runs]
