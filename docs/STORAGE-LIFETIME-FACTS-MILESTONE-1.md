@@ -690,32 +690,32 @@ is `audit/storage-lifetime/results/mutants.txt` [test]:
 
 | mutant | breaks | killed by |
 |---|---|---|
-| handler-edge-dropped | a handled call's edge to its handlers | KILL:handler-edge-dropped |
-| exceptional-successors-ignored | live-out joins exceptional successors | KILL:exceptional-successors-ignored |
-| error-edge-dropped | a failing call's error edge | KILL:error-edge-dropped |
-| handled-errors-kept | handled errors are no exit (precision) | KILL:handled-errors-kept |
-| fold-back-edge-dropped | a fold's back edge | KILL:fold-back-edge-dropped |
-| position-unread | a counted loop's position is read every iteration | KILL:position-unread |
-| pending-unreported | pending operands are reported | KILL:pending-unreported |
-| callee-held-ignored | a suspended callee holds its arguments | KILL:callee-held-ignored |
-| return-not-a-sink | `return` is a sink | KILL:return-not-a-sink |
-| fail-not-a-sink | a `fail`'s payload is a sink | KILL:fail-not-a-sink |
-| yield-not-a-sink | a yield is a sink | KILL:yield-not-a-sink |
-| struct-holds-nothing | a struct holds its fields | KILL:struct-holds-nothing |
-| closure-holds-nothing | a closure holds its captures | KILL:closure-holds-nothing |
-| result-params-ignored | a summary's `resultParams` | KILL:result-params-ignored |
-| place-store-dropped | a mutation stores into its place | KILL:place-store-dropped |
-| unknown-call-trusted | a call through a function value is unknown | KILL:unknown-call-trusted |
-| context-state-local | context state escapes | KILL:context-state-local |
-| caller-values-local | a caller's values escape the callee | KILL:caller-values-local |
-| caller-object-empty | a caller's object stands for its contents | KILL:caller-object-empty |
-| messages-trusted | a coroutine may keep a resume message | KILL:messages-trusted |
-| thunk-captures-trusted | a coroutine's code may keep its captures | KILL:thunk-captures-trusted |
-| recursion-one-round | a recursive component iterates to its fixpoint | KILL:recursion-one-round |
-| kind-filter-off | a value is never an object of another kind (precision) | KILL:kind-filter-off |
-| iteration-escape-unchecked | a value outliving the iteration makes it escape | KILL:iteration-escape-unchecked |
-| made-filter-everything | the may-have-been-made filter removes only what does not exist yet | KILL:made-filter-everything |
-| static-closure | an exactly called capturing closure carries its captures | KILL:static-closure |
+| handler-edge-dropped | a handled call's edge to its handlers | sl-mut-handler |
+| exceptional-successors-ignored | live-out joins exceptional successors | sl-mut-handler |
+| error-edge-dropped | a failing call's error edge | sl-mut-failing-call |
+| handled-errors-kept | handled errors are no exit (precision) | sl-p14-errors |
+| fold-back-edge-dropped | a fold's back edge | sl-p08-independent, fuzz |
+| position-unread | a counted loop's position is read every iteration | sl-loop-position, sl-p08-independent, sl-p10-handle, fuzz |
+| pending-unreported | pending operands are reported | sl-pending-operand |
+| callee-held-ignored | a suspended callee holds its arguments | sl-held-by-callee |
+| return-not-a-sink | `return` is a sink | sl-p17-spelling, sl-spelling-return |
+| fail-not-a-sink | a `fail`'s payload is a sink | sl-mut-failing-call, sl-p14-errors |
+| yield-not-a-sink | a yield is a sink | sl-coroutine-capture, sl-mut-yield |
+| struct-holds-nothing | a struct holds its fields | sl-mut-aggregate, sl-p06-retained |
+| closure-holds-nothing | a closure holds its captures | sl-mut-closure |
+| result-params-ignored | a summary's `resultParams` | sl-mut-alias, sl-param-contents, sl-recursion, sl-specialization |
+| place-store-dropped | a mutation stores into its place | sl-mut-context, sl-mut-place-param, sl-p06-retained |
+| unknown-call-trusted | a call through a function value is unknown | sl-mut-erased, sl-mut-unknown-call |
+| context-state-local | context state escapes | sl-mut-context |
+| caller-values-local | a caller's values escape the callee | sl-mut-place-param |
+| caller-object-empty | a caller's object stands for its contents | sl-param-contents |
+| messages-trusted | a coroutine may keep a resume message | sl-message-kept |
+| thunk-captures-trusted | a coroutine's code may keep its captures | sl-coroutine-capture |
+| recursion-one-round | a recursive component iterates to its fixpoint | sl-recursion-swapped |
+| kind-filter-off | a value is never an object of another kind (precision) | sl-kind-precision |
+| iteration-escape-unchecked | a value outliving the iteration makes it escape | sl-mut-loop-carried, sl-mut-place-param |
+| made-filter-everything | the may-have-been-made filter removes only what does not exist yet | sl-mut-across-suspension, sl-mut-overlap, sl-p02-simultaneous, sl-p07b-string |
+| static-closure | an exactly called capturing closure carries its captures | sl-closure-returns-capture |
 
 The catalog found three weaknesses of the first test set, each now a test
 of its own: `exceptional-successors-ignored`'s first form changed only the
@@ -802,24 +802,83 @@ None produced a false confined or false dead result.
 `bench/storage-lifetime.tcl` (results: `audit/storage-lifetime/results/
 bench.md`) [measurement]:
 
-BENCH-RESULTS
+| workload | compile ms | specialize ms | lifetime ms (best of 3) | units | nodes | constraints | producers confined/escapes/unknown | suspensions | VmHWM |
+|---|---:|---:|---:|---:|---:|---:|---|---:|---:|
+| p01-sequential-temps | 85 | 4 | 1.5 | 2 | 29 | 36 | 4/0/0 | 0 | 29 MB |
+| p02-simultaneous-temps | 24 | 2 | 1.5 | 2 | 27 | 41 | 5/0/0 | 0 | 31 MB |
+| p03-exclusive-branches | 25 | 2 | 1.4 | 2 | 30 | 36 | 4/0/0 | 0 | 31 MB |
+| p04-loop-reuse | 27 | 2 | 1.1 | 2 | 27 | 22 | 2/0/0 | 0 | 31 MB |
+| p05-escape-result | 25 | 3 | 1.6 | 3 | 32 | 33 | 2/2/0 | 0 | 32 MB |
+| p06-retained-aggregate | 36 | 2 | 1.7 | 2 | 34 | 35 | 0/6/0 | 0 | 33 MB |
+| p07-across-suspension | 20 | 1 | 1.4 | 3 | 32 | 34 | 2/1/0 | 2 | 33 MB |
+| p07b-string-across-suspension | 34 | 4 | 2.5 | 4 | 49 | 59 | 7/0/0 | 2 | 34 MB |
+| p08-two-coroutines | 20 | 2 | 2.2 | 4 | 52 | 64 | 6/1/0 | 3 | 34 MB |
+| p09-nested-yield | 18 | 2 | 1.8 | 4 | 41 | 42 | 1/1/0 | 5 | 34 MB |
+| p10-handle-moved | 15 | 2 | 1.5 | 4 | 37 | 37 | 1/1/0 | 2 | 34 MB |
+| p10b-handle-returned | 13 | 1 | 1.5 | 4 | 37 | 35 | 1/3/0 | 2 | 34 MB |
+| p11-context-state | 17 | 3 | 1.8 | 4 | 43 | 44 | 1/3/0 | 0 | 34 MB |
+| p12-actor-messages | 10370 | 2909 | 335.9 | 178 | 5227 | 4992 | 13/215/0 | 29 | 220 MB |
+| p13-request-handler | 113 | 7 | 5.5 | 5 | 81 | 137 | 3/15/0 | 0 | 220 MB |
+| p14-errors-early-exit | 37 | 3 | 2.3 | 3 | 52 | 52 | 5/1/0 | 0 | 220 MB |
+| p15-bounded-collections | 33 | 3 | 2.6 | 4 | 63 | 44 | 4/3/0 | 0 | 220 MB |
+| p16-foreign-noescape | 142 | 5 | 1.9 | 2 | 14 | 25 | 2/2/0 | 0 | 220 MB |
+| p17-explicit-return | 20 | 1 | 1.8 | 3 | 47 | 35 | 2/3/0 | 0 | 220 MB |
+| p18-persist-precision | 25 | 2 | 1.7 | 4 | 38 | 40 | 2/1/0 | 3 | 220 MB |
+| p19-context-scratch-vector | 17 | 2 | 1.6 | 2 | 40 | 32 | 1/3/0 | 0 | 220 MB |
+| 2048-demo | 1121 | 182 | 67.3 | 63 | 1106 | 1188 | 52/97/0 | 0 | 220 MB |
+| 2048-golden | 5687 | 2331 | 287.3 | 189 | 3097 | 5101 | 295/472/0 | 2 | 231 MB |
+| icy-tower-golden | 32615 | 3863 | 401.2 | 197 | 3532 | 5645 | 249/598/0 | 2 | 294 MB |
+| straight-250 | 1041 | 211 | 134.1 | 2 | 1260 | 1510 | 250/0/0 | 0 | 294 MB |
+| straight-1000 | 4054 | 851 | 515.9 | 2 | 5010 | 6010 | 1000/0/0 | 0 | 307 MB |
+| straight-4000 | 15384 | 3069 | 2904.6 | 2 | 20010 | 24010 | 4000/0/0 | 0 | 750 MB |
+| functions-50 | 491 | 63 | 40.6 | 52 | 462 | 665 | 51/50/0 | 0 | 750 MB |
+| functions-200 | 1391 | 1351 | 211.9 | 202 | 1812 | 2615 | 201/200/0 | 0 | 750 MB |
+| yields-50 | 278 | 43 | 25.7 | 3 | 270 | 322 | 51/1/0 | 51 | 750 MB |
+| yields-200 | 1025 | 213 | 129.3 | 3 | 1020 | 1222 | 201/1/0 | 201 | 750 MB |
+| yields-800 | 4411 | 951 | 645.8 | 3 | 4020 | 4822 | 801/1/0 | 801 | 750 MB |
+| loops-100 | 459 | 53 | 346.7 | 1 | 972 | 541 | 133/2/0 | 0 | 750 MB |
+| loops-200 | 1141 | 182 | 1235.3 | 1 | 1937 | 1072 | 266/2/0 | 0 | 750 MB |
+| loops-400 | 3238 | 486 | 4940.1 | 1 | 3872 | 2141 | 533/2/0 | 0 | 750 MB |
+| cond-100 | 2787 | 957 | 131.8 | 1 | 1965 | 888 | 1/2/0 | 0 | 750 MB |
+| cond-200 | 7125 | 2126 | 200.2 | 1 | 3896 | 1753 | 1/2/0 | 0 | 750 MB |
+| cond-400 | 14784 | 10050 | 724.1 | 1 | 7765 | 3488 | 1/2/0 | 0 | 750 MB |
+| struct-100 | 174 | 13 | 30.9 | 1 | 207 | 307 | 101/0/0 | 0 | 750 MB |
+| struct-200 | 364 | 83 | 109.9 | 1 | 407 | 607 | 201/0/0 | 0 | 750 MB |
+| struct-400 | 804 | 219 | 388.4 | 1 | 807 | 1207 | 401/0/0 | 0 | 750 MB |
 
-Observations [measurement, inference]:
+Times are of a shared 4-processor container (the run's compile and
+specialization times are beside each, measured in the same process);
+counts are exact. Observations [measurement, inference]:
 
-* On real programs the analysis is a small fraction of compilation: the
-  2048 engine's golden suite (189 units, 3,097 CFG nodes, 767 producers)
-  in about 300 ms against 4.3 s of front end; the actor probe (178 units)
-  in about 0.4 s against 11.6 s. It is not run by ordinary compilation, so
-  a compilation that does not ask pays nothing.
-* Straight-line code, many functions and many suspension points scale
-  about linearly.
-* Liveness is iterative: its rounds grow with the loop nesting depth (the
-  conventional bound for iterative bit-vector dataflow, d+2 passes for a
-  reducible graph of loop connectedness d), so loops nested 400 deep cost
-  O(nodes x depth). The made-before analysis is seeded at loop heads and
-  needs one pass; the per-loop outflow is computed once per variable. Real
-  programs nest a handful of loops deep.
-* No budget limits precision: the same verdicts at every size.
+* **On real programs the analysis is a small fraction of compilation**:
+  the 2048 engine's golden suite (189 units, 3,097 CFG nodes, 767
+  producers) 287 ms against 5.7 s of front end and 2.3 s of
+  specialization; Icy Tower's golden suite 401 ms against 32.6 s; the actor
+  probe (178 units) 336 ms against 10.4 s; every census probe under 6 ms.
+  It is not run by ordinary compilation, so a compilation that does not
+  ask pays nothing.
+* **Many functions, many instances, many suspension points**: 200
+  functions (202 units) 212 ms; a coroutine with 800 yields 646 ms (801
+  suspension live sets) -- about linear in the program.
+* **Straight-line code** grows a little faster than linear (250, 1,000,
+  4,000 String temporaries: 134, 516, 2,905 ms): a liveness bit set is as
+  wide as the function has variables, so one function of 8,000 bindings
+  pays nodes x variables / 64 word operations.
+* **Nesting is output-sensitive and round-sensitive.** A struct literal
+  nested N deep holds N pending operands at its innermost point, and the
+  coexistence it reports is that large (struct-100/200/400: 31, 110, 388
+  ms). Loops nested N deep need a liveness round per nesting level (the
+  conventional bound of iterative bit-vector dataflow: d+2 passes for a
+  reducible graph of loop connectedness d), so loops-100/200/400 cost 347,
+  1,235, 4,940 ms -- quadratic for a specimen whose size is its depth.
+  The made-before analysis is seeded at loop heads and needs one pass
+  (it took 1,065 ms of 4,472 at depth 300 before the seeding, 43 ms
+  after); the iteration outflow is computed once per variable, not per
+  loop. Real programs nest a handful of loops deep.
+* Peak memory (VmHWM, the whole process: compiler included) is dominated
+  by the front end: 220 MB after the actor probe, 750 MB after the
+  4,000-statement function.
+* **No budget limits precision**: the same verdicts at every size.
 
 ## 22. Existing regression and CI results
 
@@ -828,7 +887,10 @@ Run on the branch (Linux x86-64, the pinned toolchain) [test]:
 | check | result |
 |---|---|
 | `tests/storage-lifetime.test` | 63 tests, 63 passed (the native one needs the built driver; the oracle ones `python3`) |
-| `tests/depth-safe-nesting.test` | DSN-RESULT |
+| `audit/storage-lifetime/tools/mutate.tcl` | 26 mutants, 26 killed by their stated tests |
+| `audit/storage-lifetime/tools/fuzz.tcl` | 480 + 240 programs, 0 unsound, 0 imprecise (section 17) |
+| `audit/storage-lifetime/tools/persist.tcl`, `reachability.tcl` | 0 violations, 0 contradictions (sections 15, 16) |
+| `tests/depth-safe-nesting.test` | 52 passed (the census check with the five new walks, every specimen 1000 deep at the default limit, segment invariance) |
 | `tests/hir-interchange.test` | 11 passed (the front end's fingerprint covers the new file; nothing else changes) |
 | `tests/compilation-isolation.test` | 19 passed |
 | `tests/canary.test` | 20 passed (the new file's `# canary: covers` line) |
@@ -840,7 +902,7 @@ Run on the branch (Linux x86-64, the pinned toolchain) [test]:
 Nothing in `core/`, `surface/`, `compiler/`, `native/`, `ccompile/`,
 `stdlib/` or any backend changed; `hir/hir.tcl` only loads the new file.
 
-CI: CI-RESULT
+CI: the branch push runs each host's canary (which selects this test file); tests.yml dispatched on the branch tip. Their outcomes are recorded below once finished.
 
 ## 23. Known limitations and conservative cases
 
