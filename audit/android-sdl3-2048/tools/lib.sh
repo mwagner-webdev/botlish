@@ -51,6 +51,35 @@ screenSize() {
     echo "$size"
 }
 
+# A continuous capture of the whole log from now on (OUT/logcat-all.txt),
+# for crash detection across every phase (a phase clears the log to count
+# its own lines). stopCapture ends it.
+startCapture() {
+    adb logcat -v threadtime >"$OUT/logcat-all.txt" 2>/dev/null &
+    capture=$!
+}
+stopCapture() {
+    sleep 1
+    kill "$capture" 2>/dev/null || true
+    wait "$capture" 2>/dev/null || true
+}
+
+# The threads of PID as "TID NAME TICKS" lines.
+threads() { # PID
+    local t
+    for t in $(shellp ls "/proc/$1/task"); do
+        echo "$t $(shellp cat "/proc/$1/task/$t/comm" 2>/dev/null | tr ' ' _) $(shellp cat "/proc/$1/task/$t/stat" 2>/dev/null | sed 's/^[0-9]* ([^)]*) //' | awk '{print $12 + $13}')"
+    done
+}
+# The threads that used CPU between two samples, "NAME(TID)=TICKS".
+busiest() { # BEFORE AFTER
+    join <(sort "$1") <(sort "$2") | awk '{ d = $5 - $3; if (d > 0) printf "%s(%s)=%d ", $2, $1, d }'
+}
+# The ticks thread TID used between two samples.
+threadDelta() { # BEFORE AFTER TID
+    join <(sort "$1") <(sort "$2") | awk -v t="$3" '$1 == t { print $5 - $3 }'
+}
+
 screenshot() { # NAME
     adb exec-out screencap -p >"$OUT/$1.png" 2>/dev/null || true
 }

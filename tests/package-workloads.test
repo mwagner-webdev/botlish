@@ -256,7 +256,7 @@ test pw-sdl3-two-targets {the same sdl3 0.3.0 artifact serves linux-aarch64: pre
     list [dict get $r status] [lrange [split [dict get $r out] \n] 0 3] [expr {[treeState [file join $app {*}$::hostView]] eq $before}] \
         [dict get $hir target] $files [hir::foreign::links $hir] \
         [lsearch -inline [split [dict get $plan out] \n] {    unverified*}]
-} -cleanup cleanup -match glob -result {0 {{sdlkit 0.3.0: unchanged} {view linux-aarch64: derived (* files, 2 native libraries)} {note: linux-aarch64: SDL3: a system library of linux-aarch64, not verified (this host is linux-x86_64): the target system must provide it (3)} {view linux-x86_64: unchanged}} 1 linux-aarch64 APP/.bot_modules/.targets/linux-aarch64/sdlkit/.bot_modules/sdl3/sdl3/video.bot SDL3 {    unverified on this host: linux-aarch64's system must provide it}}
+} -cleanup cleanup -match glob -result {0 {{sdl3 0.3.0: unchanged, used by sdlkit} {sdlkit 0.3.0: unchanged} {view linux-aarch64: derived (* files, 2 native libraries)} {note: linux-aarch64: SDL3: a system library of linux-aarch64, not verified (this host is linux-x86_64): the target system must provide it (3)}} 1 linux-aarch64 APP/.bot_modules/.targets/linux-aarch64/sdl3/sdl3/video.bot SDL3 {    unverified on this host: linux-aarch64's system must provide it}}
 
 test pw-sdlkit-verify-and-reinstall {verify checks both instances against their artifacts and the host's view, its native libraries verified again; a fresh copy of the application reinstalls the same tree and view from botlish.json and the repository} -constraints {sdl3Package} -body {
     set repo [repository {sdlkit sdl3}]

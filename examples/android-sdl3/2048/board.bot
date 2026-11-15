@@ -1,0 +1,154 @@
+# board.bot -- what the 2048 screen shows, and where
+# (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md, "Rendering"): a
+# pure module. From the drawable size it measured and the game it holds,
+# the application gets its layout -- a header with the score and a restart
+# button, a square board of 4 x 4 cells, a message line -- and the frame to
+# draw: a list of rectangles and texts, decided here and only drawn by
+# render.bot. Nothing here knows SDL, Android or a pixel density: every
+# size is a fraction of the drawable area, so the board stays square and
+# every part visible on any screen.
+#
+# The game's rules are game2048_play's: this module reads a played game's
+# cells, score and facts (won?, over?), and decides nothing of them.
+import game2048_play
+import sdlscreen::layout
+import std::int
+import std::list
+import std::str
+
+# One thing to draw: a rectangle filled with COLOR, or TEXT at SCALE (SDL's
+# 8 x 8 debug font scaled: each character 8 * SCALE pixels) in COLOR. A
+# color is 0xRRGGBB.
+enum Draw:
+    Fill {x: int, y: int, w: int, h: int, color: int},
+    Text {x: int, y: int, scale: int, text: str, color: int},
+
+# The screen's parts, in pixels of the drawable area.
+struct Layout:
+    width: int
+    height: int
+    score: sdlscreen::layout::Rect
+    restart: sdlscreen::layout::Rect
+    board: sdlscreen::layout::Rect
+    message: sdlscreen::layout::Rect
+    gap: int
+
+# The layout of a drawable area WIDTH x HEIGHT whose part not covered by
+# system interface is SAFE.
+nomethod fn layout(width: int, height: int, safe: sdlscreen::layout::Rect) -> Layout:
+    side = sdlscreen::layout::smaller(safe.w, safe.h)
+    margin = sdlscreen::layout::quotient(side, 24)
+    area = safe.inset(margin)
+    tall = sdlscreen::layout::quotient(sdlscreen::layout::smaller(area.w, area.h), 6)
+    header = area.top(tall)
+    rest = area.below(tall + margin)
+    message = rest.bottom(sdlscreen::layout::quotient(tall, 2))
+    board = rest.above(sdlscreen::layout::quotient(tall, 2) + margin).square()
+    half = sdlscreen::layout::quotient(header.w - margin, 2)
+    score = sdlscreen::layout::Rect {x: header.x, y: header.y, w: half, h: header.h}
+    restart = sdlscreen::layout::Rect {x: header.x + header.w - half, y: header.y, w: half, h: header.h}
+    gap = sdlscreen::layout::larger(sdlscreen::layout::quotient(board.w, 40), 2)
+    Layout {width: width, height: height, score: score, restart: restart, board: board, message: message, gap: gap}
+
+# The cell of ROW and COLUMN.
+fn tile_rect(l: Layout, row: int, column: int) -> sdlscreen::layout::Rect:
+    sdlscreen::layout::cell(l.board, 4, column, row, l.gap)
+
+# The color of a tile of VALUE (0: an empty cell): the classic palette
+# (#cdc1b4 empty, #eee4da 2, #ede0c8 4, #f2b179 8, #f59563 16, #f67c5f 32,
+# #f65e3b 64, #edcf72 128, #edcc61 256, #edc850 512, #edc53f 1024,
+# #edc22e 2048, #3c3a32 beyond).
+fn tile_color(value: int) -> int:
+    if value == 0:
+        return 13484468
+    if value == 2:
+        return 15656154
+    if value == 4:
+        return 15589576
+    if value == 8:
+        return 15905145
+    if value == 16:
+        return 16094563
+    if value == 32:
+        return 16153695
+    if value == 64:
+        return 16145979
+    if value == 128:
+        return 15585138
+    if value == 256:
+        return 15584353
+    if value == 512:
+        return 15583312
+    if value == 1024:
+        return 15582527
+    if value == 2048:
+        return 15581742
+    3947058
+
+# The color of a tile's number: dark on the two lightest tiles, else light.
+fn number_color(value: int) -> int:
+    if value <= 4:
+        return 7827045
+    16381682
+
+# The screen (#faf8ef), the board and the score (#bbada0); the restart
+# button is #8f7a66, the light number #f9f6f2, the dark #776e65.
+fn background() -> int:
+    16447727
+
+fn board_color() -> int:
+    12299680
+
+# The largest text scale at which TEXT fits WIDTH x HEIGHT pixels (at least
+# 1).
+nomethod fn fit(text: str, width: int, height: int) -> int:
+    n = sdlscreen::layout::larger(std::str::length(text), 1)
+    across = sdlscreen::layout::quotient(width, n * 8)
+    down = sdlscreen::layout::quotient(height, 8)
+    sdlscreen::layout::larger(sdlscreen::layout::smaller(across, down), 1)
+
+# TEXT centered in R at SCALE.
+fn label(r: sdlscreen::layout::Rect, text: str, scale: int, color: int) -> Draw:
+    w = std::str::length(text) * 8 * scale
+    h = 8 * scale
+    Draw::Text {x: r.x + sdlscreen::layout::quotient(r.w - w, 2), y: r.y + sdlscreen::layout::quotient(r.h - h, 2), scale: scale, text: text, color: color}
+
+fn filled(r: sdlscreen::layout::Rect, color: int) -> Draw:
+    Draw::Fill {x: r.x, y: r.y, w: r.w, h: r.h, color: color}
+
+# A tile's number, as large as its cell holds it: the scale of two digits
+# for a number of one or two, of its own digits for a longer one.
+fn tile_text(r: sdlscreen::layout::Rect, value: int) -> List[Draw]:
+    if value == 0:
+        return []
+    digits = value.to_string()
+    room = r.inset(sdlscreen::layout::quotient(r.w, 8))
+    widest = if std::str::length(digits) < 2:
+        "00"
+    else:
+        digits
+    [room.label(digits, fit(widest, room.w, room.h), number_color(value))]
+
+# The line under the board.
+fn message(p: game2048_play::Played) -> str:
+    if game2048_play::over?(p):
+        return "GAME OVER - TAP NEW"
+    if game2048_play::won?(p.game):
+        return "YOU WIN! KEEP GOING"
+    "SWIPE TO MOVE"
+
+# The frame of P in the layout L, drawn in order.
+nomethod fn frame(p: game2048_play::Played, l: Layout) -> List[Draw]:
+    whole = sdlscreen::layout::whole(l.width, l.height)
+    cells = game2048_play::cells_of(p)
+    tiles = loop i from 0 to 16:
+        r = l.tile_rect(i.shift_right(2), i.mod(4))
+        value = cells.get(i, 0)
+        std::list::flat([[r.filled(tile_color(value))], r.tile_text(value)])
+    score_label = "SCORE ".concat(p.game.score.to_string())
+    head = [whole.filled(background()), l.score.filled(board_color()), l.score.inset(l.gap).label(score_label, fit(score_label, l.score.w - 2 * l.gap, l.score.h - 2 * l.gap), 16381682),
+        l.restart.filled(9402982), l.restart.label("NEW", fit("NEW", l.restart.w - 4 * l.gap, l.restart.h - 4 * l.gap), 16381682),
+        l.board.filled(board_color())]
+    text = message(p)
+    tail = [l.message.label(text, fit(text, l.message.w, l.message.h), 7827045)]
+    std::list::flat([head, std::list::flat(tiles), tail])

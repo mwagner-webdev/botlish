@@ -67,6 +67,7 @@ import sdl3::init
 import sdl3::iostream
 import sdl3::layouts
 import sdl3::render
+import sdl3::scancode
 import sdl3::stdinc
 import sdl3::timer
 import sdl3::video
@@ -133,7 +134,10 @@ struct Area:
 
 # An event, as a value. A finger's X and Y are pixels of the renderer's
 # output (SDL's coordinates, 0 to 1 across the window, scaled by the output
-# size), FINGER SDL's finger identity.
+# size), FINGER SDL's finger identity. Back is the system's back key
+# released (Android's back button or gesture: SDLK_AC_BACK, which SDL3
+# leaves to the application -- returning from the entry program finishes
+# the Activity), or a desktop's Escape.
 enum Event:
     Idle,
     Quit,
@@ -147,6 +151,7 @@ enum Event:
     FingerMotion {finger: int, x: int, y: int},
     FingerUp {finger: int, x: int, y: int},
     FingerCanceled {finger: int},
+    Back,
     Resized,
     RenderReset,
     Other,
@@ -181,6 +186,15 @@ private layout IntCell:
     size 4
     align 4
     field value: std::ffi::c::Int at 0
+
+# The scancode of an SDL_KeyboardEvent, at offset 24 on every target the
+# binding has (the target compiler's answer: generated/c/sdl3/TARGET/
+# layouts.tsv's SDL_KeyboardEvent, whose generated layout is blocked by its
+# C bool fields, which this module never reads).
+private layout KeyEvent:
+    size 40
+    align 8
+    field scancode: std::ffi::c::UInt at 24
 
 private layout SizeCell:
     size 8
@@ -321,19 +335,24 @@ private nomethod fn set_hints(hints: List[Hint], first: std::ffi::c::Ptr[std::ff
     refused
 
 # A resizable window of high pixel density: SDL_WINDOW_RESIZABLE (0x20)
-# | SDL_WINDOW_HIGH_PIXEL_DENSITY (0x2000), the same on every target.
-private fn window_flags() -> std::ffi::c::ULong:
+# | SDL_WINDOW_HIGH_PIXEL_DENSITY (0x2000), and SDL_WINDOW_FULLSCREEN (0x1)
+# when FULLSCREEN asks for it; the same values on every target.
+private fn window_flags(fullscreen: bool) -> std::ffi::c::ULong:
+    if fullscreen:
+        return 8225
     8224
 
 # Starts SDL: the hints HINTS set first, then SDL with video, a resizable
 # high-density window titled TITLE of WIDTH x HEIGHT (a desktop's; a
-# phone's window is the whole screen whatever is asked), its renderer with
-# vertical sync when SYNC asks for it, and the scratch memory: the session
-# of this Screen from now on. On a failure everything made before it is
+# phone's window is the whole screen whatever is asked), fullscreen when
+# the flag :fullscreen asks for it (on Android: the system bars hidden, so
+# the window's pixels are the screen's), its renderer with vertical sync
+# when :sync asks for it, and the scratch memory: the session of this
+# Screen from now on. On a failure everything made before it is
 # released again (SDL_Quit included), and ScreenFailed carries SDL's error,
 # read before that. Opening an open Screen changes nothing. (nomethod: a
 # title is not a receiver.)
-nomethod fn open(title: str, width: std::ffi::c::Int, height: std::ffi::c::Int, sync: bool, hints: List[Hint], context screen: Screen) errors ScreenFailed:
+nomethod fn open(title: str, width: std::ffi::c::Int, height: std::ffi::c::Int, hints: List[Hint], flags :sync, :fullscreen, context screen: Screen) errors ScreenFailed:
     if not screen.open.empty?():
         return unit
     rect = std::ffi::c::retype[sdl3::ctypes::SDL_FRect](sdl3::stdinc::SDL_malloc(16))
@@ -362,7 +381,7 @@ nomethod fn open(title: str, width: std::ffi::c::Int, height: std::ffi::c::Int, 
         reason = line.clone().error_text()
         free_scratch(rect, line, event, wide, high, area, first, second, data, count)
         fail ScreenFailed {call: "SDL_Init", reason: reason}
-    window = std::abi::bytes::from_list(std::str::encode_utf8(title).append(nul())).SDL_CreateWindow(width, height, window_flags())
+    window = std::abi::bytes::from_list(std::str::encode_utf8(title).append(nul())).SDL_CreateWindow(width, height, window_flags(fullscreen))
     if window.null?():
         reason = line.clone().error_text()
         free_scratch(rect, line, event, wide, high, area, first, second, data, count)
@@ -509,6 +528,10 @@ private fn decoded(context screen: Screen) -> Event errors NativeViewNull, Index
         return Event::RenderReset
     if t == sdl3::events::SDL_EVENT_FINGER_DOWN or t == sdl3::events::SDL_EVENT_FINGER_MOTION or t == sdl3::events::SDL_EVENT_FINGER_UP or t == sdl3::events::SDL_EVENT_FINGER_CANCELED:
         return t.finger(std::binary::native::view(sdl3::layouts::SDL_TouchFingerEvent, screen.open.element(0).event))
+    if t == sdl3::events::SDL_EVENT_KEY_UP:
+        code = std::binary::native::view(KeyEvent, screen.open.element(0).event).scancode
+        if code == sdl3::scancode::SDL_SCANCODE_AC_BACK or code == sdl3::scancode::SDL_SCANCODE_ESCAPE:
+            return Event::Back
     Event::Other
 
 # Milliseconds of a wait SDL accepts: -1 (until an event arrives) to 2^31-1.
@@ -542,6 +565,10 @@ fn poll(context screen: Screen) -> Event:
 # Milliseconds since SDL started.
 fn ticks(context screen: Screen) -> int:
     sdl3::timer::SDL_GetTicks()
+
+# SDL's high-resolution counter: a different value every run (a seed).
+fn counter(context screen: Screen) -> int:
+    sdl3::timer::SDL_GetPerformanceCounter()
 
 # ---------------------------------------------------------------------------
 # Drawing, in integer pixels. Each returns whether SDL drew (false when the

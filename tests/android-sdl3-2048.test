@@ -1,0 +1,668 @@
+# android-sdl3-2048.test -- RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md:
+# a standalone Android SDL3 application written in Botlish, built from
+# independently distributed packages and an external tool.
+#
+# What runs on any Linux x86-64 host with a C compiler and the package-
+# owned libSDL3.so (tclsh9.0 tests/cffi/sdl3.tcl) and SDL's pinned headers:
+#
+#   * the pure modules on the interpreter and the compiler: sdlscreen's
+#     gesture recognizer (one gesture per finger, a second finger cancels,
+#     a cancel drops, no gesture while a finger is down), its layout, the
+#     2048 application's layout and input mapping (as-gesture-*, as-layout,
+#     as-input);
+#   * game2048_play is the React Native facade's rules unchanged: its own
+#     oracle of the self-test's game is the facade's, digest fbee79e6
+#     (as-play-oracle);
+#   * both applications built as application libraries and started by a
+#     host shaped like SDL's Android bootstrap (SDLThread, SDL_RunApp,
+#     SDL_main calling NAME_main) with touch and lifecycle events pushed
+#     from another thread, as Android's UI thread pushes them: the counter
+#     counts taps once, ignores swipes and two-finger gestures, survives the
+#     background, ends on the back key; the 2048 game's swipes are the
+#     interpreter's snapshots, its restart, its save and restore, an invalid
+#     save, an interrupted save, frames checked cell by cell, GC stress
+#     (as-counter-host, as-2048-*);
+#
+# and, with the Android packages (BOTLISH_SDL3_2048_PACKAGES: build.sh's
+# OUT/repo) and the NDK (ANDROID_NDK_ROOT):
+#
+#   * the botlish_android tool's refusals, each run directly with a request
+#     of its own (as-tool-*): an ordinary library, another target, stale or
+#     substituted artifacts, an entry that is not NAME_main, another runtime
+#     ABI, an undeclared native dependency, a missing SDL3 package, Linux's
+#     libSDL3.so, a binding of another SDL, a changed Java class, 4 KiB
+#     segments, invalid names, unsafe assets, output collisions, an unknown
+#     command -- none leaving a file; its output deterministic, generic and
+#     escaped (as-tool-generate).
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot native native.tcl]
+source [file join $::projectRoot tests cffi sdl3.tcl]
+
+set ::asMain [file join $::projectRoot main.tcl]
+set ::asAudit [file join $::projectRoot audit android-sdl3-2048]
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint linuxX86 [expr {[core::cabi::hostTarget] eq "linux-x86_64"}]
+proc asSdlSources {} {
+    if {[catch {exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] fetch sdl3} out]} { return "" }
+    set dir [lindex [split [string trim $out] \n] end]
+    return [expr {[file isfile [file join $dir include SDL3 SDL_main.h]] ? $dir : ""}]
+}
+testConstraint sdlHost [expr {[testConstraint linuxX86] && [testConstraint nativeBuilt] && [native::hostSupports libraries]
+    && [auto_execok cc] ne "" && [cffi::sdl3Dir] ne "" && [asSdlSources] ne ""}]
+set ::asPackages [expr {[info exists ::env(BOTLISH_SDL3_2048_PACKAGES)] ? $::env(BOTLISH_SDL3_2048_PACKAGES) : ""}]
+testConstraint androidTool [expr {[testConstraint linuxX86] && $::asPackages ne "" && [file isdirectory $::asPackages]
+    && [info exists ::env(ANDROID_NDK_ROOT)] && [file isdirectory $::env(ANDROID_NDK_ROOT)] && [auto_execok cc] ne ""}]
+
+set ::asCounter 0
+proc asDir {name} {
+    set dir [file join [temporaryDirectory] as-[pid]-[incr ::asCounter]-$name]
+    file delete -force $dir
+    file mkdir $dir
+    return $dir
+}
+
+proc asWrite {path text} {
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+proc asRead {path} {
+    set channel [open $path]
+    fconfigure $channel -encoding utf-8
+    set text [read $channel]
+    close $channel
+    return $text
+}
+
+# {STATUS OUTPUT} of a command (standard error with standard output).
+proc asExec {args} {
+    set code [catch {exec {*}$args 2>@1} output options]
+    set status 0
+    if {$code} {
+        set e [dict get $options -errorcode]
+        set status [expr {[lindex $e 0] eq "CHILDSTATUS" ? [lindex $e 2] : 1}]
+    }
+    return [list $status $output]
+}
+
+# The value main.tcl prints for PROGRAM (a file in DIR) on BACKEND.
+proc asValue {dir program backend} {
+    lassign [asExec [info nameofexecutable] $::asMain -warnings off -backend $backend [file join $dir $program]] status out
+    if {$status != 0 || ![regexp -line {^\s*value: (.*)$} $out -> value]} { error "$program on $backend:\n$out" }
+    return [string trim $value]
+}
+
+# The application's modules beside a program: sdlscreen (the package's
+# modules) and the 2048 packages, as application modules of DIR.
+proc asModules {dir} {
+    file copy [file join $::projectRoot packages sdlscreen sdlscreen.bot] $dir
+    file copy [file join $::projectRoot packages sdlscreen sdlscreen] $dir
+    foreach f {game2048.bot game2048_play.bot} {
+        file copy [file join $::projectRoot examples games 2048 $f] $dir
+    }
+}
+
+# --------------------------------------------------------------------------
+# The pure modules
+
+test as-gesture-classify {sdlscreen::gesture: a finger lifted after moving less than the threshold on both axes is a tap at its start; else a swipe toward its larger movement (a tie horizontal); nothing while it is down} -body {
+    set dir [asDir gesture]
+    asModules $dir
+    asWrite $dir/p.bot {import sdlscreen::gesture
+
+fn name(g: sdlscreen::gesture::Gesture) -> str:
+    match g:
+        case sdlscreen::gesture::Gesture::Nothing:
+            "nothing"
+        case sdlscreen::gesture::Gesture::Tap {x, y}:
+            "tap"
+        case sdlscreen::gesture::Gesture::Swipe {direction}:
+            match direction:
+                case sdlscreen::gesture::Direction::Left:
+                    "left"
+                case sdlscreen::gesture::Direction::Right:
+                    "right"
+                case sdlscreen::gesture::Direction::Up:
+                    "up"
+                case sdlscreen::gesture::Direction::Down:
+                    "down"
+
+nomethod fn finger(x0: int, y0: int, x1: int, y1: int) -> List[str]:
+    a = sdlscreen::gesture::idle().down(7, x0, y0)
+    b = a.tracker.motion(7, (x0 + x1).shift_right(1), (y0 + y1).shift_right(1))
+    c = b.tracker.up(7, x1, y1, 30)
+    [name(a.gesture), name(b.gesture), name(c.gesture)]
+
+[finger(100, 100, 105, 110), finger(200, 100, 100, 110), finger(100, 100, 200, 120), finger(100, 200, 110, 100), finger(100, 100, 90, 200), finger(100, 100, 150, 150)]
+}
+    set values [lmap backend {interp compile} { asValue $dir p.bot $backend }]
+    list [llength [lsort -unique $values]] [lindex $values 0]
+} -result {1 {[["nothing", "nothing", "tap"], ["nothing", "nothing", "left"], ["nothing", "nothing", "right"], ["nothing", "nothing", "up"], ["nothing", "nothing", "down"], ["nothing", "nothing", "right"]]}}
+
+test as-gesture-exactly-once {sdlscreen::gesture: one gesture per finger however long it moves; a second finger cancels the gesture (nothing when either lifts); a cancel or a reset drops it; another finger's up is ignored} -body {
+    set dir [asDir gesture-once]
+    asModules $dir
+    asWrite $dir/p.bot {import std::list
+import sdlscreen::gesture
+
+fn count(steps: List[sdlscreen::gesture::Step]) -> int:
+    fold s in steps with intermediate n 0:
+        match s.gesture:
+            case sdlscreen::gesture::Gesture::Nothing:
+                n
+            case sdlscreen::gesture::Gesture::Tap {x, y}:
+                n + 1
+            case sdlscreen::gesture::Gesture::Swipe {direction}:
+                n + 1
+
+# A long swipe: thirty motions, then the up.
+fn long() -> int:
+    start = sdlscreen::gesture::idle().down(1, 0, 0)
+    moved = fold i from 1 to 31 with intermediate t start.tracker:
+        t.motion(1, i * 10, 0).tracker
+    count([start, moved.up(1, 300, 0, 30)])
+
+# Two fingers: the second's down cancels; both ups give nothing.
+fn two() -> int:
+    a = sdlscreen::gesture::idle().down(1, 0, 0)
+    b = a.tracker.down(2, 50, 50)
+    c = b.tracker.up(2, 50, 300, 30)
+    d = c.tracker.up(1, 300, 0, 30)
+    count([a, b, c, d])
+
+# A cancel of the tracked finger, then its up: nothing.
+fn cancelled() -> int:
+    a = sdlscreen::gesture::idle().down(1, 0, 0)
+    b = a.tracker.cancel(1)
+    c = b.tracker.up(1, 300, 0, 30)
+    count([a, b, c])
+
+# A reset (the background) mid-gesture: nothing.
+fn reset() -> int:
+    a = sdlscreen::gesture::idle().down(1, 0, 0)
+    count([a, a.tracker.reset().up(1, 300, 0, 30)])
+
+# Another finger's up while one is tracked: ignored; the tracked one's up counts.
+fn other() -> int:
+    a = sdlscreen::gesture::idle().down(1, 0, 0)
+    b = a.tracker.up(9, 300, 0, 30)
+    c = b.tracker.up(1, 300, 0, 30)
+    count([a, b, c])
+
+[long(), two(), cancelled(), reset(), other()]
+}
+    set values [lmap backend {interp compile} { asValue $dir p.bot $backend }]
+    list [llength [lsort -unique $values]] [lindex $values 0]
+} -result {1 {[1, 0, 0, 0, 1]}}
+
+test as-layout {the 2048 layout from the drawable size alone: a square board inside the safe area, the header and message line inside it, the restart button beside the score, sixteen cells inside the board, for a phone, a tablet, landscape and a tiny screen} -body {
+    set dir [asDir layout]
+    asModules $dir
+    file copy [file join $::projectRoot examples android-sdl3 2048 board.bot] $dir
+    asWrite $dir/p.bot {import board
+import sdlscreen::layout
+
+fn inside?(a: sdlscreen::layout::Rect, b: sdlscreen::layout::Rect) -> bool:
+    a.x >= b.x and a.y >= b.y and a.x + a.w <= b.x + b.w and a.y + a.h <= b.y + b.h
+
+nomethod fn ok(w: int, h: int) -> bool:
+    safe = sdlscreen::layout::whole(w, h)
+    l = board::layout(w, h, safe)
+    cells = loop i from 0 to 16:
+        l.tile_rect(i.shift_right(2), i.mod(4)).inside?(l.board)
+    every = fold c in cells with intermediate all true:
+        all and c
+    l.board.w == l.board.h and l.board.w > 0 and l.board.inside?(safe) and l.score.inside?(safe) and l.restart.inside?(safe) and l.message.inside?(safe) and l.restart.x > l.score.x and every
+
+[ok(320, 640), ok(1080, 2400), ok(2048, 1536), ok(800, 480), ok(120, 160)]
+}
+    asValue $dir p.bot interp
+} -result {[true, true, true, true, true]}
+
+test as-input {the 2048 input mapping: a swipe is a move of its direction, a tap on the restart button a restart, any other tap nothing; the direction codes are game2048_play's} -body {
+    set dir [asDir input]
+    asModules $dir
+    foreach f {board.bot input.bot} { file copy [file join $::projectRoot examples android-sdl3 2048 $f] $dir }
+    asWrite $dir/p.bot {import board
+import game2048
+import input
+import sdlscreen::gesture
+import sdlscreen::layout
+import std::int
+import std::str
+
+fn name(a: input::Action) -> str:
+    match a:
+        case input::Action::Nothing:
+            "nothing"
+        case input::Action::Restart:
+            "restart"
+        case input::Action::Move {direction}:
+            "move ".concat(input::code(direction).to_string())
+
+l = board::layout(320, 640, sdlscreen::layout::whole(320, 640))
+r = l.restart
+gestures = [sdlscreen::gesture::Gesture::Swipe {direction: sdlscreen::gesture::Direction::Left}, sdlscreen::gesture::Gesture::Swipe {direction: sdlscreen::gesture::Direction::Right}, sdlscreen::gesture::Gesture::Swipe {direction: sdlscreen::gesture::Direction::Up}, sdlscreen::gesture::Gesture::Swipe {direction: sdlscreen::gesture::Direction::Down}, sdlscreen::gesture::Gesture::Tap {x: r.x + 2, y: r.y + 2}, sdlscreen::gesture::Gesture::Tap {x: l.board.x + 5, y: l.board.y + 5}, sdlscreen::gesture::Gesture::Nothing]
+loop g in gestures:
+    name(g.action(l))
+}
+    asValue $dir p.bot interp
+} -result {["move 0", "move 1", "move 2", "move 3", "restart", "nothing", "nothing"]}
+
+test as-play-oracle {game2048_play is the React Native facade's rules, unchanged: its oracle of the self-test's game (seed 42, 400 moves) is the facade's, 401 snapshots, digest fbee79e6} -body {
+    set source [asRead [file join $::projectRoot examples react-native app src directions.ts]]
+    regexp {export const seed = (\d+);} $source -> seed
+    regexp {export const directions =\s*'([0-3]+)';} $source -> directions
+    set ours [exec [info nameofexecutable] [file join $::asAudit tools oracle.tcl] $seed $directions]
+    set facade [exec [info nameofexecutable] [file join $::projectRoot audit react-native-2048 tools oracle.tcl] $seed $directions]
+    set h 0x811c9dc5
+    foreach c [split $ours ""] { set h [expr {(($h ^ [scan $c %c]) * 0x01000193) & 0xffffffff}] }
+    list [llength [split $ours \n]] [expr {$ours eq $facade}] [format %08x $h]
+} -result {401 1 fbee79e6}
+
+# --------------------------------------------------------------------------
+# The applications on Linux, under a host shaped like SDL's Android bootstrap
+
+# An application of examples/android-sdl3/SRC staged with its modules and
+# the linux-x86_64 SDL3 binding (a package of the application), built as
+# the application library LIB with its Linux entry, and the touch host
+# linked against it: the directory.
+proc asApp {src lib} {
+    set key app-$src
+    if {[info exists ::asApps($key)]} { return $::asApps($key) }
+    set dir [asDir $key]
+    foreach f [glob -directory [file join $::projectRoot examples android-sdl3 $src] *.bot] { file copy $f $dir }
+    asModules $dir
+    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target linux-x86_64 -into $dir -package 1
+    set sdl [cffi::sdl3Dir]
+    lassign [asExec [info nameofexecutable] $::asMain -warnings error -L $sdl -emit-native-library $lib -application -out [file join $dir lib] [file join $dir main-linux.bot]] status out
+    if {$status != 0} { error "$lib:\n$out" }
+    lassign [asExec cc -O2 -Wall -Wextra -Werror -I [file join $dir lib] -I [file join [asSdlSources] include] \
+        "-DAPP_HEADER=\"$lib.h\"" -DAPP_PREFIX=$lib -o [file join $dir lib host] [file join $::asAudit linux touch_host.c] \
+        -L [file join $dir lib] -l$lib -L $sdl -lSDL3 -Wl,-rpath,[file join $dir lib]:$sdl -pthread] status out
+    if {$status != 0} { error "host:\n$out" }
+    set ::asApps($key) $dir
+    return $dir
+}
+
+# Runs the application of DIR under the host with the event SCRIPT and
+# ARGS, its private storage under DATA: {STATUS OUTPUT}.
+proc asRun {dir script data args} {
+    asWrite [file join $dir script.txt] $script
+    set env [list env SDL_VIDEO_DRIVER=dummy SCRIPT=[file join $dir script.txt] XDG_DATA_HOME=$data HOME=$data]
+    foreach e [array names ::env BOTLISH_NATIVE_GC_STRESS] { lappend env $e=$::env($e) }
+    return [asExec {*}$env timeout 60 [file join $dir lib host] app {*}$args]
+}
+
+# A swipe script line toward D (0 left, 1 right, 2 up, 3 down) across the
+# middle of the board.
+proc asSwipe {d} {
+    return [dict get {0 {swipe 1 0.8 0.55 0.2 0.55} 1 {swipe 1 0.2 0.55 0.8 0.55} 2 {swipe 1 0.5 0.75 0.5 0.35} 3 {swipe 1 0.5 0.35 0.5 0.75}} $d]
+}
+
+test as-counter-host {the counter under the bootstrap's shape: SDL_main on SDLThread (SDL's main thread); a tap counted once each, a swipe and a two-finger gesture not at all, a cancelled finger nothing; the background and the foreground keep the count; the back key ends the program, which returns 0} -constraints {sdlHost} -body {
+    set dir [asApp counter counter]
+    lassign [asRun $dir {ready
+tap 1 0.5 0.5
+wait 50
+swipe 2 0.1 0.5 0.9 0.5
+wait 50
+down 3 0.5 0.5
+down 4 0.6 0.6
+up 4 0.6 0.6
+up 3 0.5 0.5
+wait 50
+down 5 0.5 0.5
+cancel 5
+up 5 0.5 0.5
+wait 50
+background
+wait 100
+foreground
+wait 50
+tap 6 0.4 0.4
+wait 100
+back
+} [asDir counter-data]] status out
+    list $status [regexp {SDL_main on thread SDLThread, SDL_IsMainThread 1} $out] [regexp -all -line {^counter: taps} $out] \
+        [regexp {counter: taps 2\n} $out] [regexp {counter: back\ncounter: done 2 frames} $out] [regexp {the application returned 0} $out]
+} -result {0 1 2 1 1 1}
+
+test as-2048-host {the 2048 game under the bootstrap's shape: seed 42's new game and every swipe's snapshot the interpreter's (game2048_play's), the background and the foreground in between; the restart button a new game; the game saved after every change; the back key saves and ends the program} -constraints {sdlHost} -body {
+    set dir [asApp 2048 game]
+    set data [asDir 2048-data]
+    set plays 0132013202310231
+    set script "ready\n"
+    foreach d [split [string range $plays 0 7] ""] { append script "[asSwipe $d]\nwait 30\n" }
+    append script "background\nwait 100\nforeground\nwait 50\n"
+    foreach d [split [string range $plays 8 end] ""] { append script "[asSwipe $d]\nwait 30\n" }
+    append script "tap 2 0.74 0.07\nwait 50\nback\n"
+    lassign [asRun $dir $script $data --seed 42 --fresh] status out
+    set oracle [split [exec [info nameofexecutable] [file join $::asAudit tools oracle.tcl] 42 $plays] \n]
+    regexp -line {^2048: new (.*)$} $out -> start
+    set moves [regexp -all -inline -line {^2048: move [0-3] (.*)$} $out]
+    set snapshots [lmap {- s} $moves {set s}]
+    regexp -line {^2048: restart (.*)$} $out -> restarted
+    set saved [asRead [file join $data Botlish 2048 game.txt]]
+    list $status [expr {$start eq [lindex $oracle 0]}] [llength $snapshots] [expr {$snapshots eq [lrange $oracle 1 end]}] \
+        [regexp {2048: background\n2048: foreground} $out] [expr {$saved eq $restarted}] [regexp {2048: back\n} $out] \
+        [llength [glob -nocomplain -directory [file join $data Botlish 2048] *.tmp]]
+} -result {0 1 16 1 1 1 1 0}
+
+test as-2048-restore {persistence: a later start restores the saved game; --fresh ignores it; an invalid save, a save of another version and an empty file are fresh games, never failures; a save interrupted before its rename (a stray game.txt.tmp) leaves the previous game whole} -constraints {sdlHost} -body {
+    set dir [asApp 2048 game]
+    set data [asDir 2048-restore]
+    set script "ready\nwait 50\nback\n"
+    lassign [asRun $dir $script $data --seed 9 --fresh] - first
+    regexp -line {^2048: new (.*)$} $first -> started
+    lassign [asRun $dir $script $data] - second
+    regexp -line {^2048: restored (.*)$} $second -> restored
+    lassign [asRun $dir $script $data --fresh --seed 10] - third
+    set file [file join $data Botlish 2048 game.txt]
+    set results [list [expr {$restored eq $started}] [regexp {2048: new} $third]]
+    foreach bad [list "garbage" "2049/1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0" "" "2048/1 0 0 0 0 0 1 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2"] {
+        asWrite $file $bad
+        lassign [asRun $dir $script $data --seed 11] status out
+        lappend results $status [regexp {2048: invalid save ignored\n2048: new} $out]
+    }
+    # An interrupted save: the temporary file written, the rename not done.
+    lassign [asRun $dir $script $data --seed 12 --fresh] - fourth
+    regexp -line {^2048: new (.*)$} $fourth -> kept
+    asWrite $file.tmp "2048/1 1 2 3"
+    lassign [asRun $dir $script $data] - fifth
+    regexp -line {^2048: restored (.*)$} $fifth -> afterwards
+    lappend results [expr {$afterwards eq $kept}]
+} -result {1 1 0 1 0 1 0 1 0 1 1}
+
+test as-2048-frames {what the 2048 game draws is the game it holds: every frame SDL's offscreen driver saves, decoded, shows each cell in its tile's color (screen.py, an independent statement of the palette); a frame checked against another state fails} -constraints {sdlHost} -body {
+    set dir [asApp 2048 game]
+    set frames [asDir 2048-frames]
+    set script "ready\n[asSwipe 0]\nwait 50\n[asSwipe 3]\nwait 50\nback\n"
+    asWrite [file join $dir script.txt] $script
+    set old [pwd]
+    cd $frames
+    try {
+        lassign [asExec env SDL_VIDEO_DRIVER=offscreen SDL_VIDEO_OFFSCREEN_SAVE_FRAMES=1 SCRIPT=[file join $dir script.txt] \
+            XDG_DATA_HOME=$frames HOME=$frames timeout 60 [file join $dir lib host] app --seed 42 --fresh] status out
+    } finally {
+        cd $old
+    }
+    regexp -line {^(2048: layout .*)$} $out -> layout
+    set states [list {*}[lmap {- s} [regexp -all -inline -line {^2048: new (.*)$} $out] {set s}] {*}[lmap {- s} [regexp -all -inline -line {^2048: move [0-3] (.*)$} $out] {set s}]]
+    set bmps [lsort [glob -directory $frames *.bmp]]
+    set results [list $status [llength $states]]
+    # The first frame is the new game's, the last the last move's.
+    foreach {bmp state} [list [lindex $bmps 0] [lindex $states 0] [lindex $bmps end] [lindex $states end]] {
+        exec python3 -I [file join $::asAudit tools bmp2png.py] $bmp $bmp.png
+        lappend results [lindex [asExec python3 -I [file join $::asAudit tools screen.py] $bmp.png $layout $state] 0]
+    }
+    lappend results [lindex [asExec python3 -I [file join $::asAudit tools screen.py] [lindex $bmps 0].png $layout [lindex $states end]] 0]
+} -result {0 3 0 0 1}
+
+test as-gc-stress {both applications under BOTLISH_NATIVE_GC_STRESS=1: the counter's taps and the 2048 game's snapshots the same} -constraints {sdlHost} -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set counter [asApp counter counter]
+        lassign [asRun $counter "ready\ntap 1 0.5 0.5\nwait 200\ntap 2 0.5 0.5\nwait 200\nback\n" [asDir gc-counter]] cs cout
+        set game [asApp 2048 game]
+        lassign [asRun $game "ready\n[asSwipe 0]\nwait 300\n[asSwipe 3]\nwait 300\nback\n" [asDir gc-game] --seed 42 --fresh] gs gout
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    set oracle [split [exec [info nameofexecutable] [file join $::asAudit tools oracle.tcl] 42 03] \n]
+    list $cs [regexp {counter: taps 2} $cout] $gs [expr {[lmap {- s} [regexp -all -inline -line {^2048: move [0-3] (.*)$} $gout] {set s}] eq [lrange $oracle 1 end]}]
+} -result {0 1 0 1}
+
+# --------------------------------------------------------------------------
+# The botlish_android tool's refusals, run directly with requests of its own
+
+# The tool, built from integrations/android (as package.sh builds it).
+proc asTool {} {
+    if {[info exists ::asToolPath]} { return $::asToolPath }
+    set dir [asDir tool]
+    set src [file join $::projectRoot integrations android]
+    exec cc -std=c99 -O2 -Wall -Wextra -Werror -o $dir/embed $src/src/embed.c
+    set old [pwd]
+    cd [file join $src templates]
+    try {
+        exec $dir/embed $dir/templates.h {*}[lsort [glob *.in]]
+    } finally {
+        cd $old
+    }
+    exec cc -std=c99 -O2 -Wall -Wextra -Werror -I$dir -I$src/src -o $dir/android $src/src/main.c
+    set ::asToolPath $dir/android
+    return $::asToolPath
+}
+
+# A project with sdl3 and the target support package installed for
+# android-aarch64, and an application library built from the counter: the
+# project directory (lib/ holds the library).
+proc asProject {} {
+    if {[info exists ::asProjectDir]} { return $::asProjectDir }
+    set dir [asDir project]
+    asWrite $dir/botlish.json "\{\"schema\": 1, \"dependencies\": \{\}\}\n"
+    foreach f {counter.bot main.bot} { file copy [file join $::projectRoot examples android-sdl3 counter $f] $dir }
+    foreach p {sdlscreen android_io botlish_target_android_aarch64} {
+        lassign [asExec [info nameofexecutable] $::asMain add $p -project $dir -repository $::asPackages -target android-aarch64] status out
+        if {$status != 0} { error "add $p:\n$out" }
+    }
+    set old [pwd]
+    cd $dir
+    try {
+        lassign [asExec [info nameofexecutable] $::asMain -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 \
+            -emit-native-library counter -application -out lib main.bot] status out
+    } finally {
+        cd $old
+    }
+    if {$status != 0} { error "library:\n$out" }
+    set ::asProjectDir $dir
+    return $dir
+}
+
+# A copy of the project (its library and its installation) to damage.
+proc asCopy {} {
+    set dir [asDir copy]
+    file delete $dir
+    file copy [asProject] $dir
+    return $dir
+}
+
+# Runs the tool on PROJECT's library (MANIFEST, default lib/counter.manifest.json)
+# into OUT with TARGET and ARGS, as `botlish tool` would: {STATUS OUTPUT}.
+proc asRunTool {project out args} {
+    set manifest [file join $project lib counter.manifest.json]
+    set target android-aarch64
+    if {[dict exists $args -manifest]} { set manifest [dict get $args -manifest]; dict unset args -manifest }
+    if {[dict exists $args -target]} { set target [dict get $args -target]; dict unset args -target }
+    set words [dict get $args -words]
+    set request [file join [file dirname $out] request-[incr ::asCounter].json]
+    set q {apply {{s} {return "\"[string map {\\ \\\\ \" \\\"} $s]\""}}}
+    asWrite $request "\{\"protocol\": 1, \"kind\": \"botlish-tool-request\", \"output\": [{*}$q $out], \"target\": [{*}$q $target], \"host\": \"linux-x86_64\", \"project\": [{*}$q $project], \"artifacts\": \[\{\"kind\": \"native-library\", \"manifest\": [{*}$q $manifest]\}\], \"diagnostics\": [{*}$q $request.diag]\}"
+    return [asExec env BOTLISH_TOOL_REQUEST=$request [asTool] {*}$words]
+}
+
+# The tool's refusal of a damaged PROJECT: {STATUS CODE FILES-LEFT}.
+proc asRefusal {project args} {
+    set out [file join [asDir out] android]
+    lassign [asRunTool $project $out {*}$args] status output
+    regexp {\((AN-[A-Z0-9-]+)\)} $output -> code
+    if {![info exists code]} { set code "?: $output" }
+    set left [expr {[file isdirectory $out] ? [llength [glob -nocomplain -directory $out *]] : 0}]
+    return [list $status $code $left]
+}
+
+# The file PATH with the first match of the regular expression PATTERN
+# replaced by REPLACEMENT (regsub's).
+proc asEditJson {path pattern replacement} {
+    set text [asRead $path]
+    if {![regsub $pattern $text $replacement text]} { error "asEditJson: no $pattern in $path" }
+    asWrite $path $text
+}
+
+# The manifest of PROJECT changed by MAP (string map pairs), and its library
+# kept: a manifest that states something else.
+proc asManifest {project map} {
+    set path [file join $project lib counter.manifest.json]
+    asWrite $path [string map $map [asRead $path]]
+}
+
+test as-tool-refusals {botlish_android refuses, before writing anything, what it cannot rely on: each refusal a status, an AN- code, and an output directory left empty} -constraints {androidTool} -body {
+    set results {}
+    set good [list -words {generate}]
+    # 1. An ordinary library (schema 2): no host-startable entry.
+    set p [asCopy]
+    asWrite $p/lib.bot "exported c fn one() -> int:\n    1\n"
+    set old [pwd]; cd $p
+    exec [info nameofexecutable] $::asMain -target android-aarch64 -target-support botlish_target_android_aarch64 -emit-native-library counter -out lib lib.bot
+    cd $old
+    lappend results ordinary [asRefusal $p {*}$good]
+    # 2. Another target than the request's.
+    lappend results target [asRefusal [asProject] -target linux-x86_64 {*}$good]
+    # 3. A stale shared object (its digest is not the manifest's).
+    set p [asCopy]
+    set f [open $p/lib/libcounter.so a]; puts -nonewline $f x; close $f
+    lappend results stale-shared [asRefusal $p {*}$good]
+    # 4. A stale header.
+    set p [asCopy]
+    set f [open $p/lib/counter.h a]; puts -nonewline $f "\n"; close $f
+    lappend results stale-header [asRefusal $p {*}$good]
+    # 5. An entry that is not NAME_main.
+    set p [asCopy]
+    asEditJson $p/lib/counter.manifest.json {("symbol":\s*")counter_main"} {\1counter_start"}
+    lappend results entry [asRefusal $p {*}$good]
+    # 6. Another runtime ABI than the target support package's.
+    set p [asCopy]
+    asEditJson $p/lib/counter.manifest.json {("targetSupport":\s*\{\s*"package":\s*"[^"]*",\s*"runtimeAbi":\s*")[0-9a-f]{16}} {\10123456789abcdef}
+    lappend results runtime-abi [asRefusal $p {*}$good]
+    # 7. An undeclared native dependency.
+    set p [asCopy]
+    asEditJson $p/lib/counter.manifest.json {("dependencies":\s*\[)} {\1{"kind": "library", "name": "ssl", "linkage": "default", "link": "-lssl"}, }
+    lappend results dependency [asRefusal $p {*}$good]
+    # 8. No SDL3 package installed for android-aarch64.
+    set p [asCopy]
+    file delete -force $p/.bot_modules/.targets/android-aarch64/sdl3
+    lappend results no-sdl3 [asRefusal $p {*}$good]
+    # 9. Linux's libSDL3.so in the package (the descriptor's digest then
+    #    stated for it too: the ELF refuses it).
+    set p [asCopy]
+    set view $p/.bot_modules/.targets/android-aarch64/sdl3
+    exec cp -L [file join [cffi::sdl3Dir] libSDL3.so.0] $view/native/libSDL3.so
+    lappend results linux-sdl-digest [asRefusal $p {*}$good]
+    set sha [lindex [exec sha256sum $view/native/libSDL3.so] 0]
+    asEditJson $view/android/sdl3-android.json {("library":\s*\{\s*"path":\s*"native/libSDL3.so",\s*"soname":\s*"libSDL3.so",\s*"sha256":\s*")[0-9a-f]{64}} "\\1$sha"
+    lappend results linux-sdl-elf [asRefusal $p {*}$good]
+    # 10. A binding of another SDL than the library's.
+    set p [asCopy]
+    set version $p/.bot_modules/.targets/android-aarch64/sdl3/sdl3/version.bot
+    asWrite $version [string map {c_int(3004018) c_int(3004017)} [asRead $version]]
+    lappend results binding [asRefusal $p {*}$good]
+    # 11. A Java class of SDL's changed.
+    set p [asCopy]
+    set java $p/.bot_modules/.targets/android-aarch64/sdl3/android/java/org/libsdl/app/SDLActivity.java
+    set f [open $java a]; puts $f "// changed"; close $f
+    lappend results java [asRefusal $p {*}$good]
+    # 12. A shared object with 4 KiB segments (its manifest digest updated:
+    #     only the ELF can tell).
+    set p [asCopy]
+    exec python3 -I -c {
+import struct, sys
+p = sys.argv[1]
+d = bytearray(open(p, "rb").read())
+phoff, = struct.unpack_from("<Q", d, 32)
+phentsize, phnum = struct.unpack_from("<HH", d, 54)
+for i in range(phnum):
+    o = phoff + i * phentsize
+    if struct.unpack_from("<I", d, o)[0] == 1:
+        struct.pack_into("<Q", d, o + 48, 4096)
+open(p, "wb").write(d)
+} $p/lib/libcounter.so
+    set sha [lindex [exec sha256sum $p/lib/libcounter.so] 0]
+    asEditJson $p/lib/counter.manifest.json {("shared":\s*")[0-9a-f]{64}} "\\1$sha"
+    lappend results 4k [asRefusal $p {*}$good]
+    # 13. Names: an application ID, a display name, an Activity class.
+    foreach {what words} {id {generate -application-id org} id-keyword {generate -application-id org.class.x} id-shell {generate -application-id org.x;rm} name-control "generate -name \x01x" activity {generate -activity SDLActivity}} {
+        lappend results $what [asRefusal [asProject] -words $words]
+    }
+    # 14. An unknown command, an API level out of range.
+    lappend results command [asRefusal [asProject] -words {publish}]
+    lappend results api-low [asRefusal [asProject] -words {generate -android-api 20}]
+    lappend results api-high [asRefusal [asProject] -words {generate -android-api 99}]
+    # 15. Assets: a link, a hidden file.
+    set assets [asDir assets]
+    file link -symbolic $assets/escape /etc/passwd
+    lappend results asset-link [asRefusal [asProject] -words [list generate -assets $assets]]
+    set assets [asDir assets2]
+    asWrite $assets/.hidden x
+    lappend results asset-hidden [asRefusal [asProject] -words [list generate -assets $assets]]
+    set results
+} -result {ordinary {1 AN-NOT-APPLICATION 0} target {1 AN-TARGET 0} stale-shared {1 AN-ARTIFACT 0} stale-header {1 AN-ARTIFACT 0} entry {1 AN-ENTRY 0} runtime-abi {1 AN-RUNTIME-ABI 0} dependency {1 AN-DEPENDENCY 0} no-sdl3 {1 AN-SDL3 0} linux-sdl-digest {1 AN-SDL3 0} linux-sdl-elf {1 AN-ELF 0} binding {1 AN-SDL3 0} java {1 AN-SDL3 0} 4k {1 AN-ELF 0} id {1 AN-NAME 0} id-keyword {1 AN-NAME 0} id-shell {1 AN-NAME 0} name-control {1 AN-NAME 0} activity {1 AN-NAME 0} command {2 AN-USAGE 0} api-low {2 AN-USAGE 0} api-high {1 AN-ANDROID-API 0} asset-link {1 AN-ASSETS 0} asset-hidden {1 AN-ASSETS 0}}
+
+test as-tool-output {the output directory: one inside .bot_modules, a non-empty one the tool did not make, its own project without -replace -- all refused and left as they were; -replace regenerates exactly its record's files; build refuses a directory it did not generate and a missing SDK} -constraints {androidTool} -body {
+    set p [asProject]
+    set results {}
+    set out [file join [asDir out] android]
+    lappend results [lindex [asRunTool $p [file join $p .bot_modules x] -words {generate}] 0]
+    file mkdir $out
+    asWrite $out/mine.txt "someone's"
+    lassign [asRunTool $p $out -words {generate}] status output
+    lappend results $status [regexp {AN-OUTPUT} $output] [file exists $out/mine.txt]
+    set out [file join [asDir out2] android]
+    lappend results [lindex [asRunTool $p $out -words {generate}] 0]
+    lassign [asRunTool $p $out -words {generate}] status output
+    lappend results $status [regexp {pass -replace} $output]
+    lappend results [lindex [asRunTool $p $out -words {generate -replace -application-id org.example.other}] 0]
+    lappend results [file exists $out/app/src/main/java/org/botlish/counter/MainActivity.java] [file exists $out/app/src/main/java/org/example/other/MainActivity.java]
+    set empty [file join [asDir out3] android]
+    lassign [asRunTool $p $empty -words {build}] status output
+    lappend results $status [regexp {AN-OUTPUT} $output]
+    set saved [array get ::env ANDROID_HOME]
+    unset -nocomplain ::env(ANDROID_HOME)
+    lassign [asRunTool $p $out -words {build}] status output
+    array set ::env $saved
+    lappend results $status [regexp {AN-TOOLCHAIN} $output]
+} -result {1 1 1 1 0 1 1 0 0 1 1 1 1 1}
+
+test as-tool-generate {what the tool generates: deterministic (twice the same bytes), generic (no word of 2048 in the tool or the counter's project), the display name escaped for Android's resources, the application library and libSDL3.so the packages' bytes, SDL's Java classes beside the generated Activity naming SDL3, the library and main; -intent-arguments adds the test configuration's arguments, absent otherwise} -constraints {androidTool} -body {
+    set p [asProject]
+    set a [file join [asDir gen-a] android]
+    set b [file join [asDir gen-b] android]
+    set name "Test & <App> \"quoted\" 'single' \\ \$(rm -rf /)"
+    lassign [asRunTool $p $a -words [list generate -name $name]] s1 o1
+    lassign [asRunTool $p $b -words [list generate -name $name]] s2 o2
+    set record [asRead $a/botlish-android.json]
+    set files [regexp -all -inline {"(app/[^"]*|[^"]*\.gradle|gradlew|README.md|LICENSES/SDL.txt|gradle/[^"]*)"} $record]
+    set same 1
+    foreach {- f} $files {
+        if {[exec sha256sum $a/$f] ne [string map [list $b $a] [exec sha256sum $b/$f]]} { set same 0 }
+    }
+    set strings [asRead $a/app/src/main/res/values/strings.xml]
+    set activity [asRead $a/app/src/main/java/org/botlish/counter/MainActivity.java]
+    # (The milestone's own document name is no word of the game.)
+    set source [string map {RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md DOC} [exec cat {*}[glob [file join $::projectRoot integrations android src *.c] [file join $::projectRoot integrations android templates *.in]]]]
+    set generated [exec cat {*}[lmap {- f} $files {if {[string match *.so $f] || [string match *.jar $f] || [string match *.png $f]} continue; set f $a/$f}]]
+    set view $p/.bot_modules/.targets/android-aarch64/sdl3
+    set t [file join [asDir gen-t] android]
+    asRunTool $p $t -words {generate -intent-arguments}
+    list $s1 $s2 $same [regexp -nocase {2048|\mtiles?\M|\mboard\M} $source] [regexp -nocase {2048|\mtiles?\M|\mboard\M} $generated] \
+        [regexp {<string name="app_name">Test &amp; &lt;App&gt; \\"quoted\\" \\'single\\' \\\\ \$\(rm -rf /\)</string>} $strings] \
+        [expr {[exec sha256sum $a/app/src/main/botlish/arm64-v8a/libcounter.so] eq [string map [list $p/lib $a/app/src/main/botlish/arm64-v8a] [exec sha256sum $p/lib/libcounter.so]]}] \
+        [expr {[lindex [exec sha256sum $a/app/src/main/botlish/arm64-v8a/libSDL3.so] 0] eq [lindex [exec sha256sum $view/native/libSDL3.so] 0]}] \
+        [file exists $a/app/src/main/java/org/libsdl/app/SDLActivity.java] [regexp {"SDL3", "counter", "main"} $activity] \
+        [regexp {getArguments} $activity] [regexp {getArguments} [asRead $t/app/src/main/java/org/botlish/counter/MainActivity.java]]
+} -result {0 0 1 0 0 1 1 1 1 1 0 1}
+
+test as-tool-not-run-by-install {installing botlish_android runs nothing: its program is an installed file without an execute bit, and `botlish tools` lists the tool without running it} -constraints {androidTool} -body {
+    set dir [asDir install]
+    asWrite $dir/botlish.json "\{\"schema\": 1, \"dependencies\": \{\}\}\n"
+    lassign [asExec [info nameofexecutable] $::asMain add botlish_android -project $dir -repository $::asPackages] status out
+    set program $dir/.bot_modules/botlish_android/tools/linux-x86_64/android
+    lassign [asExec [info nameofexecutable] $::asMain tools -project $dir] lstatus listing
+    list $status [file exists $program] [file executable $program] $lstatus [regexp {android} $listing]
+} -result {0 1 0 0 1}
+
+foreach dir [glob -nocomplain -directory [temporaryDirectory] as-[pid]-*] {
+    file delete -force $dir
+}
+cleanupTests

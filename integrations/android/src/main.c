@@ -324,7 +324,7 @@ static void mkdirs(const char *path) {
 }
 
 /* The files written, relative to the output directory, in order. */
-#define MAX_WRITTEN 2048
+#define MAX_WRITTEN 4096
 static char *written[MAX_WRITTEN];
 static int nwritten = 0;
 

@@ -35,6 +35,8 @@
  *   lowmemory          SDL_EVENT_LOW_MEMORY
  *   resize             SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
  *   reset              SDL_EVENT_RENDER_DEVICE_RESET
+ *   back               SDL_EVENT_KEY_DOWN and _KEY_UP of SDL_SCANCODE_AC_BACK
+ *                      (Android's back key, which SDL3 leaves to the program)
  *   quit               SDL_EVENT_QUIT
  *   terminate          SDL_EVENT_QUIT then SDL_EVENT_TERMINATING (Android's
  *                      Activity destruction)
@@ -121,6 +123,16 @@ static void push_finger(Uint32 type, long finger, float x, float y) {
     if (!SDL_PushEvent(&e)) fprintf(stderr, "host: SDL_PushEvent failed: %s\n", SDL_GetError());
 }
 
+static void push_key(Uint32 type, SDL_Scancode code) {
+    SDL_Event e;
+    memset(&e, 0, sizeof e);
+    e.type = type;
+    e.key.timestamp = now_ns();
+    e.key.scancode = code;
+    e.key.down = type == SDL_EVENT_KEY_DOWN;
+    if (!SDL_PushEvent(&e)) fprintf(stderr, "host: SDL_PushEvent failed: %s\n", SDL_GetError());
+}
+
 static void run_script(const char *path) {
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -165,6 +177,9 @@ static void run_script(const char *path) {
             push_type(SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED);
         } else if (!strcmp(word, "reset")) {
             push_type(SDL_EVENT_RENDER_DEVICE_RESET);
+        } else if (!strcmp(word, "back")) {
+            push_key(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_AC_BACK);
+            push_key(SDL_EVENT_KEY_UP, SDL_SCANCODE_AC_BACK);
         } else if (!strcmp(word, "quit")) {
             push_type(SDL_EVENT_QUIT);
         } else if (!strcmp(word, "terminate")) {

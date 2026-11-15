@@ -193,7 +193,7 @@ proc RnProject {name} {
         game examples/react-native/2048/game.bot
         textkit examples/react-native/textkit/textkit.bot
     } $name]
-    set packages [dict get {game game2048 textkit {}} $name]
+    set packages [dict get {game {game2048 game2048_play} textkit {}} $name]
     set dir [rnDir project-$name]
     foreach side {android host} {
         rnWrite $dir/$side/botlish.json "\{\"schema\": 1, \"dependencies\": \{\}\}\n"

@@ -21,6 +21,9 @@
 #       NDK's clang as the target C compiler) and its schema 2 descriptor
 #   OUT/repo/game2048-0.1.0.botpkg
 #       examples/games/2048/game2048.bot, unchanged
+#   OUT/repo/game2048_play-0.1.0.botpkg
+#       examples/games/2048/game2048_play.bot, the played game's rules over
+#       it (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md)
 #   OUT/build.txt
 #       the inputs: rustc, cargo, the NDK's revision, the Rust target, the
 #       API level, the runtime ABI and the archive's SHA-256
@@ -92,7 +95,10 @@ JSON
 mkdir -p "$stage/game2048"
 cp "$root/audit/external-tools/packages/game2048/botlish.json" "$stage/game2048/"
 cp "$root/examples/games/2048/game2048.bot" "$stage/game2048/"
-for package in botlish_target_android_aarch64 game2048; do
+mkdir -p "$stage/game2048_play"
+cp "$root/audit/external-tools/packages/game2048_play/botlish.json" "$stage/game2048_play/"
+cp "$root/examples/games/2048/game2048_play.bot" "$stage/game2048_play/"
+for package in botlish_target_android_aarch64 game2048 game2048_play; do
     "${botlish[@]}" package pack "$stage/$package" -out "$repo" -force
 done
 {

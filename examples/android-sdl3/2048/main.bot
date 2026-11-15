@@ -1,0 +1,12 @@
+# main.bot -- the 2048 application's Android entry: installs Android's IO
+# (logcat, tag Botlish2048) and the SDL screen, runs the application. Built
+# as an application library (-emit-native-library game -application) for
+# android-aarch64; SDLActivity's thread runs it through game_main.
+import android_io
+import app
+import sdlscreen
+
+with context android_io::create_tagged("Botlish2048")
+with context sdlscreen::create()
+
+app::main()

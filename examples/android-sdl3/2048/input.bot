@@ -1,0 +1,57 @@
+# input.bot -- what a gesture means to the 2048 application
+# (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md, "Touch input and
+# gestures"): a pure module. sdlscreen::gesture turns SDL's finger events
+# into at most one gesture per finger lifted; this module maps a gesture to
+# a domain action -- a move in one of four directions, or a restart when a
+# tap lands on the restart button -- and nothing else. The game layer
+# consumes the actions; the rendering never sees a touch.
+import board
+import game2048
+import sdlscreen::gesture
+import sdlscreen::layout
+
+enum Action:
+    Nothing,
+    Move {direction: game2048::Direction},
+    Restart,
+
+# The action of a tap at X, Y on the layout L: the restart button's, or
+# none.
+fn tapped(l: board::Layout, x: int, y: int) -> Action:
+    if l.restart.contains?(x, y):
+        return Action::Restart
+    Action::Nothing
+
+# The action of the gesture G on the layout L.
+fn action(g: sdlscreen::gesture::Gesture, l: board::Layout) -> Action:
+    match g:
+        case sdlscreen::gesture::Gesture::Nothing:
+            Action::Nothing
+        case sdlscreen::gesture::Gesture::Tap {x, y}:
+            l.tapped(x, y)
+        case sdlscreen::gesture::Gesture::Swipe {direction}:
+            match direction:
+                case sdlscreen::gesture::Direction::Left:
+                    Action::Move {direction: game2048::Direction::Left}
+                case sdlscreen::gesture::Direction::Right:
+                    Action::Move {direction: game2048::Direction::Right}
+                case sdlscreen::gesture::Direction::Up:
+                    Action::Move {direction: game2048::Direction::Up}
+                case sdlscreen::gesture::Direction::Down:
+                    Action::Move {direction: game2048::Direction::Down}
+
+# The least movement of a swipe on the layout L: a twelfth of the board.
+fn threshold(l: board::Layout) -> int:
+    sdlscreen::layout::larger(sdlscreen::layout::quotient(l.board.w, 12), 8)
+
+# The direction code (0 left, 1 right, 2 up, 3 down: game2048_play's) of D.
+fn code(d: game2048::Direction) -> int:
+    match d:
+        case game2048::Direction::Left:
+            0
+        case game2048::Direction::Right:
+            1
+        case game2048::Direction::Up:
+            2
+        case game2048::Direction::Down:
+            3

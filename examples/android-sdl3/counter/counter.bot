@@ -2,7 +2,8 @@
 # (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md, "Generic generator
 # acceptance with a second application"): a window, a colored rectangle and
 # a counter that each tap on the screen increments, then a clean exit when
-# the system asks (SDL_EVENT_QUIT or SDL_EVENT_TERMINATING). It is the first
+# the system asks (SDL_EVENT_QUIT or SDL_EVENT_TERMINATING) or the back key
+# is released (the program returns: SDLActivity finishes). It is the first
 # integration gate of the milestone -- SDL initialized, a window and a
 # renderer made, drawn, used and released from Botlish, on SDL's thread --
 # and the proof that the Android generator knows nothing of 2048: it has no
@@ -88,6 +89,9 @@ fn react(state: State, e: sdlscreen::Event, context io: std::io::IO, screen: sdl
             Reaction {done: true, state: state}
         case sdlscreen::Event::Terminating:
             Reaction {done: true, state: state}
+        case sdlscreen::Event::Back:
+            say("back")
+            Reaction {done: true, state: state}
         case sdlscreen::Event::FingerDown {finger, x, y}:
             next(state.stepped(state.tracker.down(finger, x, y)))
         case sdlscreen::Event::FingerMotion {finger, x, y}:
@@ -142,7 +146,7 @@ fn run(state: State, context io: std::io::IO, screen: sdlscreen::Screen) -> Stat
 # closed. Returns whether it ran to its end.
 fn main(context io: std::io::IO, screen: sdlscreen::Screen) -> bool:
     hints = [sdlscreen::nonblocking_pause()]
-    sdlscreen::open("Botlish counter", 480, 800, true, hints):
+    sdlscreen::open("Botlish counter", 480, 800, hints, :sync):
         on sdlscreen::ScreenFailed {call, reason}:
             say("failed ".concat(call).concat(": ").concat(reason))
             return false

@@ -19,6 +19,16 @@ TAG=BotlishCounter
 . "$here/lib.sh"
 
 note "device: $(shellp getprop ro.product.model) sdk $(shellp getprop ro.build.version.sdk) abilist $(shellp getprop ro.product.cpu.abilist) bridge $(shellp getprop ro.dalvik.vm.native.bridge) page $(shellp getconf PAGE_SIZE)"
+# adb root (google_apis images allow it): the app process's maps are root's
+# to read.
+rooted=0
+if adb root >/dev/null 2>&1; then
+    adb wait-for-device
+    sleep 2
+    [[ $(shellp id -u) == 0 ]] && rooted=1
+fi
+note "  adb root: $rooted"
+startCapture
 adb uninstall "$PKG" >/dev/null 2>&1 || true
 adb install -r "$apk" >"$OUT/install.txt" 2>&1 && pass "install" || { fail "install: $(cat "$OUT/install.txt")"; exit 1; }
 adb logcat -c
@@ -37,9 +47,13 @@ note "  pid $pid"
 tid=$(grep "counter: ready" "$OUT/start.log" | head -1 | awk '{print $4}')
 tname=$(shellp cat "/proc/$pid/task/$tid/comm" 2>/dev/null)
 [[ $tname == SDLThread ]] && pass "the program runs on SDLThread (tid $tid)" || fail "the program's thread $tid is \"$tname\", not SDLThread"
-shellp cat "/proc/$pid/maps" | grep -o '[^ /]*\.so$' | grep -E 'libcounter|libSDL3|libmain|libndk_translation|libnb' | sort -u >"$OUT/maps.txt"
-note "  mapped: $(tr '\n' ' ' <"$OUT/maps.txt")"
-grep -q libcounter "$OUT/maps.txt" && pass "libcounter.so is mapped in the application process" || fail "libcounter.so is not mapped"
+if (( rooted )); then
+    shellp cat "/proc/$pid/maps" | grep -o '[^ /]*\.so$' | grep -E 'libcounter|libSDL3|libmain|libndk_translation|libnb' | sort -u >"$OUT/maps.txt"
+    note "  mapped: $(tr '\n' ' ' <"$OUT/maps.txt")"
+    grep -q libcounter "$OUT/maps.txt" && pass "libcounter.so is mapped in the application process" || fail "libcounter.so is not mapped"
+else
+    note "  maps: not readable without adb root (the entry ran: counter_main's lines above)"
+fi
 screenshot first
 
 read -r w h <<<"$(screenSize | tr x ' ')"
@@ -69,20 +83,27 @@ sleep 3
 shellp input tap $cx $cy
 waitFor tap2 "$TAG.*counter: taps 2" 1 20 && pass "back in the foreground: the count kept (taps 2)"
 screenshot resumed
-# Idle in the foreground: waits in SDL_WaitEventTimeout, no busy loop.
+# Idle in the foreground: the program waits in SDL_WaitEventTimeout, no
+# busy loop (its thread, SDLThread, is measured; the process's other
+# threads -- ART's, the renderer's, the native bridge's -- are recorded).
+sleep 5
+threads "$pid" >"$OUT/fg-threads-0.txt"
 t0=$(cpuTicks "$pid")
 sleep 5
 t1=$(cpuTicks "$pid")
-note "  foreground idle: $((t1 - t0)) clock ticks of CPU in 5 s"
-(( t1 - t0 <= 50 )) && pass "the idle app does not spin ($((t1 - t0)) ticks in 5 s)" || fail "the idle app used $((t1 - t0)) ticks in 5 s"
+threads "$pid" >"$OUT/fg-threads-1.txt"
+sdl=$(threadDelta "$OUT/fg-threads-0.txt" "$OUT/fg-threads-1.txt" "$tid")
+note "  foreground idle: $((t1 - t0)) clock ticks of CPU in 5 s; threads: $(busiest "$OUT/fg-threads-0.txt" "$OUT/fg-threads-1.txt")"
+(( ${sdl:-999} <= 25 )) && pass "the idle program does not spin (SDLThread: ${sdl:-?} ticks in 5 s)" || fail "the idle program's thread used ${sdl:-?} ticks in 5 s"
 
-# The back key finishes the Activity: SDL sends QUIT and TERMINATING, the
-# program closes SDL and returns, counter_main drops the VM, SDLThread ends.
+# The back key: SDL3 leaves it to the program (SDLK_AC_BACK), which ends its
+# loop, closes SDL and returns; counter_main drops the VM, and SDLActivity
+# finishes the Activity when SDL_main returns.
 shellp input keyevent KEYCODE_BACK
-waitFor exit "counter_main returned 0" 1 30 && pass "exit: $(grep -o 'counter: done.*' "$OUT/exit.log" | head -1); counter_main returned 0"
+waitFor exit "counter_main returned 0" 1 30 && pass "exit: $(grep -o 'counter: back' "$OUT/exit.log" | head -1); $(grep -o 'counter: done.*' "$OUT/exit.log" | head -1); counter_main returned 0"
 for _ in $(seq 1 20); do [[ -z $(appPid) ]] && break; sleep 1; done
 [[ -z $(appPid) ]] && note "  the process ended" || note "  the process lives on after the Activity finished (Android keeps it cached)"
-adb logcat -d >"$OUT/logcat-all.txt"
+stopCapture
 c=$(crashes "$OUT/logcat-all.txt")
 [[ -z $c ]] && pass "no crash of $PKG" || fail "crash: $c"
 o=$(otherCrashes "$OUT/logcat-all.txt")

@@ -82,7 +82,7 @@ project() { # NAME SOURCE PACKAGE...
     (cd "$dir/host" && "${botlish[@]}" -warnings error -emit-native-library "$name" -out lib "$(basename "$source")")
     cmp "$dir/android/lib/$name.h" "$dir/host/lib/$name.h"
 }
-project game "$root/examples/react-native/2048/game.bot" game2048
+project game "$root/examples/react-native/2048/game.bot" game2048 game2048_play
 project textkit "$root/examples/react-native/textkit/textkit.bot"
 
 step "3. the tool, run explicitly"

@@ -72,7 +72,7 @@ app() {
     printf '{"schema": 1, "dependencies": {}}\n' >"$dir/botlish.json"
     find "$source" -maxdepth 1 -name '*.bot' ! -name 'main-linux.bot' -exec cp {} "$dir/" \;
     local packages=(sdlscreen android_io)
-    [[ $name == game* ]] && packages+=(game2048_play)
+    [[ $name == game* ]] && packages+=(game2048 game2048_play)
     for package in "${packages[@]}" botlish_target_android_aarch64; do
         (cd "$dir" && "${botlish[@]}" add "$package" -repository "$out/repo" -target android-aarch64)
     done
