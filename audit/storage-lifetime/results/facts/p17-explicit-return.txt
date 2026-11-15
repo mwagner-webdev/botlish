@@ -1,0 +1,39 @@
+unit <program>
+  summary: result may be fresh
+  producer call of bare (struct) at p17-explicit-return.bot:18:9
+    activation: confined
+    iteration of the fold at p17-explicit-return.bot:17:5: confined
+    segment: confined
+  producer call of explicit (struct) at p17-explicit-return.bot:21:9
+    activation: confined
+    iteration of the fold at p17-explicit-return.bot:20:5: confined
+    segment: confined
+  producer call of list (list) at p17-explicit-return.bot:23:1
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at the end: live 
+  exits of iteration of the fold at p17-explicit-return.bot:17:5:
+    next at p17-explicit-return.bot:17:5: live acc, the position of the fold at p17-explicit-return.bot:17:5
+  exits of iteration of the fold at p17-explicit-return.bot:20:5:
+    next at p17-explicit-return.bot:20:5: live a, acc, the position of the fold at p17-explicit-return.bot:20:5
+unit bare<int>
+  summary: result may be fresh
+  producer P {x, y} (struct) at p17-explicit-return.bot:12:5
+    activation: escapes
+      - result: the unit's value (at p17-explicit-return.bot:11:8)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at p17-explicit-return.bot:11:8: live 
+unit explicit<int>
+  summary: result may be fresh
+  producer P {x, y} (struct) at p17-explicit-return.bot:15:12
+    activation: escapes
+      - result: returned (at p17-explicit-return.bot:15:5)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    return at p17-explicit-return.bot:15:5: live 

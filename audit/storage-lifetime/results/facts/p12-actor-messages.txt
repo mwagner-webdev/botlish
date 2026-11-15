@@ -1,0 +1,298 @@
+unit <program>
+  summary: result may be fresh
+  producer call of std::event_loop::create (struct) at p12-actor-messages.bot:64:14
+    activation: escapes
+      - context: kept by context#install (at p12-actor-messages.bot:64:1)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of mutable_vector#share (struct) at p12-actor-messages.bot:64:1
+    activation: escapes
+      - context: kept by context#install (at p12-actor-messages.bot:64:1)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::event_loop::create at p12-actor-messages.bot:64:14
+  producer call of std::event_loop::deterministic::create (struct) at p12-actor-messages.bot:65:14
+    activation: escapes
+      - context: kept by context#install (at p12-actor-messages.bot:65:1)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of mutable_vector#share (struct) at p12-actor-messages.bot:65:1
+    activation: escapes
+      - context: kept by context#install (at p12-actor-messages.bot:65:1)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::event_loop::deterministic::create at p12-actor-messages.bot:65:14
+  producer call of std::actor::create (struct) at p12-actor-messages.bot:66:14
+    activation: escapes
+      - context: kept by context#install (at p12-actor-messages.bot:66:1)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of mutable_vector#share (struct) at p12-actor-messages.bot:66:1
+    activation: escapes
+      - context: kept by context#install (at p12-actor-messages.bot:66:1)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::create at p12-actor-messages.bot:66:14
+  producer call of main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (list) at p12-actor-messages.bot:67:1
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of list (list) at p12-actor-messages.bot:69:9
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of list (list) at p12-actor-messages.bot:71:9
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of list (list) at p12-actor-messages.bot:73:9
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at the end: live 
+unit server<std::actor::Inbox[Req]>
+  summary: result may be fresh; a resume message may be kept
+  producer call of std::actor::listen (struct) at p12-actor-messages.bot:22:10
+    activation: confined
+    segment: escapes
+      - suspension: it is live across a suspension point
+  producer call of std::actor::exit (struct) at p12-actor-messages.bot:24:20
+    activation: escapes
+      - result: returned (at p12-actor-messages.bot:24:13)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of std::actor::receive (struct) at p12-actor-messages.bot:26:13
+    activation: escapes
+      - callee: through std::actor::send<std::actor::Address[Resp], Resp>'s parameter m: yielded to the resumer (at p12-actor-messages.bot:30:9)
+    iteration of the fold at p12-actor-messages.bot:25:9: escapes
+      - inherited: it is not confined to the activation
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::listen at p12-actor-messages.bot:22:10
+  producer call of std::str::concat (str) at p12-actor-messages.bot:29:16
+    activation: escapes
+      - callee: through std::actor::send<std::actor::Address[Resp], Resp>'s parameter m: yielded to the resumer (at p12-actor-messages.bot:30:9)
+    iteration of the fold at p12-actor-messages.bot:25:9: escapes
+      - inherited: it is not confined to the activation
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::listen at p12-actor-messages.bot:22:10; call of std::actor::receive at p12-actor-messages.bot:26:13
+  producer call of std::int::to_string (str) at p12-actor-messages.bot:29:45
+    activation: escapes
+      - callee: through std::actor::send<std::actor::Address[Resp], Resp>'s parameter m: yielded to the resumer (at p12-actor-messages.bot:30:9)
+    iteration of the fold at p12-actor-messages.bot:25:9: escapes
+      - inherited: it is not confined to the activation
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::listen at p12-actor-messages.bot:22:10; call of std::actor::receive at p12-actor-messages.bot:26:13; call of std::str::concat at p12-actor-messages.bot:29:16
+  producer call of std::str::concat (str) at p12-actor-messages.bot:29:16
+    activation: escapes
+      - callee: through std::actor::send<std::actor::Address[Resp], Resp>'s parameter m: yielded to the resumer (at p12-actor-messages.bot:30:9)
+    iteration of the fold at p12-actor-messages.bot:25:9: escapes
+      - inherited: it is not confined to the activation
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::listen at p12-actor-messages.bot:22:10; call of std::actor::receive at p12-actor-messages.bot:26:13; call of std::str::concat at p12-actor-messages.bot:29:16; call of std::int::to_string at p12-actor-messages.bot:29:45
+  producer Resp {id, body} (struct) at p12-actor-messages.bot:30:22
+    activation: escapes
+      - callee: through std::actor::send<std::actor::Address[Resp], Resp>'s parameter m: yielded to the resumer (at p12-actor-messages.bot:30:9)
+    iteration of the fold at p12-actor-messages.bot:25:9: escapes
+      - inherited: it is not confined to the activation
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::listen at p12-actor-messages.bot:22:10; call of std::actor::receive at p12-actor-messages.bot:26:13; call of std::str::concat at p12-actor-messages.bot:29:16; call of std::str::concat at p12-actor-messages.bot:29:16; call of std::int::to_string at p12-actor-messages.bot:29:45
+  producer call of std::actor::exit (struct) at p12-actor-messages.bot:32:5
+    activation: escapes
+      - result: the unit's value (at p12-actor-messages.bot:21:10)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  suspension call (call of std::actor::listen) at p12-actor-messages.bot:22:10
+    live bindings: 
+    objects kept: 
+  suspension call (call of std::actor::receive) at p12-actor-messages.bot:26:13
+    live bindings: rx, k
+    held by the suspended callee: call of std::actor::listen at p12-actor-messages.bot:22:10
+    objects kept: call of std::actor::listen at p12-actor-messages.bot:22:10
+  suspension call (call of std::actor::send) at p12-actor-messages.bot:30:9
+    live bindings: rx, k
+    held by the suspended callee: call of std::actor::receive at p12-actor-messages.bot:26:13; call of std::str::concat at p12-actor-messages.bot:29:16; call of std::str::concat at p12-actor-messages.bot:29:16; call of std::int::to_string at p12-actor-messages.bot:29:45; Resp {id, body} at p12-actor-messages.bot:30:22
+    objects kept: call of std::actor::listen at p12-actor-messages.bot:22:10; call of std::actor::receive at p12-actor-messages.bot:26:13; call of std::str::concat at p12-actor-messages.bot:29:16; call of std::str::concat at p12-actor-messages.bot:29:16; call of std::int::to_string at p12-actor-messages.bot:29:45; Resp {id, body} at p12-actor-messages.bot:30:22
+  exits of activation:
+    suspend at p12-actor-messages.bot:22:10: live 
+    return at p12-actor-messages.bot:24:13: live 
+    suspend at p12-actor-messages.bot:26:13: live rx, k
+    suspend at p12-actor-messages.bot:30:9: live rx, k
+    result at p12-actor-messages.bot:21:10: live 
+  exits of iteration of the fold at p12-actor-messages.bot:25:9:
+    break at p12-actor-messages.bot:28:17: live the pending value of fold at p12-actor-messages.bot:25:9
+    next at p12-actor-messages.bot:25:9: live rx, k
+unit client<int, std::actor::Address[Req], std::actor::Inbox[Resp], std::actor::Address[Resp]>
+  summary: result may be fresh; parameter me escapes (callee); a resume message may be kept
+  producer call of std::actor::listen (struct) at p12-actor-messages.bot:35:10
+    activation: confined
+    segment: escapes
+      - suspension: it is live across a suspension point
+  producer call of std::actor::exit (struct) at p12-actor-messages.bot:37:20
+    activation: escapes
+      - result: returned (at p12-actor-messages.bot:37:13)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer Req {id, text, reply} (struct) at p12-actor-messages.bot:39:20
+    activation: escapes
+      - callee: through std::actor::deliver<std::actor::Address[Req], Req>'s parameter m: yielded to the resumer (at p12-actor-messages.bot:39:9)
+    iteration of the fold at p12-actor-messages.bot:38:13: escapes
+      - inherited: it is not confined to the activation
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::listen at p12-actor-messages.bot:35:10
+  producer call of std::actor::receive (struct) at p12-actor-messages.bot:40:13
+    activation: confined
+    iteration of the fold at p12-actor-messages.bot:38:13: confined
+    segment: confined
+    coexists with: call of std::actor::listen at p12-actor-messages.bot:35:10
+  producer call of std::actor::exit (struct) at p12-actor-messages.bot:44:5
+    activation: escapes
+      - result: the unit's value (at p12-actor-messages.bot:34:10)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  suspension call (call of std::actor::listen) at p12-actor-messages.bot:35:10
+    live bindings: n, to, me
+    objects kept: 
+  suspension call (call of std::actor::deliver) at p12-actor-messages.bot:39:9
+    live bindings: n, to, me, rx, acc
+    loop positions: the position of the fold at p12-actor-messages.bot:38:13
+    held by the suspended callee: Req {id, text, reply} at p12-actor-messages.bot:39:20
+    objects kept: call of std::actor::listen at p12-actor-messages.bot:35:10; Req {id, text, reply} at p12-actor-messages.bot:39:20
+  suspension call (call of std::actor::receive) at p12-actor-messages.bot:40:13
+    live bindings: n, to, me, rx, acc
+    loop positions: the position of the fold at p12-actor-messages.bot:38:13
+    held by the suspended callee: call of std::actor::listen at p12-actor-messages.bot:35:10
+    objects kept: call of std::actor::listen at p12-actor-messages.bot:35:10
+  exits of activation:
+    suspend at p12-actor-messages.bot:35:10: live n, to, me
+    return at p12-actor-messages.bot:37:13: live 
+    suspend at p12-actor-messages.bot:39:9: live n, to, me, rx, acc, the position of the fold at p12-actor-messages.bot:38:13
+    suspend at p12-actor-messages.bot:40:13: live n, to, me, rx, acc, the position of the fold at p12-actor-messages.bot:38:13
+    result at p12-actor-messages.bot:34:10: live 
+  exits of iteration of the fold at p12-actor-messages.bot:38:13:
+    break at p12-actor-messages.bot:42:17: live the pending value of fold at p12-actor-messages.bot:38:13
+    next at p12-actor-messages.bot:38:13: live n, to, me, rx, acc, the position of the fold at p12-actor-messages.bot:38:13
+unit main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><int>
+  summary: result may be fresh
+  producer call of std::actor::open (struct) at p12-actor-messages.bot:47:32
+    activation: escapes
+      - callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:52:5)
+      - callee: through the coroutine's code: through client<int, std::actor::Address[Req], std::actor::Inbox[Resp], std::actor::Address[Resp]>'s parameter me: through std::actor::deliver<std::actor::Address[Req], Req>'s parameter m: yielded to the resumer (at p12-actor-messages.bot:54:9)
+      - callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:56:5)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of std::actor::open (struct) at p12-actor-messages.bot:48:32
+    activation: escapes
+      - callee: through the coroutine's code: through client<int, std::actor::Address[Req], std::actor::Inbox[Resp], std::actor::Address[Resp]>'s parameter me: through std::actor::deliver<std::actor::Address[Req], Req>'s parameter m: yielded to the resumer (at p12-actor-messages.bot:54:9)
+      - callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:56:5)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::open at p12-actor-messages.bot:47:32
+  producer closure (closure) at p12-actor-messages.bot:50:9
+    activation: escapes
+      - callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:52:5)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::open at p12-actor-messages.bot:47:32; call of std::actor::open at p12-actor-messages.bot:48:32
+  producer call of coroutine#create (coroutine) at p12-actor-messages.bot:50:9
+    activation: escapes
+      - callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:52:5)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::open at p12-actor-messages.bot:47:32; call of std::actor::open at p12-actor-messages.bot:48:32; closure at p12-actor-messages.bot:50:9
+  producer call of coroutine#start (struct) at p12-actor-messages.bot:50:9
+    activation: escapes
+      - callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:52:5)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::open at p12-actor-messages.bot:47:32; call of std::actor::open at p12-actor-messages.bot:48:32; call of coroutine#create at p12-actor-messages.bot:50:9; closure at p12-actor-messages.bot:50:9
+  producer call of std::actor::spawned (struct) at p12-actor-messages.bot:51:9
+    activation: escapes
+      - callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:52:5)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::open at p12-actor-messages.bot:47:32; call of std::actor::open at p12-actor-messages.bot:48:32; call of coroutine#create at p12-actor-messages.bot:50:9; closure at p12-actor-messages.bot:50:9; call of coroutine#start at p12-actor-messages.bot:50:9
+  producer closure (closure) at p12-actor-messages.bot:54:9
+    activation: escapes
+      - callee: through the coroutine's code: through client<int, std::actor::Address[Req], std::actor::Inbox[Resp], std::actor::Address[Resp]>'s parameter me: through std::actor::deliver<std::actor::Address[Req], Req>'s parameter m: yielded to the resumer (at p12-actor-messages.bot:54:9)
+      - callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:56:5)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::open at p12-actor-messages.bot:47:32; call of std::actor::open at p12-actor-messages.bot:48:32
+  producer call of coroutine#create (coroutine) at p12-actor-messages.bot:54:9
+    activation: escapes
+      - callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:56:5)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::open at p12-actor-messages.bot:47:32; call of std::actor::open at p12-actor-messages.bot:48:32; closure at p12-actor-messages.bot:54:9
+  producer call of coroutine#start (struct) at p12-actor-messages.bot:54:9
+    activation: escapes
+      - callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:56:5)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::open at p12-actor-messages.bot:47:32; call of std::actor::open at p12-actor-messages.bot:48:32; call of coroutine#create at p12-actor-messages.bot:54:9; closure at p12-actor-messages.bot:54:9
+  producer call of std::actor::spawned (struct) at p12-actor-messages.bot:55:9
+    activation: escapes
+      - callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:56:5)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::actor::open at p12-actor-messages.bot:47:32; call of std::actor::open at p12-actor-messages.bot:48:32; call of coroutine#create at p12-actor-messages.bot:54:9; closure at p12-actor-messages.bot:54:9; call of coroutine#start at p12-actor-messages.bot:54:9
+  producer call of std::event_loop::take_outcomes (list) at p12-actor-messages.bot:60:16
+    activation: confined
+    segment: confined
+  producer loop (list) at p12-actor-messages.bot:61:5
+    activation: escapes
+      - result: the unit's value (at p12-actor-messages.bot:46:8)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::event_loop::take_outcomes at p12-actor-messages.bot:60:16
+  exits of activation:
+    error at p12-actor-messages.bot:47:32 (std::event_loop::SchedulerFault): live 
+    error at p12-actor-messages.bot:48:32 (std::event_loop::SchedulerFault): live 
+    error at p12-actor-messages.bot:52:5 (std::event_loop::SchedulerFault): live 
+    error at p12-actor-messages.bot:54:9 (std::event_loop::SchedulerFault): live 
+    error at p12-actor-messages.bot:56:5 (std::event_loop::SchedulerFault): live 
+    error at p12-actor-messages.bot:57:5 (std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::SchedulerFault): live 
+    error at p12-actor-messages.bot:58:5 (std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::SchedulerFault): live 
+    error at p12-actor-messages.bot:59:5 (std::event_loop::SchedulerFault): live 
+    error at p12-actor-messages.bot:60:16 (std::event_loop::SchedulerFault): live 
+    result at p12-actor-messages.bot:46:8: live 
+  exits of iteration of the loop at p12-actor-messages.bot:61:5:
+    next at p12-actor-messages.bot:61:5: live outcomes, the List loop at p12-actor-messages.bot:61:5 collects, the position of the loop at p12-actor-messages.bot:61:5
+unit block e10108<generic>
+  summary: result may be fresh; a resume message may be kept
+  producer call of server (struct) at p12-actor-messages.bot:50:35
+    activation: escapes
+      - result: the unit's value (at p12-actor-messages.bot:50:9)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  suspension call (call of server) at p12-actor-messages.bot:50:35
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    suspend at p12-actor-messages.bot:50:35: live 
+    result at p12-actor-messages.bot:50:9: live 
+unit block e10138<generic>
+  summary: result may be fresh; captures escape (callee); a resume message may be kept
+  producer call of client (struct) at p12-actor-messages.bot:54:35
+    activation: escapes
+      - result: the unit's value (at p12-actor-messages.bot:54:9)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  suspension call (call of client) at p12-actor-messages.bot:54:35
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    error at p12-actor-messages.bot:54:35 (std::event_loop::SchedulerFault): live 
+    suspend at p12-actor-messages.bot:54:35 (std::event_loop::SchedulerFault): live 
+    result at p12-actor-messages.bot:54:9: live 

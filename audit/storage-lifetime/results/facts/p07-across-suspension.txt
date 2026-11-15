@@ -1,0 +1,32 @@
+unit <program>
+  summary: result may be fresh
+  producer call of coroutine#create (coroutine) at p07-across-suspension.bot:17:1
+    activation: confined
+    segment: confined
+  producer Msg {n} (struct) at p07-across-suspension.bot:18:13
+    activation: confined
+    segment: confined
+    coexists with: call of coroutine#create at p07-across-suspension.bot:17:1
+  producer call of list (list) at p07-across-suspension.bot:19:1
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at the end: live 
+unit worker<int>
+  summary: keeps nothing it is given
+  suspension yield (call of coroutine#yield) at p07-across-suspension.bot:13:9
+    live bindings: kept
+    objects kept: 
+  exits of activation:
+    suspend at p07-across-suspension.bot:13:9: live kept
+    result at p07-across-suspension.bot:10:10: live 
+unit block e30<generic>
+  summary: keeps nothing it is given
+  suspension call (call of worker) at p07-across-suspension.bot:17:27
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    suspend at p07-across-suspension.bot:17:27: live 
+    result at p07-across-suspension.bot:17:1: live 

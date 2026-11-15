@@ -1,0 +1,35 @@
+unit <program>
+  summary: result may be fresh
+  producer call of coroutine#create (coroutine) at p10-handle-moved.bot:15:1
+    activation: confined
+    segment: confined
+  producer call of list (list) at p10-handle-moved.bot:18:1
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at the end: live 
+unit gen<int>
+  summary: keeps nothing it is given
+  suspension yield (call of coroutine#yield) at p10-handle-moved.bot:8:9
+    live bindings: n
+    loop positions: the position of the loop at p10-handle-moved.bot:7:5
+    objects kept: 
+  exits of activation:
+    suspend at p10-handle-moved.bot:8:9: live n, the position of the loop at p10-handle-moved.bot:7:5
+    result at p10-handle-moved.bot:6:7: live 
+  exits of iteration of the loop at p10-handle-moved.bot:7:5:
+    next at p10-handle-moved.bot:7:5: live n, the position of the loop at p10-handle-moved.bot:7:5
+unit advance<coroutine>
+  summary: result may hold parameters h
+  exits of activation:
+    result at p10-handle-moved.bot:11:11: live 
+unit block e18<generic>
+  summary: keeps nothing it is given
+  suspension call (call of gen) at p10-handle-moved.bot:15:27
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    suspend at p10-handle-moved.bot:15:27: live 
+    result at p10-handle-moved.bot:15:1: live 

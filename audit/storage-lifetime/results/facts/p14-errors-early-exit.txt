@@ -1,0 +1,39 @@
+unit <program>
+  summary: keeps nothing it is given
+  producer call of check (payload) at p14-errors-early-exit.bot:24:9
+    activation: confined
+    iteration of the fold at p14-errors-early-exit.bot:23:1: confined
+    segment: confined
+  exits of activation:
+    result at the end: live 
+  exits of iteration of the fold at p14-errors-early-exit.bot:23:1:
+    next at p14-errors-early-exit.bot:23:1: live acc, the position of the fold at p14-errors-early-exit.bot:23:1
+unit check<int>
+  summary: result may be fresh
+  producer call of std::int::to_string (str) at p14-errors-early-exit.bot:12:9
+    activation: confined
+    segment: confined
+  producer call of std::str::concat (str) at p14-errors-early-exit.bot:12:9
+    activation: confined
+    segment: confined
+    coexists with: call of std::int::to_string at p14-errors-early-exit.bot:12:9
+  producer struct {limit} (struct) at p14-errors-early-exit.bot:14:21
+    activation: escapes
+      - error: the payload of TooBig (at p14-errors-early-exit.bot:14:9)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    fail at p14-errors-early-exit.bot:14:9: live 
+    result at p14-errors-early-exit.bot:11:9: live 
+unit early<int>
+  summary: keeps nothing it is given
+  producer call of std::int::to_string (str) at p14-errors-early-exit.bot:18:9
+    activation: confined
+    segment: confined
+  producer call of std::str::concat (str) at p14-errors-early-exit.bot:21:22
+    activation: confined
+    segment: confined
+    coexists with: call of std::int::to_string at p14-errors-early-exit.bot:18:9
+  exits of activation:
+    return at p14-errors-early-exit.bot:20:9: live 
+    result at p14-errors-early-exit.bot:17:9: live 

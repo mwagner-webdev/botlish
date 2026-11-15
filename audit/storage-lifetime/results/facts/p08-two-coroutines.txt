@@ -1,0 +1,59 @@
+unit <program>
+  summary: result may be fresh
+  producer call of coroutine#create (coroutine) at p08-two-coroutines.bot:15:1
+    activation: confined
+    segment: confined
+  producer call of coroutine#create (coroutine) at p08-two-coroutines.bot:16:1
+    activation: confined
+    segment: confined
+    coexists with: call of coroutine#create at p08-two-coroutines.bot:15:1
+  producer Tick {by} (struct) at p08-two-coroutines.bot:17:8
+    activation: confined
+    segment: confined
+    coexists with: call of coroutine#create at p08-two-coroutines.bot:15:1; call of coroutine#create at p08-two-coroutines.bot:16:1
+  producer Tick {by} (struct) at p08-two-coroutines.bot:18:8
+    activation: confined
+    segment: confined
+    coexists with: call of coroutine#create at p08-two-coroutines.bot:15:1; call of coroutine#create at p08-two-coroutines.bot:16:1; Tick {by} at p08-two-coroutines.bot:17:8
+  producer Tick {by} (struct) at p08-two-coroutines.bot:19:8
+    activation: confined
+    segment: confined
+    coexists with: call of coroutine#create at p08-two-coroutines.bot:15:1; call of coroutine#create at p08-two-coroutines.bot:16:1; Tick {by} at p08-two-coroutines.bot:17:8; Tick {by} at p08-two-coroutines.bot:18:8
+  producer Tick {by} (struct) at p08-two-coroutines.bot:20:8
+    activation: confined
+    segment: confined
+    coexists with: call of coroutine#create at p08-two-coroutines.bot:16:1; Tick {by} at p08-two-coroutines.bot:18:8
+  producer call of list (list) at p08-two-coroutines.bot:21:1
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at the end: live 
+unit counter<int>
+  summary: keeps nothing it is given
+  suspension yield (call of coroutine#yield) at p08-two-coroutines.bot:11:13
+    live bindings: acc
+    loop positions: the position of the fold at p08-two-coroutines.bot:10:13
+    objects kept: 
+  exits of activation:
+    suspend at p08-two-coroutines.bot:11:13: live acc, the position of the fold at p08-two-coroutines.bot:10:13
+    result at p08-two-coroutines.bot:9:11: live 
+  exits of iteration of the fold at p08-two-coroutines.bot:10:13:
+    next at p08-two-coroutines.bot:10:13: live acc, the position of the fold at p08-two-coroutines.bot:10:13
+unit block e21<generic>
+  summary: keeps nothing it is given
+  suspension call (call of counter) at p08-two-coroutines.bot:15:34
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    suspend at p08-two-coroutines.bot:15:34: live 
+    result at p08-two-coroutines.bot:15:1: live 
+unit block e33<generic>
+  summary: keeps nothing it is given
+  suspension call (call of counter) at p08-two-coroutines.bot:16:34
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    suspend at p08-two-coroutines.bot:16:34: live 
+    result at p08-two-coroutines.bot:16:1: live 

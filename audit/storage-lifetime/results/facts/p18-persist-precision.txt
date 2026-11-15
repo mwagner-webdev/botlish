@@ -1,0 +1,40 @@
+unit <program>
+  summary: result may be fresh
+  producer call of coroutine#create (coroutine) at p18-persist-precision.bot:18:1
+    activation: confined
+    segment: confined
+  producer call of coroutine#create (coroutine) at p18-persist-precision.bot:19:1
+    activation: confined
+    segment: confined
+    coexists with: call of coroutine#create at p18-persist-precision.bot:18:1
+  producer call of list (list) at p18-persist-precision.bot:20:1
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at the end: live 
+unit worker<int, bool>
+  summary: keeps nothing it is given
+  suspension yield (call of coroutine#yield) at p18-persist-precision.bot:13:9
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    suspend at p18-persist-precision.bot:13:9: live 
+    result at p18-persist-precision.bot:9:10: live 
+unit block e23<generic>
+  summary: keeps nothing it is given
+  suspension call (call of worker) at p18-persist-precision.bot:18:34
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    suspend at p18-persist-precision.bot:18:34: live 
+    result at p18-persist-precision.bot:18:1: live 
+unit block e36<generic>
+  summary: keeps nothing it is given
+  suspension call (call of worker) at p18-persist-precision.bot:19:34
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    suspend at p18-persist-precision.bot:19:34: live 
+    result at p18-persist-precision.bot:19:1: live 

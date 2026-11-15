@@ -1,0 +1,29 @@
+unit <program>
+  summary: keeps nothing it is given
+  exits of activation:
+    result at the end: live 
+  exits of iteration of the fold at p02-simultaneous-temps.bot:11:1:
+    next at p02-simultaneous-temps.bot:11:1: live acc, the position of the fold at p02-simultaneous-temps.bot:11:1
+unit label<int>
+  summary: keeps nothing it is given
+  producer call of std::int::to_string (str) at p02-simultaneous-temps.bot:7:9
+    activation: confined
+    segment: confined
+  producer call of std::str::concat (str) at p02-simultaneous-temps.bot:7:9
+    activation: confined
+    segment: confined
+    coexists with: call of std::int::to_string at p02-simultaneous-temps.bot:7:9
+  producer call of std::int::to_string (str) at p02-simultaneous-temps.bot:8:9
+    activation: confined
+    segment: confined
+    coexists with: call of std::str::concat at p02-simultaneous-temps.bot:7:9; call of std::int::to_string at p02-simultaneous-temps.bot:7:9
+  producer call of std::str::concat (str) at p02-simultaneous-temps.bot:8:9
+    activation: confined
+    segment: confined
+    coexists with: call of std::str::concat at p02-simultaneous-temps.bot:7:9; call of std::int::to_string at p02-simultaneous-temps.bot:7:9; call of std::int::to_string at p02-simultaneous-temps.bot:8:9
+  producer call of std::str::concat (str) at p02-simultaneous-temps.bot:9:22
+    activation: confined
+    segment: confined
+    coexists with: call of std::str::concat at p02-simultaneous-temps.bot:7:9; call of std::int::to_string at p02-simultaneous-temps.bot:7:9; call of std::str::concat at p02-simultaneous-temps.bot:8:9; call of std::int::to_string at p02-simultaneous-temps.bot:8:9
+  exits of activation:
+    result at p02-simultaneous-temps.bot:6:9: live 

@@ -1,0 +1,953 @@
+# storage-lifetime.test -- storage lifetime facts: identity confinement,
+# ordinary-value liveness and suspension liveness, per specialization
+# instance (STORAGE-LIFETIME-FACTS-MILESTONE-1.md, hir/lifetime.tcl).
+#
+# The analysis changes nothing a backend does; these tests pin its facts:
+#
+#   * the census corpus (audit/storage-static-reuse/cases/), each program
+#     classified as STORAGE-STATIC-REUSE-CENSUS-1.md, section 8 predicts --
+#     or as deeper inspection showed (the report, section 19);
+#   * adversarial program mutations: each turns a fact the base program has
+#     (confined, dead across a suspension, not coexisting) into the
+#     conservative one (escapes, unknown, live, coexisting) -- a later read,
+#     a return, an escaping aggregate, a capture, an alias, a use moved
+#     across a suspension, a failing call, a handler, a loop-carried value,
+#     an unknown or retaining call, a transfer through `any`;
+#   * source-spelling invariance: equivalent spellings, equal facts;
+#   * specialization, recursion (Botlish has no forward reference: a
+#     function's own recursion is the call graph's one kind of cycle),
+#     exact callables, exits, pending operands;
+#   * determinism, isolation between compilations, no change to the HIR;
+#   * depth-safety at Tcl's default recursion limit;
+#   * the independent oracle (audit/storage-lifetime/tools/fuzz.tcl), the C
+#     backend's frame persistence (persist.tcl) and the native backend's
+#     reachability under GC stress (reachability.tcl), each in a small run.
+#
+# audit/storage-lifetime/tools/mutate.tcl's mutants must be killed here.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set ::slCases [file join $::projectRoot audit storage-static-reuse cases]
+set ::slTools [file join $::projectRoot audit storage-lifetime tools]
+testConstraint slNative [file exists [file join $::projectRoot native target release botlish-native]]
+
+# The HIR and the facts of the program TEXT (or of the census case NAME
+# with -case).
+proc slFacts {text args} {
+    if {[string match "-case *" $text]} {
+        set path [lindex [glob [file join $::slCases [lindex $text 1]*.bot]] 0]
+        set hir [surface::readProgramFile $path -warnings off]
+    } else {
+        set hir [surface::compile $text -warnings off]
+    }
+    return [list $hir [hir::lifetime::analyze $hir {*}$args]]
+}
+
+# The first unit whose label matches GLOB.
+proc slUnit {facts glob} {
+    foreach id [hir::lifetime::units $facts] {
+        if {[string match $glob [dict get $facts units $id label]]} {
+            return $id
+        }
+    }
+    error "no unit $glob in [lmap id [hir::lifetime::units $facts] {dict get $facts units $id label}]"
+}
+
+proc slLine {hir e} {
+    return [dict getdef [dict get $hir exprs $e origin] line 0]
+}
+
+# The producer of unit U written on LINE whose kind is KIND (the Nth, from
+# 1, when several are).
+proc slSite {hir u line kind {nth 1}} {
+    set found {}
+    dict for {site p} [dict get $u producers] {
+        if {[slLine $hir [dict get $p expr]] == $line && [dict get $p kind] eq $kind} {
+            lappend found $site
+        }
+    }
+    if {[llength $found] < $nth} {
+        error "no $kind producer on line $line"
+    }
+    return [lindex [lsort -dictionary $found] [expr {$nth - 1}]]
+}
+
+# The verdict of the KIND producer on LINE of the unit matching GLOB for
+# REGION: activation, segment or iteration@LINE (the loop's line).
+proc slVerdict {pair glob line kind region {nth 1}} {
+    lassign $pair hir facts
+    set u [hir::lifetime::unit $facts [slUnit $facts $glob]]
+    set site [slSite $hir $u $line $kind $nth]
+    if {[string match iteration@* $region]} {
+        foreach r [dict keys [dict get $u verdicts $site]] {
+            if {[lindex $r 0] eq "iteration" && "iteration@[slLine $hir [lindex $r 1]]" eq $region} {
+                return [dict get $u verdicts $site $r verdict]
+            }
+        }
+        return "no such region"
+    }
+    return [dict get $u verdicts $site $region verdict]
+}
+
+# The reason categories of that verdict.
+proc slReasons {pair glob line kind region {nth 1}} {
+    lassign $pair hir facts
+    set u [hir::lifetime::unit $facts [slUnit $facts $glob]]
+    set site [slSite $hir $u $line $kind $nth]
+    if {[string match iteration@* $region]} {
+        foreach r [dict keys [dict get $u verdicts $site]] {
+            if {[lindex $r 0] eq "iteration" && "iteration@[slLine $hir [lindex $r 1]]" eq $region} {
+                set region $r
+            }
+        }
+    }
+    return [lsort -unique [lmap r [dict get $u verdicts $site $region reasons] {dict get $r category}]]
+}
+
+# What is live across the suspension on LINE of the unit matching GLOB:
+# binding names, pos@LINE for a loop's position, pending@LINE for a pending
+# operand, sorted.
+proc slLive {pair glob line} {
+    lassign $pair hir facts
+    set u [hir::lifetime::unit $facts [slUnit $facts $glob]]
+    foreach s [dict get $u suspensions] {
+        if {[slLine $hir [dict get $s expr]] != $line} continue
+        set live {}
+        foreach v [dict get $s bindings] {
+            lappend live [hir::semantic::SourceName $hir [string range $v 2 end]]
+        }
+        foreach v [dict get $s positions] {
+            lappend live pos@[slLine $hir [string range $v 2 end]]
+        }
+        foreach v [dict get $s pending] {
+            lappend live pending@[slLine $hir [string range $v 2 end]]
+        }
+        return [lsort $live]
+    }
+    error "no suspension on line $line"
+}
+
+# 1 if the KIND2 producer on LINE2 may be live when the KIND1 producer on
+# LINE1 makes its object.
+proc slCoexist {pair glob line1 kind1 line2 kind2} {
+    lassign $pair hir facts
+    set u [hir::lifetime::unit $facts [slUnit $facts $glob]]
+    set a [slSite $hir $u $line1 $kind1]
+    set b [slSite $hir $u $line2 $kind2]
+    return [expr {$b in [dict get $u coexist $a]}]
+}
+
+# The facts of the units matching GLOB without locations or ids: for
+# spelling invariance. Producers by what and kind with each region's
+# verdict and reason categories (loops by their order), suspensions by
+# their live binding names.
+proc slNormalized {pair glob} {
+    lassign $pair hir facts
+    set result {}
+    foreach id [hir::lifetime::units $facts] {
+        set u [hir::lifetime::unit $facts $id]
+        if {![string match $glob [dict get $u label]]} continue
+        set loops [lsort -dictionary [dict get $u loops]]
+        set producers {}
+        dict for {site p} [dict get $u producers] {
+            set regions {}
+            dict for {region v} [dict get $u verdicts $site] {
+                if {[lindex $region 0] eq "iteration"} {
+                    set region "iteration [lsearch $loops [lindex $region 1]]"
+                }
+                lappend regions [list $region [dict get $v verdict] \
+                    [lsort -unique [lmap r [dict get $v reasons] {dict get $r category}]]]
+            }
+            lappend producers [list [dict get $p what] [dict get $p kind] $regions]
+        }
+        set suspensions {}
+        foreach s [dict get $u suspensions] {
+            lappend suspensions [lsort [lmap v [dict get $s bindings] {hir::semantic::SourceName $hir [string range $v 2 end]}]]
+        }
+        lappend result [list [lsort $producers] $suspensions [dict get $u summary resultParams] [dict get $u summary fresh]]
+    }
+    return $result
+}
+
+# ---------------------------------------------------------------------------
+# The census corpus
+
+test sl-p01-sequential {p01: the two temporaries are made one after the other: neither of a's objects is live when b's are made, and every one is confined to label's activation} -body {
+    set p [slFacts {-case p01}]
+    list [slCoexist $p label* 11 str 9 str] [slCoexist $p label* 11 str 9 str] \
+        [slVerdict $p label* 9 str activation 1] [slVerdict $p label* 9 str activation 2] \
+        [slVerdict $p label* 11 str activation 1] [slVerdict $p label* 11 str activation 2]
+} -result {0 0 confined confined confined confined}
+
+test sl-p02-simultaneous {p02: a is still live when b is made: their objects coexist} -body {
+    set p [slFacts {-case p02}]
+    list [slCoexist $p label* 8 str 7 str] [slVerdict $p label* 9 str activation]
+} -result {1 confined}
+
+test sl-p03-exclusive {p03: the two branches' Strings never coexist (only one branch runs)} -body {
+    set p [slFacts {-case p03}]
+    list [slCoexist $p label* 10 str 8 str] [slCoexist $p label* 8 str 10 str] \
+        [slVerdict $p label* 8 str activation] [slVerdict $p label* 10 str activation]
+} -result {0 0 confined confined}
+
+test sl-p04-loop {p04: the struct and the String of each iteration are confined to it} -body {
+    set p [slFacts {-case p04}]
+    list [slVerdict $p work* 14 struct iteration@13] [slVerdict $p work* 15 str iteration@13]
+} -result {confined confined}
+
+test sl-p05-escape-result {p05: make's String escapes make's activation through its result; in use_it, the results of make are confined to its activation} -body {
+    set p [slFacts {-case p05}]
+    list [slVerdict $p make* 8 str activation] [slReasons $p make* 8 str activation] \
+        [dict get [hir::lifetime::unit [lindex $p 1] [slUnit [lindex $p 1] make*]] summary fresh] \
+        [slVerdict $p use_it* 11 str activation] [slVerdict $p use_it* 12 str activation]
+} -result {escapes result 1 confined confined}
+
+test sl-p06-retained {p06: Strings pushed into the vector collect returns escape collect's activation (and so every iteration)} -body {
+    set p [slFacts {-case p06}]
+    list [slVerdict $p collect* 17 str activation] [slVerdict $p collect* 17 str iteration@16]
+} -result {escapes escapes}
+
+test sl-p07-suspension {p07: across worker's yield only kept is live: dead is consumed by the yield, after is made after it} -body {
+    slLive [slFacts {-case p07-}] worker* 13
+} -result {kept}
+
+test sl-p07b-string {p07b: kept's Strings cross the suspension (not segment-confined), gone's do not; drive's String is confined to its iteration} -body {
+    set p [slFacts {-case p07b}]
+    list [slVerdict $p worker* 10 str segment] [slVerdict $p worker* 11 str segment] \
+        [slVerdict $p worker* 10 str activation] [slVerdict $p drive* 18 str iteration@16] \
+        [slVerdict $p drive* 17 coroutine iteration@16]
+} -result {escapes confined confined confined confined}
+
+test sl-p08-independent {p08: counter keeps its intermediate and its fold's position across a yield; the two coroutines of the program are live at once} -body {
+    set p [slFacts {-case p08}]
+    list [slLive $p counter* 11] [slCoexist $p <program>* 16 coroutine 15 coroutine]
+} -result {{acc pos@10} 1}
+
+test sl-p09-nested {p09: outer keeps seed across its first yielding call and first across its second; inner keeps base across both yields} -body {
+    set p [slFacts {-case p09}]
+    list [slLive $p outer* 13] [slLive $p outer* 14] [slLive $p inner* 8] [slLive $p inner* 9]
+} -result {seed first base base}
+
+test sl-p10-handle {p10: advance returns the handle it is given (its result holds its parameter, nothing fresh); the program's coroutine is confined to the run} -body {
+    set p [slFacts {-case p10-}]
+    set s [dict get [hir::lifetime::unit [lindex $p 1] [slUnit [lindex $p 1] advance*]] summary]
+    list [dict get $s resultParams] [dict get $s fresh] [slVerdict $p <program>* 15 coroutine activation] \
+        [slLive $p gen* 8]
+} -result {0 0 confined {n pos@7}}
+
+test sl-p10b-returned {p10b: a coroutine make constructs and returns escapes make's activation} -body {
+    set p [slFacts {-case p10b}]
+    list [slVerdict $p make* 13 coroutine activation] [slReasons $p make* 13 coroutine activation]
+} -result {escapes result}
+
+test sl-p11-context {p11: what the program installs as context state escapes (context), never request-local} -body {
+    set p [slFacts {-case p11}]
+    list [slVerdict $p <program>* 21 mutvec activation] [slReasons $p <program>* 21 mutvec activation]
+} -result {escapes context}
+
+test sl-p12-actor {p12: a message sent through the actor library is never confined: it is yielded to the library's host} -body {
+    set p [slFacts {-case p12}]
+    list [slVerdict $p server* 30 struct activation] [slVerdict $p server* 30 struct iteration@25]
+} -result {escapes escapes}
+
+test sl-p13-request {p13: every per-request value handle makes or receives is confined to its activation} -body {
+    set p [slFacts {-case p13}]
+    list [slVerdict $p handle* 39 str activation] [slVerdict $p handle* 39 struct activation] \
+        [slVerdict $p handle* 42 str activation] [slVerdict $p parse* 32 struct activation]
+} -result {confined confined confined escapes}
+
+test sl-p14-errors {p14: check's payload escapes through the error, its String does not; early's String is confined on its return and on its normal end; check's activation leaves by fail and by its end} -body {
+    set p [slFacts {-case p14}]
+    lassign $p hir facts
+    set u [hir::lifetime::unit $facts [slUnit $facts check*]]
+    list [slVerdict $p check* 14 struct activation] [slReasons $p check* 14 struct activation] \
+        [slVerdict $p check* 12 str activation] [slVerdict $p early* 18 str activation] \
+        [lsort [lmap x [dict get $u exits activation] {dict get $x kind}]] \
+        [slVerdict $p <program>* 24 payload iteration@23]
+} -result {escapes error confined confined {fail result} confined}
+
+test sl-p15-collections {p15: a collected List escapes the function that collects it and is confined to its caller's iteration -- a declared length changes nothing} -body {
+    set p [slFacts {-case p15}]
+    list [slVerdict $p fixed* 10 list activation] [slVerdict $p dynamic* 14 list activation] \
+        [slVerdict $p <program>* 24 list iteration@23 1] [slVerdict $p <program>* 24 list iteration@23 2]
+} -result {escapes escapes confined confined}
+
+test sl-p16-borrowed {p16: byte storage borrowed by a no-escape C call stays confined} -body {
+    slVerdict [slFacts {-case p16-}] <program>* 12 struct activation
+} -result {confined}
+
+test sl-p16b-refused {p16b: a C call that may keep the pointer is refused before any analysis (FOREIGN-BORROW)} -body {
+    catch {slFacts {-case p16b}} message
+    string match *FOREIGN-BORROW* $::errorCode
+} -result 1
+
+test sl-p17-spelling {p17: an explicit trailing return and an implicit result give the same facts (the native representation analysis tells them apart; this one does not)} -body {
+    set p [slFacts {-case p17}]
+    expr {[slNormalized $p bare*] eq [slNormalized $p explicit*]}
+} -result 1
+
+test sl-p18-precision {p18: nothing is live across worker's yield: x is read only in the branch that never resumes (C's Persist keeps x and a join)} -body {
+    slLive [slFacts {-case p18}] worker* 13
+} -result {}
+
+test sl-p19-context-vector {p19: the context-owned scratch vector escapes (context): a region must never hold context state} -body {
+    set p [slFacts {-case p19}]
+    slReasons $p <program>* 17 mutvec activation
+} -result {context}
+
+# ---------------------------------------------------------------------------
+# Adversarial mutations: each base fact, then the mutated program's
+
+set ::slBase {
+import std::int
+import std::str
+import std::mutable_vector
+
+fn f(n: int) -> int:
+    s = std::int::to_string(n)
+    std::str::length(s)
+
+f(3)
+}
+
+test sl-mut-return {returning the object: confined -> escapes (result)} -body {
+    set m {
+import std::int
+import std::str
+
+fn f(n: int) -> str:
+    s = std::int::to_string(n)
+    s
+
+std::str::length(f(3))
+}
+    list [slVerdict [slFacts $::slBase] f* 7 str activation] [slVerdict [slFacts $m] f* 6 str activation] \
+        [slReasons [slFacts $m] f* 6 str activation]
+} -result {confined escapes result}
+
+test sl-mut-aggregate {storing the object in a struct that escapes: escapes; in one that does not: confined} -body {
+    set kept {
+import std::int
+import std::str
+
+struct Box:
+    text: str
+
+fn f(n: int) -> int:
+    s = std::int::to_string(n)
+    b = Box {text: s}
+    std::str::length(b.text)
+
+f(3)
+}
+    set escaping [string map {"fn f(n: int) -> int:" "fn f(n: int) -> Box:" "    std::str::length(b.text)" "    b" "f(3)" "f(3).text"} $kept]
+    list [slVerdict [slFacts $kept] f* 9 str activation] [slVerdict [slFacts $escaping] f* 9 str activation]
+} -result {confined escapes}
+
+test sl-mut-closure {a capture: confined while the closure is only called here; escapes once the closure is returned} -body {
+    set called {
+import std::int
+import std::str
+
+fn f(n: int) -> int:
+    s = std::int::to_string(n)
+    fn g() -> int:
+        std::str::length(s)
+    g()
+
+f(3)
+}
+    set returned {
+import std::int
+import std::str
+
+fn f(n: int) -> Fn{args: [], return: int, errors: []}:
+    s = std::int::to_string(n)
+    fn g() -> int:
+        std::str::length(s)
+    g
+
+f(3)()
+}
+    list [slVerdict [slFacts $called] f* 6 str activation] [slVerdict [slFacts $returned] f* 6 str activation]
+} -result {confined escapes}
+
+test sl-mut-alias {an alias the caller keeps: keep(s) returned makes s escape; keep(s) dropped does not (a summary, not a name)} -body {
+    set dropped {
+import std::int
+import std::str
+
+fn keep(x: str) -> str:
+    x
+
+fn f(n: int) -> int:
+    s = std::int::to_string(n)
+    k = keep(s)
+    std::str::length(k)
+
+f(3)
+}
+    set kept [string map {"fn f(n: int) -> int:" "fn f(n: int) -> str:" "    std::str::length(k)" "    k" "f(3)" "std::str::length(f(3))"} $dropped]
+    list [slVerdict [slFacts $dropped] f* 9 str activation] [slVerdict [slFacts $kept] f* 9 str activation]
+} -result {confined escapes}
+
+set ::slSuspend {
+import std::coroutine
+import std::int
+import std::str
+
+fn w(seed: int) -> int:
+    s = std::int::to_string(seed)
+    n = std::str::length(s)
+    yield n
+    n
+
+coroutine {step, first} = w(3)
+[first, step()]
+}
+
+test sl-mut-across-suspension {a use moved after the yield: s goes from dead across the suspension (segment-confined) to live across it} -body {
+    set m [string map {"    yield n\n    n" "    yield n\n    std::str::length(s)"} $::slSuspend]
+    list [slLive [slFacts $::slSuspend] w* 9] [slVerdict [slFacts $::slSuspend] w* 7 str segment] \
+        [slLive [slFacts $m] w* 9] [slVerdict [slFacts $m] w* 7 str segment]
+} -result {n confined s escapes}
+
+test sl-mut-later-read {a later read: the binding becomes live across the suspension} -body {
+    set m [string map {"    yield n\n    n" "    yield n\n    n + seed"} $::slSuspend]
+    list [slLive [slFacts $::slSuspend] w* 9] [slLive [slFacts $m] w* 9]
+} -result {n {n seed}}
+
+test sl-mut-failing-call {a failing call before the region's end: its error edge is an exit of the activation and of the iteration, and an object in its payload escapes} -body {
+    set m {
+import std::int
+import std::str
+
+error Bad:
+    text: str
+
+fn g(n: int) -> int errors Bad:
+    if n > 2:
+        fail Bad {text: std::int::to_string(n)}
+    n
+
+fn f(n: int) -> int errors Bad:
+    fold i from 0 to n with intermediate acc 0:
+        acc + g(i)
+
+f(3):
+    on Bad:
+        0
+}
+    set p [slFacts $m]
+    lassign $p hir facts
+    set u [hir::lifetime::unit $facts [slUnit $facts f*]]
+    set exits [lmap x [dict get $u exits [lindex [dict keys [dict get $u exits]] 1]] {dict get $x kind}]
+    list [lsort [lmap x [dict get $u exits activation] {dict get $x kind}]] [lsort -unique $exits] \
+        [slVerdict $p g* 10 str activation] [slReasons $p g* 10 struct activation]
+} -result {{error result} {error next} escapes error}
+
+test sl-mut-handler {a handler that reads a binding keeps it live at the handled call (the call's exceptional edge)} -body {
+    set base {
+import std::int
+import std::str
+
+error Bad
+
+fn g(n: int) -> int errors Bad:
+    if n > 2:
+        fail Bad
+    n
+
+fn f(n: int) -> int:
+    s = std::int::to_string(n)
+    k = std::str::length(s)
+    r = g(k):
+        on Bad:
+            0
+    r
+
+f(3)
+}
+    set m [string map {"        on Bad:\n            0" "        on Bad:\n            std::str::length(s)"} $base]
+    lassign [slFacts $base] hir facts
+    set u [slUnit $facts f*]
+    set call [lindex [lmap e [dict keys [dict get $hir exprs]] {
+        if {[dict get $hir exprs $e kind] eq "call" && [slLine $hir $e] == 15 && [hir::lifetime::What $hir $e] eq "call of g"} {set e} else continue
+    }] 0]
+    set before [lmap v [hir::lifetime::liveAfter $facts $u $call] {dict get $facts units $u vars $v}]
+    lassign [slFacts $m] hir2 facts2
+    set u2 [slUnit $facts2 f*]
+    set call2 [lindex [lmap e [dict keys [dict get $hir2 exprs]] {
+        if {[dict get $hir2 exprs $e kind] eq "call" && [slLine $hir2 $e] == 15 && [hir::lifetime::What $hir2 $e] eq "call of g"} {set e} else continue
+    }] 0]
+    set after [lmap v [hir::lifetime::liveAfter $facts2 $u2 $call2] {dict get $facts2 units $u2 vars $v}]
+    list [expr {"s" in $before}] [expr {"s" in $after}]
+} -result {0 1}
+
+test sl-mut-overlap {two lifetimes made to overlap: a read of the first moved after the second's construction} -body {
+    set base {
+import std::int
+import std::str
+
+fn f(n: int) -> int:
+    a = std::int::to_string(n)
+    x = std::str::length(a)
+    b = std::int::to_string(n + 1)
+    x + std::str::length(b)
+
+f(3)
+}
+    set m [string map {"    x = std::str::length(a)\n" "" "    x + std::str::length(b)" "    std::str::length(a) + std::str::length(b)"} $base]
+    list [slCoexist [slFacts $base] f* 8 str 6 str] [slCoexist [slFacts $m] f* 7 str 6 str]
+} -result {0 1}
+
+test sl-mut-loop-carried {a loop-carried reference: a String kept in the iteration is confined to it, one carried by the intermediate escapes it} -body {
+    set base {
+import std::int
+import std::str
+
+fn f(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        s = std::int::to_string(i)
+        acc + std::str::length(s)
+
+f(3)
+}
+    set carried {
+import std::int
+import std::str
+
+fn f(n: int) -> int:
+    t = fold i from 0 to n with intermediate acc "":
+        s = std::int::to_string(i)
+        acc.concat(s)
+    std::str::length(t)
+
+f(3)
+}
+    list [slVerdict [slFacts $base] f* 7 str iteration@6] [slVerdict [slFacts $carried] f* 7 str iteration@6] \
+        [slReasons [slFacts $carried] f* 7 str iteration@6] [slVerdict [slFacts $carried] f* 7 str activation]
+} -result {confined escapes carried confined}
+
+test sl-mut-unknown-call {a call through a function value the analysis cannot resolve: the argument's confinement is unknown, never confined} -body {
+    set m {
+import std::int
+import std::str
+
+fn f(g, n: int) -> int:
+    s = std::int::to_string(n)
+    g(s)
+
+fn h(x: str) -> int:
+    std::str::length(x)
+
+f(h, 3)
+}
+    set p [slFacts $m -specialize 0]
+    list [slVerdict $p f* 6 str activation] [slReasons $p f* 6 str activation]
+} -result {unknown unknown}
+
+test sl-exact-callable {the same call made exact by a specialization instance (an exact callable key): resolved, and confined} -body {
+    set m {
+import std::int
+import std::str
+
+fn f(g, n: int) -> int:
+    s = std::int::to_string(n)
+    g(s)
+
+fn h(x: str) -> int:
+    std::str::length(x)
+
+f(h, 3)
+}
+    slVerdict [slFacts $m] f* 6 str activation
+} -result {confined}
+
+test sl-mut-erased {a value given to a parameter typed `any` and from there to a function value: unknown} -body {
+    set m {
+import std::int
+import std::str
+
+fn apply(g: any, x: any) -> any:
+    g(x)
+
+fn f(n: int) -> int:
+    s = std::int::to_string(n)
+    apply(std::str::length, s)
+    0
+
+f(3)
+}
+    slVerdict [slFacts $m -specialize 0] f* 9 str activation
+} -result {unknown}
+
+test sl-mut-yield {a value yielded escapes the activation (yield), whatever the resumer does with it} -body {
+    set m {
+import std::coroutine
+import std::int
+import std::str
+
+fn w(seed: int) -> str:
+    s = std::int::to_string(seed)
+    yield s
+    ""
+
+coroutine {step, first} = w(3)
+[std::str::length(first), std::str::length(step())]
+}
+    set p [slFacts $m]
+    list [slVerdict $p w* 7 str activation] [slReasons $p w* 7 str activation]
+} -result {escapes yield}
+
+test sl-mut-context {stored into an installed context's vector: escapes (context)} -body {
+    set m {
+import std::int
+import std::mutable_vector
+
+context struct Log:
+    lines: MutableVector[str]
+
+fn note(n: int, context l: Log):
+    s = std::int::to_string(n)
+    l.lines.push(s)
+
+with context Log {lines: std::mutable_vector::from_list([""])}
+note(3)
+}
+    set p [slFacts $m]
+    list [slVerdict $p note* 9 str activation] [slReasons $p note* 9 str activation]
+} -result {escapes context}
+
+test sl-mut-place-param {pushed into the caller's vector through a place parameter: escapes the callee (caller) and, in the caller, the iteration (carried)} -body {
+    set m {
+import std::int
+import std::mutable_vector
+
+fn stash(place v: MutableVector[str], n: int):
+    s = std::int::to_string(n)
+    v.push(s)
+
+fn f(n: int) -> int:
+    v = std::mutable_vector::from_list([""])
+    fold i from 0 to n with intermediate acc 0:
+        t = std::int::to_string(i)
+        v.push(t)
+        stash(v, i)
+        acc + 1
+
+f(3)
+}
+    set p [slFacts $m]
+    set s [dict get [hir::lifetime::unit [lindex $p 1] [slUnit [lindex $p 1] stash*]] summary]
+    list [slVerdict $p stash* 6 str activation] [slReasons $p stash* 6 str activation] [dict get $s freshInto] \
+        [slVerdict $p f* 12 str iteration@11] [slVerdict $p f* 14 fresh iteration@11]
+} -result {escapes caller 0 escapes escapes}
+
+test sl-mut-message {a resume message the coroutine only reads stays in the handle (confined); one it keeps escapes it (unknown)} -body {
+    set reads {
+import std::coroutine
+import std::int
+import std::str
+
+struct M:
+    text: str
+
+fn w(seed: int, resume M) -> int:
+    m = yield seed
+    std::str::length(m.text)
+
+coroutine {step, first} = w(3)
+x = M {text: std::int::to_string(7)}
+[first, step(x)]
+}
+    set keeps {
+import std::coroutine
+import std::int
+import std::str
+
+struct M:
+    text: str
+
+fn w(seed: int, resume M) -> str:
+    m = yield ""
+    m.text
+
+coroutine {step, first} = w(3)
+x = M {text: std::int::to_string(7)}
+[first, step(x)]
+}
+    list [slVerdict [slFacts $reads] <program>* 14 struct activation] [slVerdict [slFacts $keeps] <program>* 14 struct activation]
+} -result {confined escapes}
+
+# ---------------------------------------------------------------------------
+# Calls, specialization, recursion
+
+test sl-recursion {a recursive function returning its argument: the fixpoint gives the summary (result holds the parameter), and its caller's String escapes through it} -body {
+    set m {
+import std::int
+import std::str
+
+fn down(x: str, n: int) -> str:
+    if n > 0:
+        down(x, n - 1)
+    else:
+        x
+
+fn f(n: int) -> str:
+    s = std::int::to_string(n)
+    down(s, n)
+
+std::str::length(f(3))
+}
+    set p [slFacts $m]
+    list [dict get [hir::lifetime::unit [lindex $p 1] [slUnit [lindex $p 1] down*]] summary resultParams] \
+        [slVerdict $p f* 12 str activation]
+} -result {0 escapes}
+
+test sl-specialization {instances of one function: the String instance's summary holds its parameter; the Int instance has no object to hold} -body {
+    set m {
+import std::int
+import std::str
+
+fn same(x):
+    x
+
+a = same(3)
+b = same(std::int::to_string(4))
+a + std::str::length(b)
+}
+    set p [slFacts $m]
+    lassign $p hir facts
+    set out {}
+    foreach id [hir::lifetime::units $facts] {
+        set u [hir::lifetime::unit $facts $id]
+        if {[string match same<* [dict get $u label]]} {
+            lappend out [list [dict get $u label] [dict get $u summary resultParams]]
+        }
+    }
+    lsort $out
+} -result {{same<int> {}} {same<str> 0}}
+
+test sl-pending-operand {a value evaluated before a yielding call and consumed after it is a pending operand live across the call's suspension} -body {
+    set m {
+import std::coroutine
+import std::int
+import std::str
+
+fn inner(n: int) -> int:
+    yield n
+    n
+
+fn outer(seed: int) -> int:
+    std::str::length(std::int::to_string(seed)) + inner(seed)
+
+coroutine {step, first} = outer(3)
+[first, step()]
+}
+    set p [slFacts $m]
+    list [slLive $p outer* 11] [slVerdict $p outer* 11 str segment]
+} -result {pending@11 confined}
+
+test sl-held-by-callee {an object given to a yielding call is held across the callee's suspension: not segment-confined} -body {
+    set m {
+import std::coroutine
+import std::int
+import std::str
+
+fn inner(s: str) -> int:
+    yield 1
+    std::str::length(s)
+
+fn outer(seed: int) -> int:
+    t = std::int::to_string(seed)
+    inner(t)
+
+coroutine {step, first} = outer(3)
+[first, step()]
+}
+    set p [slFacts $m]
+    lassign $p hir facts
+    set u [hir::lifetime::unit $facts [slUnit $facts outer*]]
+    list [slVerdict $p outer* 11 str segment] [llength [dict get [lindex [dict get $u suspensions] 0] held]]
+} -result {escapes 1}
+
+test sl-child-handle {a child coroutine's handle live across the parent's suspension keeps the child (and what it holds) across it} -body {
+    set m {
+import std::coroutine
+import std::int
+import std::str
+
+fn child(s: str) -> int:
+    yield 1
+    std::str::length(s)
+
+fn parent(seed: int) -> int:
+    t = std::int::to_string(seed)
+    coroutine {step, first} = child(t)
+    yield first
+    step()
+
+coroutine {step: pstep, first: pfirst} = parent(3)
+[pfirst, pstep()]
+}
+    set p [slFacts $m]
+    list [slLive $p parent* 13] [slVerdict $p parent* 12 coroutine segment] [slVerdict $p parent* 11 str segment] \
+        [slVerdict $p parent* 11 str activation]
+} -result {step escapes escapes confined}
+
+test sl-loop-position {a yield inside a counted loop keeps the loop's position (and its bound, a binding) across it} -body {
+    set m {
+import std::coroutine
+
+fn w(n: int) -> int:
+    loop i from 0 to n:
+        yield i
+    0
+
+coroutine {step, first} = w(3)
+[first, step()]
+}
+    slLive [slFacts $m] w* 6
+} -result {n pos@5}
+
+test sl-thousand-fields {a struct of a thousand fields is as confined as a pair: no width, transport or profitability policy decides a fact} -body {
+    set fields [join [lmap i [lrange [lsearch -all [lrepeat 1000 x] x] 0 end] {string cat "    f$i: str"}] \n]
+    set values [join [lmap i [lsearch -all [lrepeat 1000 x] x] {string cat "f$i: s"}] ", "]
+    set m "import std::int\nimport std::str\n\nstruct Big:\n$fields\n\nfn f(n: int) -> int:\n    s = std::int::to_string(n)\n    b = Big {$values}\n    std::str::length(b.f999)\n\nf(3)\n"
+    set p [slFacts $m]
+    list [slVerdict $p f* 1008 struct activation] [slVerdict $p f* 1007 str activation]
+} -result {confined confined}
+
+# ---------------------------------------------------------------------------
+# Source-spelling invariance
+
+foreach {name a b} {
+    nested-flat {
+import std::int
+import std::str
+
+fn f(n: int) -> int:
+    std::str::length(std::int::to_string(n).concat("x"))
+
+f(3)
+    } {
+import std::int
+import std::str
+
+fn f(n: int) -> int:
+    t = std::int::to_string(n)
+    u = t.concat("x")
+    std::str::length(u)
+
+f(3)
+    }
+    conditional {
+import std::int
+import std::str
+
+fn f(n: int) -> int:
+    s = if n > 2:
+        std::int::to_string(n)
+    else:
+        std::int::to_string(0)
+    std::str::length(s)
+
+f(3)
+    } {
+import std::int
+import std::str
+
+fn f(n: int) -> int:
+    if n > 2:
+        s = std::int::to_string(n)
+        std::str::length(s)
+    else:
+        s = std::int::to_string(0)
+        std::str::length(s)
+
+f(3)
+    }
+    return {
+import std::int
+
+fn f(n: int) -> str:
+    return std::int::to_string(n)
+
+f(3)
+    } {
+import std::int
+
+fn f(n: int) -> str:
+    std::int::to_string(n)
+
+f(3)
+    }
+} {
+    test sl-spelling-$name "equivalent spellings ($name) give the same facts" -body [list \
+        expr "\[slNormalized \[slFacts [list $a]\] f*\] eq \[slNormalized \[slFacts [list $b]\] f*\]"] -result 1
+}
+
+# ---------------------------------------------------------------------------
+# Determinism, isolation, no change
+
+test sl-deterministic {the same program analyzed twice gives the same report, byte for byte} -body {
+    lassign [slFacts {-case p13}] hir facts
+    lassign [slFacts {-case p13}] hir2 facts2
+    expr {[hir::lifetime::report $hir $facts] eq [hir::lifetime::report $hir2 $facts2]}
+} -result 1
+
+test sl-isolation {facts do not depend on what was analyzed before (no state across compilations), and the analysis leaves the HIR unchanged} -body {
+    set hir [surface::readProgramFile [lindex [glob [file join $::slCases p07b*.bot]] 0] -warnings off]
+    set copy $hir
+    set first [hir::lifetime::report $hir [hir::lifetime::analyze $hir]]
+    slFacts {-case p12}
+    slFacts {-case p05}
+    set again [hir::lifetime::report $hir [hir::lifetime::analyze $hir]]
+    list [expr {$first eq $again}] [expr {$copy eq $hir}]
+} -result {1 1}
+
+test sl-depth {programs nested 300 deep analyze at Tcl's default recursion limit (the walks that follow the nesting are guarded)} -body {
+    source [file join $::projectRoot audit depth-safe-nesting tools specimens.tcl]
+    set limit [interp recursionlimit {}]
+    set out {}
+    foreach kind {paren call project struct ifnest loops handler fnnest} {
+        set hir [surface::compile [dict get [dsn::specimen $kind 300] source] -warnings off]
+        interp recursionlimit {} 1000
+        try {
+            set facts [hir::lifetime::analyze $hir]
+            lappend out [expr {[llength [hir::lifetime::units $facts]] > 0}]
+        } finally {
+            interp recursionlimit {} $limit
+        }
+    }
+    set out
+} -result {1 1 1 1 1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# The independent evidence, in small runs
+
+test sl-oracle {the analysis agrees with the independent oracle's model on generated programs: no unsound result} -body {
+    set out [exec [info nameofexecutable] [file join $::slTools fuzz.tcl] -seeds 1-2 -count 12]
+    lindex [split $out \n] end
+} -match regexp -result {programs 24, invalid 0, suspensions \d+, unsound 0, .*}
+
+test sl-oracle-c {Int-only generated programs: the oracle agrees, and C's frame persistence keeps every value the analysis says survives a suspension} -body {
+    set out [exec [info nameofexecutable] [file join $::slTools fuzz.tcl] -seeds 3 -count 12 -strings 0]
+    list [regexp {C differential: frames \d+, violations 0} $out] [regexp {unsound 0} $out]
+} -result {1 1}
+
+test sl-persist-corpus {the census corpus against C's frame persistence: no violation; p18's frame keeps x and a join no path needs} -body {
+    set out [exec [info nameofexecutable] [file join $::slTools persist.tcl] -quiet 1 \
+        {*}[lsort [glob [file join $::slCases *.bot]]]]
+    list [regexp {violations 0} [lindex [split $out \n] end]] \
+        [regexp {p18-persist-precision: worker \(i[0-9]+\): HIR requires 0 \(\); C keeps 2 \(v_x_5, j1\); extra: v_x_5, j1} $out]
+} -result {1 1}
+
+test sl-native-reachability {the native backend under GC stress never finds reachable, iterations later, an object the analysis confines to its iteration} -constraints slNative -body {
+    set out [exec [info nameofexecutable] [file join $::slTools reachability.tcl] -small 4 -large 16]
+    lindex [split $out \n] end
+} -result {contradictions 0}
+
+cleanupTests

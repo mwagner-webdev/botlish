@@ -1,0 +1,24 @@
+unit <program>
+  summary: keeps nothing it is given
+  exits of activation:
+    result at the end: live 
+  exits of iteration of the fold at p01-sequential-temps.bot:14:1:
+    next at p01-sequential-temps.bot:14:1: live acc, the position of the fold at p01-sequential-temps.bot:14:1
+unit label<int>
+  summary: keeps nothing it is given
+  producer call of std::int::to_string (str) at p01-sequential-temps.bot:9:9
+    activation: confined
+    segment: confined
+  producer call of std::str::concat (str) at p01-sequential-temps.bot:9:9
+    activation: confined
+    segment: confined
+    coexists with: call of std::int::to_string at p01-sequential-temps.bot:9:9
+  producer call of std::int::to_string (str) at p01-sequential-temps.bot:11:9
+    activation: confined
+    segment: confined
+  producer call of std::str::concat (str) at p01-sequential-temps.bot:11:9
+    activation: confined
+    segment: confined
+    coexists with: call of std::int::to_string at p01-sequential-temps.bot:11:9
+  exits of activation:
+    result at p01-sequential-temps.bot:8:9: live 
