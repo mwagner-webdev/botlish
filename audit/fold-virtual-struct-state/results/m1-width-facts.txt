@@ -1,0 +1,104 @@
+# FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md, section 14: tools/width-facts.tcl (off = -struct-fold 0 -struct-ref-joins 0, the base lowering)
+program          config decision                 regs   raw  manag  safe   cand  live  shad  frame traffic
+few-2.bot        slots  virtual 2                  22     8     14     3      7     3     3     64      18
+few-2.bot        off    -                          25     8     17     5     11     3     3     96      31
+few-4.bot        slots  virtual 4                  30    10     20     3      9     5     5     80      20
+few-4.bot        off    -                          31    10     21     5     15     4     4    128      38
+few-6.bot        slots  virtual 6                  38    12     26     3     11     7     7     96      22
+few-6.bot        off    -                          37    12     25     5     19     6     6    176      46
+few-8.bot        slots  virtual 8                  46    14     32     3     13     9     9    112      24
+few-8.bot        off    -                          43    14     29     5     23     8     8    224      54
+few-16.bot       slots  virtual 16                 78    22     56     3     21    17    17    176      32
+few-16.bot       off    -                          67    22     45     5     39    16    16    496     112
+few-32.bot       slots  virtual 32                145    38    107     4     69    33    33    560     113
+few-32.bot       off    -                         115    38     77     5     71    32    32   1008     210
+few-64.bot       slots  virtual 64                273    70    203     4    133    65    65   1072     209
+few-64.bot       off    -                         211    70    141     5    135    64    64   2032     403
+most-2.bot       slots  virtual 2                  39    15     24     7     15     3     3     64      30
+most-2.bot       off    -                          42    15     27     9     19     3     3     96      39
+most-4.bot       slots  virtual 4                  69    25     44    13     29     5     5    112      60
+most-4.bot       off    -                          70    25     45    15     35     5     5    176      66
+most-6.bot       slots  virtual 6                  99    35     64    19     43     7     7    144      86
+most-6.bot       off    -                          98    35     63    21     51     7     7    240      90
+most-8.bot       slots  virtual 8                 129    45     84    25     57     9     9    176     112
+most-8.bot       off    -                         126    45     81    27     67     9     9    304     114
+most-16.bot      slots  virtual 16                249    85    164    49    113    17    17    304     280
+most-16.bot      off    -                         238    85    153    51    131    17    17    560     210
+most-32.bot      slots  virtual 32                492   165    327    98    257    33    33    848     716
+most-32.bot      off    -                         462   165    297    99    259    33    33   1072     402
+most-64.bot      slots  virtual 64                972   325    647   194    513    65    65   1616    1356
+most-64.bot      off    -                         910   325    585   195    515    65    65   2096     786
+branch-2.bot     slots  virtual 2                  40    14     26     7     14     4     4     96      39
+branch-2.bot     off    -                          42    14     28     9     18     4     4    128      49
+branch-4.bot     slots  virtual 4                  64    20     44    13     26     6     6    128      72
+branch-4.bot     off    -                          62    20     42    15     32     6     6    192      75
+branch-6.bot     slots  virtual 6                  88    26     62    19     38     8     8    160     100
+branch-6.bot     off    -                          82    26     56    21     46     8     8    256     101
+branch-8.bot     slots  virtual 8                 112    32     80    25     50    10    10    192     128
+branch-8.bot     off    -                         102    32     70    27     60    10    10    320     127
+branch-16.bot    slots  virtual 16                208    56    152    49     98    18    18    320     293
+branch-16.bot    off    -                         182    56    126    51    116    18    18    576     231
+branch-32.bot    slots  virtual 32                403   104    299    98    226    34    34    864     659
+branch-32.bot    off    -                         342   104    238    99    228    34    34   1088     439
+branch-64.bot    slots  virtual 64                787   200    587   194    450    66    66   1632    1234
+branch-64.bot    off    -                         662   200    462   195    452    66    66   2112     855
+nested-2.bot     slots  virtual 2                  38    11     27     9     21     4     4    128      53
+nested-2.bot     off    -                          43    11     32    11     23     4     4    160      60
+nested-4.bot     slots  virtual 4                  54    15     39    13     31     6     6    160      82
+nested-4.bot     off    -                          57    15     42    15     33     6     6    224      81
+nested-6.bot     slots  virtual 6                  70    19     51    17     41     8     8    192     108
+nested-6.bot     off    -                          71    19     52    19     43     8     8    288     103
+nested-8.bot     slots  virtual 8                  86    23     63    21     51    10    10    224     134
+nested-8.bot     off    -                          85    23     62    23     53    10    10    352     125
+nested-16.bot    slots  virtual 16                150    39    111    37     91    18    18    352     274
+nested-16.bot    off    -                         141    39    102    39     93    18    18    608     213
+nested-32.bot    slots  virtual 32                282    71    211    70    203    34    34    896     575
+nested-32.bot    off    -                         253    71    182    71    173    34    34   1120     389
+nested-64.bot    slots  virtual 64                538   135    403   134    395    66    66   1664    1087
+nested-64.bot    off    -                         477   135    342   135    333    66    66   2144     741
+spill-2.bot      slots  virtual 2                  38    16     22     5     11     3     3     80      31
+spill-2.bot      off    -                          41    16     25     7     15     3     3    112      40
+spill-4.bot      slots  virtual 4                  62    24     38     9     21     5     5    112      57
+spill-4.bot      off    -                          63    24     39    11     27     5     5    176      65
+spill-6.bot      slots  virtual 6                  86    32     54    13     31     7     7    144      79
+spill-6.bot      off    -                          85    32     53    15     39     7     7    240      87
+spill-8.bot      slots  virtual 8                 110    40     70    17     41     9     9    176     101
+spill-8.bot      off    -                         107    40     67    19     51     9     9    304     109
+spill-16.bot     slots  virtual 16                206    72    134    33     81    17    17    304     239
+spill-16.bot     off    -                         195    72    123    35     99    17    17    560     197
+spill-32.bot     slots  virtual 32                401   136    265    66    193    33    33    848     568
+spill-32.bot     off    -                         371   136    235    67    195    33    33   1072     373
+spill-64.bot     slots  virtual 64                785   264    521   130    385    65    65   1616    1080
+spill-64.bot     off    -                         723   264    459   131    387    65    65   2096     725
+
+# ret-W: the fold function is g
+program          config decision                 regs   raw  manag  safe   cand  live  shad  frame traffic
+ret-2.bot        slots  virtual 2                  32    11     21     6     12     4     4     96      33
+ret-2.bot        off    -                          32    11     21     8     16     4     4    128      43
+ret-4.bot        slots  virtual 4                  54    17     37    12     24     6     6    144      85
+ret-4.bot        off    -                          52    17     35    14     30     6     6    192      78
+ret-6.bot        slots  virtual 6                  76    23     53    18     36     8     8    176     113
+ret-6.bot        off    -                          72    23     49    20     44     8     8    256     106
+ret-8.bot        slots  virtual 8                  98    29     69    24     48    10    10    208     141
+ret-8.bot        off    -                          92    29     63    26     58    10    10    320     134
+ret-16.bot       slots  virtual 16                186    53    133    49    112    18    18    464     328
+ret-16.bot       off    -                         172    53    119    50    114    18    18    576     246
+ret-32.bot       slots  virtual 32                362   101    261    97    224    34    34    864     650
+ret-32.bot       off    -                         332   101    231    98    226    34    34   1088     470
+ret-64.bot       slots  virtual 64                714   197    517   193    448    66    66   1632    1225
+ret-64.bot       off    -                         652   197    455   194    450    66    66   2112     918
+
+# 128 and 256 fields
+program          config decision                 regs   raw  manag  safe   cand  live  shad  frame traffic
+most-128.bot     slots  dropped width            1806   645   1161   387   1027   129   129   4096    1555
+most-128.bot     off    -                        1806   645   1161   387   1027   129   129   4096    1555
+most-128.bot     noceiling virtual 128              1932   645   1287   386   1025   129   129   3152    2550
+most-256.bot     slots  dropped width            3598  1285   2313   771   2051   257   257   4096    4117
+most-256.bot     off    -                        3598  1285   2313   771   2051   257   257   4096    4117
+most-256.bot     noceiling virtual 256              3852  1285   2567   770   2049   257   257   4096    5323
+spill-128.bot    slots  dropped width            1427   520    907   259    771   129   129   4096    1301
+spill-128.bot    off    -                        1427   520    907   259    771   129   129   4096    1301
+spill-128.bot    noceiling virtual 128              1553   520   1033   258    769   129   129   3152    2117
+spill-256.bot    slots  dropped width            2835  1032   1803   515   1539   257   257   4096    3298
+spill-256.bot    off    -                        2835  1032   1803   515   1539   257   257   4096    3298
+spill-256.bot    noceiling virtual 256              3089  1032   2057   514   1537   257   257   4096    4606

@@ -1,0 +1,1004 @@
+# fold-virtual-struct-state.test -- a fold's struct intermediate carried as
+# independent field registers (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md).
+#
+# hir/escape.tcl's struct scalar replacement gains its fourth slot kind, the
+# fold slot: a fold intermediate every incoming value of which is one struct
+# descriptor (the initial value and every normal completion: a construction,
+# the intermediate itself, or a reference to a virtual local or intermediate)
+# is carried as N loop-carried registers by native lowering, its completion
+# moved into them by a parallel back edge, its value handed on as fields
+# where the fold is itself a recognized construction (a fold-valued function
+# returns `retmulti` fields) and built once otherwise. A slot is declined
+# when a use that needs the whole object may run in an iteration that then
+# keeps the intermediate unchanged (the no-loss rule). An `if` branch may end
+# in a reference to a virtual binding of the same descriptor (a join with an
+# identity branch), and a whole-struct share of a carried intermediate (a
+# copying fold's entry copy) is lowered field by field.
+#
+# Every program runs on the interpreter, the Tcl compiler, both native
+# backends, the specialized backend with fold slots off, with reference
+# joins off, with struct scalar replacement off, and with coroutine fusion
+# off: the outcomes must be one. The representation tests read the fold slots
+# (native::foldSlots), the struct census and the native allocation counters
+# (native::allocationReport), always measured without GC stress (a run under
+# stress collects on its own timing; its values are still checked).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot native native.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+# Every configuration a program's outcome must agree on: a backend and the
+# lowering's environment for it.
+set ::fvsConfigs {
+    interp {}
+    compile {}
+    cranelift-generic {}
+    cranelift {}
+    cranelift {BOTLISH_NATIVE_STRUCT_FOLD 0}
+    cranelift {BOTLISH_NATIVE_STRUCT_REF_JOINS 0}
+    cranelift {BOTLISH_NATIVE_STRUCT_OPT 0}
+    cranelift-unfused {}
+}
+
+# Runs SCRIPT (in the caller) with the environment variables of PAIRS set,
+# restoring them after.
+proc fvsWithEnv {pairs script} {
+    set saved {}
+    foreach {name value} $pairs {
+        lappend saved $name [expr {[info exists ::env($name)] ? [list 1 $::env($name)] : [list 0 ""]}]
+        set ::env($name) $value
+    }
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        foreach {name old} $saved {
+            if {[lindex $old 0]} {
+                set ::env($name) [lindex $old 1]
+            } else {
+                unset ::env($name)
+            }
+        }
+    }
+}
+
+proc fvsHir {text} {
+    return [surface::compile $text t.bot -warnings off]
+}
+
+# The outcome of TEXT ({value V} or {error CODE}), the same on every
+# configuration; else what differs.
+set ::fvsPrograms {}
+
+proc fvsValue {text} {
+    lappend ::fvsPrograms $text
+    set hir [fvsHir $text]
+    set outcomes {}
+    foreach {backend env} $::fvsConfigs {
+        lappend outcomes [list $backend $env [fvsWithEnv $env {lrange [outcomeUnderHir $backend $hir] 0 1}]]
+    }
+    set distinct [lsort -unique [lmap o $outcomes {lindex $o 2}]]
+    if {[llength $distinct] != 1} {
+        return "DISAGREE: $outcomes"
+    }
+    return [lindex $distinct 0]
+}
+
+# The native allocation report of HIR's run (no GC stress) under lowering
+# OPTIONS.
+proc fvsReport {hir args} {
+    fvsWithEnv {} {}
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set saved [expr {$had ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
+    try {
+        return [native::allocationReport $hir summary 1 {*}$args]
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_GC_STRESS) $saved
+        }
+    }
+}
+
+# The Struct allocations of TEXT's native run under lowering OPTIONS.
+proc fvsStructs {text args} {
+    return [dict get [fvsReport [fvsHir $text] {*}$args] byKind Struct allocations]
+}
+
+# {SHARES DETACHES ELEMENTS} of the MutableVector copy-on-write counters of
+# TEXT's native run under OPTIONS.
+proc fvsCopies {text args} {
+    set report [fvsReport [fvsHir $text] {*}$args]
+    if {![dict exists $report mutableVector]} {
+        return {0 0 0}
+    }
+    set counts [dict get $report mutableVector]
+    return [lmap f {shares detaches detachElements} {dict getdef $counts $f 0}]
+}
+
+# The List elements copied by TEXT's native run under OPTIONS.
+proc fvsListCopies {text args} {
+    return [dict get [fvsReport [fvsHir $text] {*}$args] copies listElements]
+}
+
+# The fold slots of TEXT under OPTIONS: one "FUNCTION NAME STATUS ?WHY?"
+# per shaped fold intermediate (FUNCTION its instance label's function).
+proc fvsSlots {text args} {
+    return [lmap rec [native::foldSlots [fvsHir $text] {*}$args] {
+        set f [lindex [split [dict get $rec label] <] 0]
+        string trim "$f [dict get $rec name] [dict get $rec status] [dict get $rec reason]"
+    }]
+}
+
+# The struct census classes of TEXT ({class count ...}, sorted).
+proc fvsCensus {text args} {
+    set counts [dict create]
+    foreach rec [native::structCensus [fvsHir $text] {*}$args] {
+        set what [dict get $rec class]
+        if {$what eq "materialized"} {
+            append what ([dict get $rec reason])
+        }
+        dict incr counts $what
+    }
+    return [lsort -stride 2 $counts]
+}
+
+# The NIR of TEXT's function NAME (its first func of that name).
+proc fvsNir {text name args} {
+    set nir [native::nir [fvsHir $text] {*}$args]
+    set lines {}
+    set in 0
+    foreach line [split $nir \n] {
+        if {!$in && [string match "func * \"$name\" *" $line]} {
+            set in 1
+        }
+        if {$in} {
+            lappend lines $line
+            if {$line eq "end"} {
+                break
+            }
+        }
+    }
+    return [join $lines \n]
+}
+
+set ::fvsP {import std::list
+
+struct P:
+    a: int
+    b: int
+
+}
+
+# ---------------------------------------------------------------------------
+# The workloads
+
+test fvs-scanner {the six-field scanner: both folds carried, nothing built} -constraints nativeBuilt -body {
+    set text [core::ReadFile [file join $::projectRoot audit fold-loops workloads scanner-fold.bot]]
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0] [fvsSlots $text]
+} -result {{value {[26, 15, 1116, 3]}} 0 161 {{number_at num virtual} {scan s virtual}}}
+
+test fvs-scanner-result-transport {a fold-valued function returns retmulti fields} -constraints nativeBuilt -body {
+    set text [core::ReadFile [file join $::projectRoot audit fold-loops workloads scanner-fold.bot]]
+    set nir [native::nir [fvsHir $text]]
+    list [regexp {func \S+ "number_at" [^\n]*results=2} $nir] \
+        [regexp {callmulti} $nir] [regexp -all {structnew} $nir]
+} -result {1 1 0}
+
+test fvs-scanner-two {the two-field scanner: nothing built} -constraints nativeBuilt -body {
+    set text [core::ReadFile [file join $::projectRoot audit fold-virtual-struct-state workloads a-scan2-fold.bot]]
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0]
+} -result {{value {[26]}} 0 161}
+
+test fvs-scanner-four {the four-field scanner: nothing built} -constraints nativeBuilt -body {
+    set text [core::ReadFile [file join $::projectRoot audit fold-virtual-struct-state workloads a-scan4-fold.bot]]
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0]
+} -result {{value {[26, 15, 1116]}} 0 161}
+
+test fvs-chunks-m2-boundary {an immutable List field: the struct goes, the List copies stay (M2)} -constraints nativeBuilt -body {
+    set text [core::ReadFile [file join $::projectRoot audit fold-loops workloads chunks-fold.bot]]
+    regsub -line {^n = \d+$} $text {n = 256} text
+    set copies [fvsListCopies $text]
+    set copiesOff [fvsListCopies $text -struct-fold 0]
+    list [fvsValue $text] [fvsStructs $text] [expr {[fvsStructs $text -struct-fold 0] > 200}] \
+        [expr {$copies == $copiesOff}]
+} -result {{value {[110, 233, 22408]}} 0 1 1}
+
+# ---------------------------------------------------------------------------
+# Control flow: the one back-edge move
+
+test fvs-exits {continue, break, partial and identity completions keep their meaning} -constraints nativeBuilt -body {
+    set text [core::ReadFile [file join $::projectRoot audit fold-virtual-struct-state workloads d-exits.bot]]
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0] [llength [fvsSlots $text]]
+} -result {{value {[[0, 37], [27, 7], [16, 17], [3, 4], [40, 8], [4, 10], [9, 4], [16, 21], [1, 0], [36, 8]]}} 10 69 10}
+
+test fvs-swap-parallel {a completion that permutes the fields: a parallel back edge} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn swap_pure(xs: List\[int\]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 1}:
+        P {a: s.b, b: s.a}
+
+p = swap_pure(\[1, 2, 3\])
+q = swap_pure(\[1, 2\])
+\[p.a, p.b, q.a, q.b\]
+"
+    list [fvsValue $text] [fvsStructs $text]
+} -result {{value {[1, 0, 0, 1]}} 0}
+
+test fvs-swap-parallel-nir {the permuting back edge reads every carried register before writing one} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn swap_pure(xs: List\[int\]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 1}:
+        P {a: s.b, b: s.a}
+
+p = swap_pure(\[1, 2, 3\])
+\[p.a, p.b\]
+"
+    set nir [fvsNir $text swap_pure]
+    # The back edge: both carried registers copied out (T1 = move B,
+    # T2 = move A), then written from the copies (A = move T1, B = move T2):
+    # a sequential `A = move B; B = move A` would leave {1, 1}.
+    regexp {(%\d+) = move (%\d+)[^\n]*\n\s+(%\d+) = move (%\d+)[^\n]*\n\s+\4 = move \1[^\n]*\n\s+\2 = move \3} $nir
+} -result 1
+
+test fvs-rotate-three {a three-field rotation, a partial permutation, a repeated source} -constraints nativeBuilt -body {
+    set text {import std::list
+
+struct R:
+    x: int
+    y: int
+    z: int
+
+fn rotate(n: int) -> R:
+    fold i from 0 to n with intermediate r R {x: 1, y: 2, z: 3}:
+        R {x: r.y, y: r.z, z: r.x}
+
+fn partial(n: int) -> R:
+    fold i from 0 to n with intermediate r R {x: 1, y: 2, z: 3}:
+        R {x: r.y, y: r.x, z: r.z + i}
+
+fn repeated(n: int) -> R:
+    fold i from 0 to n with intermediate r R {x: 1, y: 2, z: 3}:
+        R {x: r.z, y: r.z, z: r.x + r.y}
+
+fn conditional(n: int) -> R:
+    fold i from 0 to n with intermediate r R {x: 1, y: 2, z: 3}:
+        if i.mod(2) == 0:
+            R {x: r.y, y: r.x, z: r.z}
+        else:
+            R {x: r.z, y: r.y, z: r.x}
+
+fn show(r: R) -> List[int]:
+    [r.x, r.y, r.z]
+
+[show(rotate(4)), show(rotate(3)), show(partial(3)), show(repeated(3)), show(conditional(5))]
+}
+    list [fvsValue $text] [fvsStructs $text]
+} -result {{value {[[2, 3, 1], [1, 2, 3], [2, 1, 6], [6, 6, 6], [3, 2, 1]]}} 0}
+
+test fvs-nested-permutations {nested folds permute independent carried registers} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn grid(n: int) -> P:
+    fold i from 0 to n with intermediate s P {a: 1, b: 2}:
+        t = fold j from 0 to 3 with intermediate u P {a: s.b, b: s.a}:
+            P {a: u.b, b: u.a + j}
+        P {a: t.b, b: t.a + i}
+
+g = grid(3)
+\[g.a, g.b\]
+"
+    list [fvsValue $text] [fvsStructs $text] [fvsSlots $text]
+} -result {{value {[8, 7]}} 0 {{grid s virtual} {grid u virtual}}}
+
+test fvs-empty-fold {a fold that never iterates: its value is the initial value} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn none(xs: List\[int\]) -> P:
+    fold x in xs with intermediate s P {a: 3, b: 4}:
+        P {a: s.a + x, b: s.b}
+
+fn counted(n: int) -> P:
+    fold i from 0 to n with intermediate s P {a: 5, b: 6}:
+        P {a: s.a + i, b: s.b}
+
+e = none(\[\])
+c = counted(0)
+\[e.a, e.b, c.a, c.b\]
+"
+    list [fvsValue $text] [fvsStructs $text]
+} -result {{value {[3, 4, 5, 6]}} 0}
+
+test fvs-bare-fold {a fold with no domain, ended by break, its value read as fields} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn until(limit: int) -> P:
+    fold with intermediate s P {a: 0, b: 1}:
+        if s.a >= limit:
+            break
+        P {a: s.a + 3, b: s.b * 2}
+
+u = until(10)
+\[u.a, u.b\]
+"
+    list [fvsValue $text] [fvsStructs $text] [fvsSlots $text]
+} -result {{value {[12, 16]}} 0 {{until s virtual}}}
+
+test fvs-break-candidate {a bare break after a candidate is computed yields the iteration's start} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn stop(xs: List\[int\]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 1}:
+        n = P {a: s.a + x, b: s.b * 2}
+        if x == 3:
+            break
+        n
+
+fn skip(xs: List\[int\]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 1}:
+        n = P {a: s.a + x, b: s.b * 2}
+        if x.mod(2) == 0:
+            continue
+        n
+
+b = stop(\[1, 2, 3, 4\])
+c = skip(\[1, 2, 3, 4, 5\])
+\[b.a, b.b, c.a, c.b\]
+"
+    list [fvsValue $text] [fvsStructs $text] [fvsSlots $text]
+} -result {{value {[3, 4, 9, 8]}} 0 {{skip s virtual} {stop s virtual}}}
+
+test fvs-early-return {return of the intermediate mid-fold, and a fold value returned as fields} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn early(xs: List\[int\]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 0}:
+        if x == 4:
+            return s
+        P {a: s.a + x, b: s.b + 1}
+
+e = early(\[1, 2, 3, 4, 5\])
+f = early(\[1, 2\])
+\[e.a, e.b, f.a, f.b\]
+"
+    # The `return s` exit and the exhausted fold's value are each built
+    # once; no iteration builds one.
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0]
+} -result {{value {[6, 3, 3, 2]}} 2 7}
+
+test fvs-errors {an error after a candidate, a handled error, a handler that continues} -constraints nativeBuilt -body {
+    set text [core::ReadFile [file join $::projectRoot audit fold-virtual-struct-state workloads d-errors.bot]]
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0]
+} -result {{value {[[-1, 3], [12, 5], [7, 3]]}} 0 14}
+
+test fvs-error-escapes {an error leaving the fold leaves no partial value} -constraints nativeBuilt -body {
+    set text "$::fvsP
+error Stop:
+    at: int
+
+fn step(x: int) -> int errors Stop:
+    if x > 2:
+        fail Stop {at: x}
+    x
+
+fn run(xs: List\[int\]) -> P errors Stop:
+    fold x in xs with intermediate s P {a: 0, b: 0}:
+        n = P {a: s.a + x, b: s.b + 1}
+        P {a: n.a + step(x), b: n.b}
+
+fn guarded(xs: List\[int\]) -> P:
+    r = run(xs):
+        on Stop {at}:
+            P {a: -1, b: at}
+    r
+
+r = guarded(\[1, 2, 3\])
+q = guarded(\[1, 2\])
+\[r.a, r.b, q.a, q.b\]
+"
+    list [fvsValue $text] [fvsSlots $text]
+} -result {{value {[-1, 3, 6, 2]}} {{run s virtual}}}
+
+test fvs-nested {an inner fold seeded with the intermediate, with a field, inside an inner loop} -constraints nativeBuilt -body {
+    set text [core::ReadFile [file join $::projectRoot audit fold-virtual-struct-state workloads d-nested.bot]]
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0]
+} -result {{value {[[9, 6], [10, 3], [3, 12], [123, 3]]}} 0 19}
+
+test fvs-coroutine {an intermediate live across yield, fused and unfused} -constraints nativeBuilt -body {
+    set text [core::ReadFile [file join $::projectRoot audit fold-virtual-struct-state workloads d-coroutine.bot]]
+    list [fvsValue $text] [fvsStructs $text] [withoutCoroutineFusion {fvsStructs $text}] [fvsStructs $text -struct-fold 0]
+} -result {{value {[[10], [21], [32], [6, 3]]}} 0 0 4}
+
+test fvs-gc-stress {heap-backed fields stay rooted across safepoints, under GC stress} -constraints nativeBuilt -body {
+    set text {import std::list
+import std::str
+
+struct S:
+    name: str
+    items: List[int]
+    count: int
+
+fn build(n: int) -> S:
+    fold i from 0 to n with intermediate s S {name: "", items: [], count: 0}:
+        if i.mod(3) == 0:
+            s
+        else:
+            S {name: std::str::concat(s.name, "x"), items: s.items.append(i), count: s.count + 1}
+
+r = build(40)
+[std::str::length(r.name), r.items.length(), r.count]
+}
+    set hir [fvsHir $text]
+    set plain [lrange [outcomeUnderHir cranelift $hir] 0 1]
+    set stressed [fvsWithEnv {BOTLISH_NATIVE_GC_STRESS 1} {lrange [outcomeUnderHir cranelift $hir] 0 1}]
+    set unfused [fvsWithEnv {BOTLISH_NATIVE_GC_STRESS 1} {lrange [outcomeUnderHir cranelift-unfused $hir] 0 1}]
+    list [fvsValue $text] $plain $stressed $unfused [fvsSlots $text]
+} -result {{value {[26, 26, 26]}} {value {[26, 26, 26]}} {value {[26, 26, 26]}} {value {[26, 26, 26]}} {{build s virtual}}}
+
+test fvs-affine-body {an affine value released inside the body of a carried fold} -constraints nativeBuilt -body {
+    set text "import std::list
+import std::coroutine
+
+struct P:
+    a: int
+    b: int
+
+fn gen() -> int:
+    yield 1
+    yield 2
+    0
+
+fn run(n: int) -> P:
+    fold i from 0 to n with intermediate s P {a: 0, b: 0}:
+        coroutine {step, first} = gen()
+        P {a: s.a + first, b: s.b + 1}
+
+r = run(5)
+\[r.a, r.b\]
+"
+    list [fvsValue $text] [fvsSlots $text]
+} -result {{value {[5, 5]}} {{run s virtual}}}
+
+# ---------------------------------------------------------------------------
+# Observation and materialization
+
+test fvs-observe {stored, compared, captured and forwarded intermediates} -constraints nativeBuilt -body {
+    set text [core::ReadFile [file join $::projectRoot audit fold-virtual-struct-state workloads d-observe.bot]]
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0] \
+        [lsearch -all -inline [fvsSlots $text] {* dropped *}]
+} -result {{value {[[1, 3, 6, 10], [6, 10], [10, 2], 10, [6, 3], [3, 3], [4, 10], 2]}} 30 57 {{captured s dropped capture} {compared s dropped no-loss}}}
+
+test fvs-history-independent {earlier versions retained in a List stay as they were} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn history(n: int) -> List\[P\]:
+    t = fold i from 0 to n with intermediate s {p: P {a: 0, b: 0}, seen: \[\]}:
+        {p: P {a: s.p.a + i, b: s.p.b + 1}, seen: s.seen.append(s.p)}
+    t.seen
+
+hs = history(4)
+loop h in hs:
+    \[h.a, h.b\]
+"
+    fvsValue $text
+} -result {value {[[0, 0], [0, 1], [1, 2], [3, 3]]}}
+
+test fvs-no-loss-open-call {an open call on an identity path: declined, nothing more built} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn weight(p: P) -> int:
+    p.a + p.b
+
+fn heavy(p: P) -> int:
+    p.a * p.b
+
+fn run(n: int, k: int) -> P:
+    f = if k > 0:
+        weight
+    else:
+        heavy
+    fold i from 0 to n with intermediate s P {a: 0, b: 1}:
+        w = f(s)
+        if w > 1000 * 1000:
+            P {a: s.a, b: 1}
+        elif i == n - 1:
+            P {a: s.a + 1, b: s.b + i}
+        else:
+            s
+
+r = run(512, 1)
+\[r.a, r.b, weight(r) - 1\]
+"
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0] [fvsSlots $text]
+} -result {{value {[1, 512, 512]}} 2 2 {{run s dropped no-loss}}}
+
+test fvs-no-loss-continue {a materializing use before a continue: declined} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn run(xs: List\[int\]) -> List\[P\]:
+    t = fold x in xs with intermediate s {p: P {a: 0, b: 0}, seen: \[\]}:
+        q = s.p
+        if x.mod(2) == 0:
+            continue
+        {p: P {a: q.a + x, b: q.b + 1}, seen: s.seen.append(q)}
+    t.seen
+
+fn run2(xs: List\[int\]) -> P:
+    keep = \[P {a: 0, b: 0}\]
+    fold x in xs with intermediate s P {a: 0, b: 0}:
+        if s == P {a: 9, b: 9}:
+            continue
+        P {a: s.a + x, b: s.b + 1}
+
+r = run(\[1, 2, 3\])
+r2 = run2(\[1, 2\])
+\[r.length(), r2.a, r2.b\]
+"
+    list [fvsValue $text] [fvsSlots $text]
+} -result {{value {[2, 3, 2]}} {{run2 s dropped no-loss} {run s virtual}}}
+
+test fvs-no-loss-constructing-path {a materializing use only on constructing paths: carried} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn record(n: int) -> List\[P\]:
+    t = fold i from 0 to n with intermediate s {p: P {a: 0, b: 0}, log: \[\]}:
+        if i.mod(2) == 0:
+            {p: P {a: s.p.a + i, b: s.p.b}, log: s.log.append(s.p)}
+        else:
+            s
+    t.log
+
+record(5).length()
+"
+    list [fvsValue $text] [fvsSlots $text]
+} -result {{value 3} {{record s virtual}}}
+
+test fvs-no-loss-return {a return of the intermediate ends its path: an identity completion after it is no loss} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn early(xs: List\[int\]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 0}:
+        if x == 4:
+            return s
+        if x.mod(2) == 0:
+            s
+        else:
+            P {a: s.a + x, b: s.b + 1}
+
+fn late(xs: List\[int\]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 0}:
+        if x == 9:
+            return s
+        t = s == P {a: 4, b: 2}
+        if t:
+            s
+        else:
+            P {a: s.a + x, b: s.b + 1}
+
+e = early(\[1, 2, 3, 4, 5\])
+f = early(\[1, 2, 3\])
+g = late(\[1, 2, 3, 5\])
+\[e.a, e.b, f.a, f.b, g.a, g.b\]
+"
+    list [fvsValue $text] [fvsSlots $text]
+} -result {{value {[4, 2, 4, 2, 11, 4]}} {{early s virtual} {late s dropped no-loss}}}
+
+test fvs-source-falls {a completion naming a candidate that is built anyway: the slot falls with it} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn run(xs: List\[int\]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 0}:
+        n = P {a: s.a + x, b: s.b + 1}
+        ws = loop y in \[1, 2\]:
+            \[n, n\].length() + y
+        if x > 100:
+            P {a: ws.length(), b: 0}
+        else:
+            n
+
+r = run(\[1, 2, 3\])
+\[r.a, r.b\]
+"
+    list [fvsValue $text] [fvsSlots $text]
+} -result {{value {[6, 3]}} {{run s dropped source}}}
+
+test fvs-param-initial {a struct parameter as the initial value: no slot (a parameter is no source)} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn run(p: P, n: int) -> P:
+    fold i from 0 to n with intermediate s p:
+        P {a: s.a + i, b: s.b + 1}
+
+fn twice(n: int) -> P:
+    run(P {a: n, b: n}, n)
+
+r = twice(4)
+\[r.a, r.b\]
+"
+    list [fvsValue $text] [fvsSlots $text]
+} -result {{value {[10, 8]}} {}}
+
+test fvs-unrecognized-completion {a completion no construction recognizes (an open call's result): no slot} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn step(p: P) -> P:
+    P {a: p.b, b: p.a + 1}
+
+fn back(p: P) -> P:
+    P {a: p.a + 1, b: p.b}
+
+fn run(n: int, k: int) -> P:
+    g = if k > 0:
+        step
+    else:
+        back
+    fold i from 0 to n with intermediate s P {a: 0, b: 0}:
+        g(s)
+
+r = run(5, 1)
+\[r.a, r.b\]
+"
+    list [fvsValue $text] [fvsSlots $text]
+} -result {{value {[2, 3]}} {}}
+
+test fvs-exact-call {an exact call of the intermediate takes its fields} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn weight(p: P) -> int:
+    p.a + p.b
+
+fn run(n: int) -> P:
+    fold i from 0 to n with intermediate s P {a: 0, b: 1}:
+        if weight(s) > 1000:
+            s
+        else:
+            P {a: s.a + 1, b: s.b + i}
+
+r = run(100)
+\[r.a, r.b\]
+"
+    list [fvsValue $text] [fvsStructs $text] [fvsSlots $text]
+} -result {{value {[45, 991]}} 0 {{run s virtual}}}
+
+test fvs-exact-call-nested-result {exact calls whose nested-struct results enter the slot (its initial value and its completion): their callee's results are in the slot's class, carried uncut} -constraints nativeBuilt -body {
+    set text {struct Inner:
+    a: int
+    b: int
+
+struct Outer:
+    inner: Inner
+    n: int
+
+fn start(k: int) -> Outer:
+    Outer {inner: Inner {a: k, b: k + 1}, n: 0}
+
+fn step(o: Outer, i: int) -> Outer:
+    Outer {inner: Inner {a: o.inner.b, b: o.inner.a + i}, n: o.n + 1}
+
+fn run(n: int) -> int:
+    t = fold i from 0 to n with intermediate s start(3):
+        step(s, i)
+    t.inner.a * 10000 + t.inner.b * 100 + t.n
+
+run(10)
+}
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0] [fvsSlots $text]
+} -result {{value 232910} 11 22 {{run s virtual}}}
+
+test fvs-exit-materialized {a fold value stored whole is built once, after the loop} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn many(n: int) -> List\[P\]:
+    v = fold i from 0 to n with intermediate s P {a: 0, b: 0}:
+        P {a: s.a + i, b: s.b + 1}
+    \[v, v\]
+
+ps = many(100)
+loop p in ps:
+    p.a + p.b
+"
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0]
+} -result {{value {[5050, 5050]}} 1 101}
+
+test fvs-discarded {a fold whose value nothing reads builds nothing} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn effect(n: int) -> int:
+    fold i from 0 to n with intermediate s P {a: 0, b: 0}:
+        P {a: s.a + i, b: s.b + 1}
+    n
+
+effect(50)
+"
+    list [fvsValue $text] [fvsStructs $text]
+} -result {{value 50} 0}
+
+test fvs-fold-argument {a fold's value forwarded to an exact callee's fields parameter} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn total(p: P) -> int:
+    p.a * 100 + p.b
+
+fn run(n: int) -> int:
+    t = fold i from 0 to n with intermediate s P {a: 0, b: 0}:
+        P {a: s.a + 1, b: s.b + i}
+    total(t)
+
+run(10)
+"
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0]
+} -result {{value 1045} 0 11}
+
+# ---------------------------------------------------------------------------
+# Shapes
+
+test fvs-shapes {anonymous, nested, generic, callable-field, one-field and refined intermediates} -constraints nativeBuilt -body {
+    set text [core::ReadFile [file join $::projectRoot audit fold-virtual-struct-state workloads d-shapes.bot]]
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0] [llength [fvsSlots $text]]
+} -result {{value {[[6, 3], [6, 3, 3], [6, 3], 14, 6, 6]}} 4 28 6}
+
+test fvs-nested-closed {a nested struct field stays one carried value} -constraints nativeBuilt -body {
+    set text {import std::list
+
+struct P:
+    a: int
+    b: int
+
+struct Outer:
+    inner: P
+    n: int
+
+fn run(n: int) -> Outer:
+    fold i from 0 to n with intermediate s Outer {inner: P {a: 0, b: 0}, n: 0}:
+        Outer {inner: P {a: s.inner.a + i, b: s.inner.b + 1}, n: s.n + 1}
+
+o = run(10)
+[o.inner.a, o.inner.b, o.n]
+}
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0]
+} -result {{value {[45, 10, 10]}} 11 22}
+
+test fvs-mixed-descriptor {incoming values of different descriptors: one register} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn run(n: int) -> int:
+    t = fold i from 0 to n with intermediate s {a: 0, b: 0}:
+        if i == 0:
+            {a: s.a + 1, b: s.b}
+        else:
+            {a: s.a, b: s.b + i}
+    t.a + t.b
+
+run(4)
+}
+    list [fvsValue $text] [fvsSlots $text]
+} -result {{value 7} {{run s virtual}}}
+
+test fvs-wide {a 20-field intermediate is carried; the fold ceiling declines it} -constraints nativeBuilt -body {
+    set fields [lmap i [lrange {0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19} 0 end] {set i "f$i"}]
+    set text "import std::list\n\nstruct W:\n"
+    foreach f $fields { append text "    $f: int\n" }
+    append text "\nfn run(n: int) -> int:\n    w = fold i from 0 to n with intermediate s W {[join [lmap f $fields {set f "$f: 0"}] {, }]}:\n"
+    append text "        W {[join [lmap f $fields {set f "$f: s.$f + 1"}] {, }]}\n"
+    append text "    w.f0 + w.f19\n\nrun(10)\n"
+    # The local `w` is wider than the local ceiling (16): the fold's value is
+    # built once, after the loop, for it.
+    list [fvsValue $text] [fvsSlots $text] [fvsSlots $text -struct-fold-width 16] [fvsStructs $text] \
+        [fvsStructs $text -struct-fold 0]
+} -result {{value 20} {{run s virtual}} {{run s dropped width}} 1 11}
+
+# ---------------------------------------------------------------------------
+# Mutable collection fields and the field-wise share
+
+set ::fvsAcc {import std::mutable_vector
+
+struct Acc:
+    count: int
+    items: MutableVector[int]
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn total(v: MutableVector[int]) -> int:
+    fold i from 0 to v.length() with intermediate t 0:
+        t + v.at(i)
+
+}
+
+test fvs-consumed-vector {a consumed vector field: no share, no detach, no struct} -constraints nativeBuilt -body {
+    set text "$::fvsAcc
+fn build(n: int) -> Acc:
+    fold i from 0 to n with intermediate a Acc {count: 0, items: ints()}:
+        a.items.push(i)
+        Acc {count: a.count + 1, items: a.items}
+
+r = build(100)
+\[r.count, r.items.length(), total(r.items)\]
+"
+    list [fvsValue $text] [fvsStructs $text] [fvsStructs $text -struct-fold 0] [fvsCopies $text]
+} -result {{value {[100, 100, 4950]}} 0 101 {0 0 0}}
+
+test fvs-copying-share {a copying fold's entry share lowered field-wise: the same copies, no struct} -constraints nativeBuilt -body {
+    set text "$::fvsAcc
+fn build(n: int) -> Acc:
+    fold i from 0 to n with intermediate a Acc {count: 0, items: ints()}:
+        a.items.push(i)
+        if i.mod(3) != 0:
+            continue
+        Acc {count: a.count + 1, items: a.items}
+
+r = build(60)
+\[r.count, r.items.length(), total(r.items)\]
+"
+    set copies [fvsCopies $text]
+    list [fvsValue $text] [fvsStructs $text] [expr {[fvsStructs $text -struct-fold 0] > 60}] \
+        [expr {$copies eq [fvsCopies $text -struct-fold 0]}] [expr {[lindex $copies 0] > 0}]
+} -result {{value {[20, 20, 570]}} 0 1 1 1}
+
+test fvs-copying-share-off {with reference joins off the copying fold is declined as before} -constraints nativeBuilt -body {
+    set text "$::fvsAcc
+fn build(n: int) -> Acc:
+    fold i from 0 to n with intermediate a Acc {count: 0, items: ints()}:
+        a.items.push(i)
+        if i.mod(3) != 0:
+            continue
+        Acc {count: a.count + 1, items: a.items}
+
+r = build(60)
+\[r.count, r.items.length()\]
+"
+    list [fvsSlots $text -struct-ref-joins 0] \
+        [expr {[fvsStructs $text -struct-ref-joins 0] == [fvsStructs $text -struct-fold 0]}]
+} -result {{{build a#entry dropped native call}} 1}
+
+test fvs-two-vectors {a struct of a count and two vectors, one pushed per iteration} -constraints nativeBuilt -body {
+    set text [core::ReadFile [file join $::projectRoot audit fold-virtual-struct-state workloads c-two-vecs.bot]]
+    regsub -line {^n = \d+$} $text {n = 200} text
+    list [fvsValue $text] [fvsStructs $text] [fvsCopies $text]
+} -result {{value {[200, 100, 100, 9900]}} 0 {0 0 0}}
+
+# ---------------------------------------------------------------------------
+# Joins with an identity branch outside folds (ClassifyIf's REFJOIN)
+
+test fvs-ref-join-local {a local bound to a join with a reference branch stays virtual} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn pick(x: int) -> int:
+    q = P {a: x, b: x + 1}
+    p = if x > 2:
+        q
+    else:
+        P {a: 1, b: x}
+    p.a * p.b + q.b
+
+\[pick(3), pick(1)\]
+"
+    list [fvsValue $text] [fvsCensus $text] [fvsCensus $text -struct-ref-joins 0]
+} -result {{value {[16, 3]}} {local 2} {local 1 materialized(control) 1}}
+
+test fvs-ref-join-materialized-source {a join with a reference to a materialized binding is not taken} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn pick(x: int, keep: List\[P\]) -> int:
+    q = P {a: x, b: x + 1}
+    k = keep.append(q)
+    p = if x > 2:
+        q
+    else:
+        P {a: 1, b: x}
+    p.a * p.b + k.length()
+
+\[pick(3, \[\]), pick(1, \[\])\]
+"
+    fvsValue $text
+} -result {value {[13, 2]}}
+
+# ---------------------------------------------------------------------------
+# Policy and switches
+
+test fvs-legacy-policy {the legacy policy keeps every fold one register} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn run(n: int) -> P:
+    fold i from 0 to n with intermediate s P {a: 0, b: 0}:
+        P {a: s.a + i, b: s.b + 1}
+
+r = run(10)
+\[r.a, r.b\]
+"
+    list [fvsSlots $text -struct-policy legacy] [fvsStructs $text -struct-policy legacy] [fvsStructs $text]
+} -result {{} 11 0}
+
+test fvs-struct-opt-off {struct scalar replacement off: no fold slot, the same value} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn run(n: int) -> P:
+    fold i from 0 to n with intermediate s P {a: 0, b: 0}:
+        P {a: s.a + i, b: s.b + 1}
+
+r = run(10)
+\[r.a, r.b\]
+"
+    list [fvsSlots $text -struct-opt 0] [fvsStructs $text -struct-opt 0]
+} -result {{} 11}
+
+test fvs-explain {explain names a virtual fold intermediate} -constraints nativeBuilt -body {
+    set text "$::fvsP
+fn run(n: int) -> P:
+    fold i from 0 to n with intermediate s P {a: 0, b: 0}:
+        P {a: s.a + i, b: s.b + 1}
+
+r = run(10)
+\[r.a, r.b\]
+"
+    set hir [fvsHir $text]
+    set spec [hir::specialize::analyze $hir]
+    hir::specialize::memoizeViews $hir $spec
+    set analysis [hir::escape::analyze $hir $spec 1 [dict create enabled 1]]
+    regexp {virtual fold intermediate \S+: struct P\{a, b\} \(2 fields\), carried as field registers} \
+        [hir::escape::explain $hir $spec $analysis]
+} -result 1
+
+# Standalone executables (main.tcl -emit-native-executable) of the
+# workloads and of a permuting nested-result program, plain and under GC
+# stress, against the interpreter.
+test fvs-executable {carried folds in standalone executables, plain and under GC stress, agree with the interpreter} -constraints {nativeBuilt executableAot} -body {
+    set dir [makeDirectory {fvs executable test}]
+    set programs {}
+    foreach name {d-exits d-errors d-coroutine d-observe d-shapes c-vec-continue b-counted-fold} {
+        lappend programs $name [core::ReadFile [file join $::projectRoot audit fold-virtual-struct-state workloads $name.bot]]
+    }
+    lappend programs scanner [core::ReadFile [file join $::projectRoot audit fold-loops workloads scanner-fold.bot]]
+    lappend programs permute {struct Inner:
+    a: int
+    b: int
+
+struct Outer:
+    inner: Inner
+    n: int
+
+fn step(o: Outer, i: int) -> Outer:
+    Outer {inner: Inner {a: o.inner.b, b: o.inner.a + i}, n: o.n + 1}
+
+fn run(n: int) -> List[int]:
+    t = fold i from 0 to n with intermediate s Outer {inner: Inner {a: 1, b: 2}, n: 0}:
+        if i.mod(4) == 3:
+            continue
+        if i == 9:
+            break
+        if i.mod(3) == 0:
+            Outer {inner: Inner {a: s.inner.b, b: s.inner.a}, n: s.n}
+        else:
+            step(s, i)
+    [t.inner.a, t.inner.b, t.n]
+
+[run(0), run(5), run(20)]
+}
+    set bad {}
+    try {
+        foreach {name text} $programs {
+            set path [file join $dir $name.bot]
+            set channel [open $path w]
+            fconfigure $channel -encoding utf-8 -translation lf
+            puts -nonewline $channel $text
+            close $channel
+            set expected [lindex [outcomeUnderHir interp [surface::readProgramFile $path -warnings off]] 1]
+            exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -emit-native-executable $path
+            set plain [standaloneValue [file rootname $path]]
+            set stressed [standaloneValue [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
+            if {$plain ne $expected || $stressed ne $expected} {
+                lappend bad [list $name $expected $plain $stressed]
+            }
+        }
+    } finally {
+        removeDirectory {fvs executable test}
+    }
+    list [llength $programs] $bad
+} -result {18 {}}
+
+# Every register the lowering reads is defined on every path to the read
+# (section 13 of the report): the independent check of NIR text,
+# audit/fold-virtual-struct-state/tools/defined.tcl, over every program the
+# tests above ran (the workloads when a -match ran none), with fold slots
+# and reference joins on, and each off alone.
+test fvs-nir-defined {every register the fold-slot lowering reads is defined on every path to it} -constraints nativeBuilt -body {
+    set ::definedLibrary 1
+    source [file join $::projectRoot audit fold-virtual-struct-state tools defined.tcl]
+    set programs [lsort -unique $::fvsPrograms]
+    if {$programs eq ""} {
+        foreach path [glob [file join $::projectRoot audit fold-virtual-struct-state workloads d-*.bot]] {
+            lappend programs [core::ReadFile $path]
+        }
+    }
+    set bad {}
+    foreach text $programs {
+        set hir [fvsHir $text]
+        foreach options {{} {-struct-fold 0} {-struct-ref-joins 0}} {
+            foreach v [defined::check [dict get [native::lowered $hir {*}$options] text]] {
+                lappend bad [list $options {*}[lrange $v 0 2]]
+            }
+        }
+    }
+    list [expr {[llength $programs] > 5}] $bad
+} -result {1 {}}
+
+cleanupTests
