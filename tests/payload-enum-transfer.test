@@ -1,0 +1,1563 @@
+# payload-enum-transfer.test -- PORTABILITY-PAYLOAD-ENUM-TRANSFER-
+# MILESTONE-1.md: payload-bearing enums are Sendable when every payload field
+# of every declared case is (hir::types::SendClass), and cross VM boundaries
+# through std::transfer: the `penum` schema node (hir/transfer.tcl), the Tcl
+# codec (core/transfer.tcl), the native plan (native/lower.tcl's
+# TransferPlan) and codec (native/src/runtime/transfer.rs).
+#
+# The static half: the judgement and its reasons, recursive and mutually
+# recursive declarations in any order, admission (std::transfer, a Sendable
+# view, a constrained slot, thread entries, std::actor::remote's types). The
+# schema: its canonical text and fingerprint, stable under reordering,
+# sensitive to every incompatible change; a payload-free enum's unchanged.
+# The format: fixed byte vectors, written out by hand from the format's
+# rules (never copied from a backend) and checked on every backend. The
+# dynamic half: round trips, exhaustive match of decoded values, independent
+# mutable payloads, every backend's bytes decoded by every other, refusals of
+# malformed and foreign bytes, independently compiled programs, separate
+# processes (the sender gone), GC stress, and the principal application:
+# typed remote messages and calls between threads (tests/payload-enum-
+# transfer/*.bot), each value matched exhaustively by the receiving actor.
+#
+# canary: covers hir/transfer.tcl core/transfer.tcl native/src/runtime/transfer.rs
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot tools event-loop-linux.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint botlishThreads [expr {[testConstraint nativeBuilt] && [native::hostSupports jit] && [native::hostSupports stackGuard]}]
+testConstraint threadTransport [expr {[testConstraint botlishThreads] && $::tcl_platform(os) eq "Linux"
+    && $::tcl_platform(machine) in {x86_64 amd64 aarch64}
+    && [testConstraint nativeCCalls] && [testConstraint cLinker] && [auto_execok cc] ne "" && [auto_execok ar] ne ""}]
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+proc petBackends {} {
+    if {[testConstraint nativeBuilt]} {
+        return {interp compile cranelift-generic cranelift}
+    }
+    return {interp compile}
+}
+
+set ::petPrelude {import std::transfer
+import std::ffi::c
+import std::abi
+import std::abi::bytes
+import std::byte
+import std::int
+import std::list
+import std::str
+import std::mutable_vector
+}
+
+set ::petHelpers {
+# DATA with byte I replaced by B.
+fn poke(data: std::abi::bytes::Bytes, i: int, b: std::byte::Byte) -> std::abi::bytes::Bytes:
+    m = std::abi::bytes::replace(std::abi::bytes::from_bytes(data), i, b):
+        on IndexNotFound:
+            return data
+    std::abi::bytes::freeze(m)
+
+# DATA's first N bytes.
+fn prefix(data: std::abi::bytes::Bytes, n: int) -> std::abi::bytes::Bytes:
+    std::abi::bytes::slice(data, 0, n):
+        on LowerUnderrun:
+            data
+        on UpperOverrun:
+            data
+
+fn size(data: std::abi::bytes::Bytes) -> int:
+    std::abi::bytes::length(data).value
+
+# DATA followed by the bytes XS.
+fn append(data: std::abi::bytes::Bytes, xs: List[std::byte::Byte]) -> std::abi::bytes::Bytes:
+    std::abi::bytes::join([data, std::abi::bytes::from_list(xs)])
+}
+
+# The declarations most programs share.
+set ::petDecls {
+enum Color:
+    Red, Green, Blue
+
+enum Message:
+    Ping,
+    Text {body: str},
+    Number {value: int},
+    Batch {items: List[int]},
+
+enum Shape:
+    Dot,
+    Rect {w: int, h: int, label: str, filled: bool},
+
+enum Outer:
+    Empty,
+    Wrap {inner: Message},
+
+enum Tree:
+    Leaf {value: int},
+    Branch {children: List[Tree]},
+
+enum Expr:
+    Lit {value: int},
+    Neg {e: Expr},
+    Add {left: Expr, right: Expr},
+
+enum Blob:
+    Nothing,
+    One {b: std::byte::Byte},
+
+enum Counter:
+    Idle,
+    Counts {numbers: MutableVector[int]},
+
+struct Point:
+    x: int
+    y: int
+
+struct Envelope:
+    id: int
+    message: Message
+
+opaque struct Name:
+    text: str
+    size: int
+    sendable through(name_text, name_of) as str
+
+fn name_text(n: Name) -> str:
+    n.text
+
+fn name_of(t: str) -> Name:
+    Name {text: t, size: t.length()}
+
+fn name_size(n: Name) -> int:
+    n.size
+
+enum Labeled:
+    Anonymous,
+    Named {name: Name},
+}
+
+# BODY with the prelude, BODY's own leading imports, and the helpers.
+proc petProgram {body} {
+    set imports {}
+    set rest {}
+    set header 1
+    foreach line [split $body \n] {
+        if {$header && ([string match "import *" $line] || [string trim $line] eq "")} {
+            lappend imports $line
+        } else {
+            set header 0
+            lappend rest $line
+        }
+    }
+    return "$::petPrelude\n[join $imports \n]\n$::petHelpers\n[join $rest \n]"
+}
+
+# The value every backend agrees BODY's program has, as text, or its
+# outcome when it is no value.
+proc petAgree {body} {
+    set outcome [sourceAgree [petProgram $body] [petBackends]]
+    if {[lindex $outcome 0] eq "value"} {
+        return [lindex $outcome 1]
+    }
+    return $outcome
+}
+
+set ::petHandlers {
+        on TransferMalformed:
+            return "malformed"
+        on TransferVersion:
+            return "version"
+        on TransferTypeMismatch:
+            return "mismatch"
+        on TransferInvalidValue:
+            return "invalid"
+        on TransferLimit:
+            return "limit"}
+
+# The same, each refusal false (for a Bool-valued function).
+set ::petFalse {
+        on TransferMalformed:
+            return false
+        on TransferVersion:
+            return false
+        on TransferTypeMismatch:
+            return false
+        on TransferInvalidValue:
+            return false
+        on TransferLimit:
+            return false}
+
+# A program checking that VALUE of static TYPE round-trips into an equal
+# value: "equal", "different" or the refusal.
+proc petRoundTrip {type value {decls ""}} {
+    return "$decls
+fn check(a: $type) -> str:
+    b = std::transfer::decode\[$type\](std::transfer::encode(a)):$::petHandlers
+    if a == b:
+        return \"equal\"
+    \"different\"
+
+check($value)
+"
+}
+
+# The refusal (or "ok") decoding BYTES as TYPE, after SETUP.
+proc petRefusal {type setup bytes {decls ""}} {
+    return "$decls
+fn attempt(data: std::abi::bytes::Bytes) -> str:
+    v = std::transfer::decode\[$type\](data):$::petHandlers
+    \"ok\"
+
+$setup
+attempt($bytes)
+"
+}
+
+# The HIR of DECLS (a program of the shared prelude) with a function taking
+# TYPE; the type as declared.
+proc petTyped {decls type} {
+    set hir [surface::compile [petProgram "$decls\nfn f(x: $type) -> int:\n    1\n1\n"] t.bot -warnings off]
+    hir::activate $hir
+    set p [dict get $hir exprs [lindex [dict get $hir roots] end-1]]
+    return [list $hir [lindex [dict get [dict get $hir exprs [dict get $p value]] declaredParamTypes] 0]]
+}
+
+# The schema (hir::transfer::Schema) of TYPE after DECLS; FILES library
+# modules written first.
+proc petSchema {decls type {files {}}} {
+    withPrivateLibrary {
+        petWriteModules $files
+        lassign [petTyped $decls $type] hir t
+        set schema [hir::transfer::Schema $t]
+    }
+    return $schema
+}
+
+proc petFingerprint {decls type {files {}}} {
+    return [dict get [petSchema $decls $type $files] fingerprint]
+}
+
+# {CLASS WHY} of TYPE against Sendable after DECLS.
+proc petClass {decls type {files {}}} {
+    withPrivateLibrary {
+        petWriteModules $files
+        lassign [petTyped $decls $type] hir t
+        set class [hir::types::SendClass $t]
+    }
+    return $class
+}
+
+proc petWriteModules {files} {
+    foreach {path text} $files {
+        set full [file join $::core::libraryDir $path]
+        file mkdir [file dirname $full]
+        set f [open $full w]
+        fconfigure $f -encoding utf-8
+        puts -nonewline $f $text
+        close $f
+    }
+}
+
+# The kinds of SOURCE's diagnostics, in order, or "accepted".
+proc petKinds {source {files {}}} {
+    withPrivateLibrary {
+        petWriteModules $files
+        if {[catch {surface::compile $source t.bot -warnings off} message options]} {
+            if {[dict exists $options -diagnostics]} {
+                set result [lmap d [dict get $options -diagnostics] {lindex [dict get $d errorcode] end}]
+            } else {
+                set result [list [lindex [dict get $options -errorcode] end]]
+            }
+        } else {
+            set result accepted
+        }
+    }
+    return $result
+}
+
+# The first diagnostic's message of SOURCE (its location removed), or
+# "accepted".
+proc petMessage {source} {
+    if {[catch {surface::compile $source t.bot -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            set message [dict get [lindex [dict get $options -diagnostics] 0] message]
+        }
+        return [regsub {^[^ ]*:[0-9]+:[0-9]+: } $message {}]
+    }
+    return accepted
+}
+
+# The 64-bit FNV-1a of TEXT's UTF-8, written here again (independently of
+# hir::transfer::Fingerprint).
+proc petFnv {text} {
+    set h 14695981039346656037
+    foreach b [lmap c [split [encoding convertto utf-8 $text] ""] {scan $c %c}] {
+        set h [expr {(($h ^ $b) * 1099511628211) % 18446744073709551616}]
+    }
+    return [format %016llx $h]
+}
+
+# The eight bytes of fingerprint FP (hex), little-endian.
+proc petFpBytes {fp} {
+    return [lmap i {0 1 2 3 4 5 6 7} {expr {("0x$fp" >> (8 * $i)) & 0xff}}]
+}
+
+proc petLiteral {codes} {
+    return "std::abi::bytes::from_list(\[[join [lmap b $codes {string cat "std::byte::from_int($b)"}] {, }]\])"
+}
+
+# The bytes (a list of Ints) of the std::abi::bytes::Bytes value RESULT
+# returns -- a Tcl value of one of the backends.
+proc petCodesOf {value} {
+    binary scan [binary decode hex [lindex $value 2 0 1]] cu* codes
+    return $codes
+}
+
+# The value of the HIR on BACKEND, as the Tcl backends show it.
+proc petRun {backend hir} {
+    switch -- $backend {
+        interp { return [core::evalProgram [hir::lower $hir]] }
+        compile { return [core::compiler::evalHir $hir] }
+        cranelift { return [native::evalHir $hir] }
+        cranelift-generic { return [native::evalHir $hir -specialize 0] }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# The judgement: every case's every payload field
+
+# Declarations of the matrix's components that are not sendable.
+set ::petBad {
+context struct Settings:
+    level: int
+
+opaque struct Token:
+    id: int
+}
+
+foreach {name decls type class why} {
+    payload-free {} Color total {}
+    mixed {} Message total {}
+    recursive {} Tree total {}
+    direct-recursion {} Expr total {}
+    nested {} Outer total {}
+    through {} Labeled total {}
+    mutable {} Counter total {}
+    domain {} Blob total {}
+    in-struct {} Envelope total {}
+    in-list {} {List[Message]} total {}
+    function {
+enum Request:
+    Stop,
+    Execute {work: Fn{args: [], return: int}},
+} Request none {field "work" of case Request::Execute (Fn{args: [], return: int, errors: []}): a function or closure is code of this program and the environment it captured: neither is a value another VM can rebuild}
+    coroutine {
+enum Job:
+    Done,
+    Running {handle: Coroutine{args: [], return: int}},
+} Job none {field "handle" of case Job::Running (Coroutine{args: [], return: int, errors: []}): a coroutine handle owns a suspended computation (its frames are this VM's): it cannot be copied, and moving it is not sending a value}
+    context {
+enum Mode:
+    Off,
+    On {settings: Settings},
+} Mode none {field "settings" of case Mode::On (Settings): Settings is a context struct: an installed context is authority, selected by each program's own installation, never a value one VM can hand another}
+    pointer {
+enum Handle:
+    Closed,
+    Open {p: std::ffi::c::Ptr[std::ffi::c::Void]},
+} Handle none {field "p" of case Handle::Open (std::ffi::c::Ptr[std::ffi::c::Void]): a C pointer, function pointer or native view or edit addresses native memory whose validity and thread affinity only its owner knows: it is not a value to copy}
+    opaque {
+enum Grant:
+    Denied,
+    Given {token: Token},
+} Grant none {field "token" of case Grant::Given (Token): Token is an opaque struct whose owner, the entry program, does not declare it sendable: its fields are its owner's representation, whose meaning (a value, or an identity of one VM: a slot, a handle) only the owner knows}
+    nested-collection {
+enum Plan:
+    Empty,
+    Steps {steps: List[List[Fn{args: [], return: int}]]},
+} Plan none {field "steps" of case Plan::Steps (List[List[Fn{args: [], return: int, errors: []}]]): its elements (List[Fn{args: [], return: int, errors: []}]): its elements (Fn{args: [], return: int, errors: []}): a function or closure is code of this program and the environment it captured: neither is a value another VM can rebuild}
+    nested-enum {
+enum Inner:
+    Plain,
+    Bad {f: Fn{args: [], return: int}},
+enum Wrapper:
+    Nothing,
+    Holds {inner: Inner},
+} Wrapper none {field "inner" of case Wrapper::Holds (Inner): field "f" of case Inner::Bad (Fn{args: [], return: int, errors: []}): a function or closure is code of this program and the environment it captured: neither is a value another VM can rebuild}
+    recursive-leaf {
+enum Node:
+    Leaf {run: Fn{args: [], return: int}},
+    Branch {kids: List[Node]},
+} Node none {field "run" of case Node::Leaf (Fn{args: [], return: int, errors: []}): a function or closure is code of this program and the environment it captured: neither is a value another VM can rebuild}
+    recursive-deep-leaf {
+enum Node:
+    Branch {kids: List[Node]},
+    Leaf {at: Holder},
+struct Holder:
+    run: Fn{args: [], return: int}
+} Node none {field "at" of case Node::Leaf (Holder): field "run" of Holder (Fn{args: [], return: int, errors: []}): a function or closure is code of this program and the environment it captured: neither is a value another VM can rebuild}
+    unknown {
+enum Loose:
+    Empty,
+    Any {x: any},
+} Loose unknown {field "x" of case Loose::Any (any): its static type is any, which does not say what its values are}
+} {
+    test pet-class-$name "Sendable of a payload-bearing enum is every case's payload fields': $name" -body {
+        list {*}[petClass "$::petDecls\n$::petBad\n$decls" $type]
+    } -result [list $class $why]
+}
+
+test pet-class-any-case {a payload-free case does not make an enum sendable: a value typed by the enum may be any of its cases, so one non-sendable case is enough -- whichever case comes first, and wherever it is declared} -body {
+    lmap order {
+        "enum R:\n    Stop,\n    Execute {work: Fn{args: \[\], return: int}},"
+        "enum R:\n    Execute {work: Fn{args: \[\], return: int}},\n    Stop,"
+        "enum R:\n    A {x: int},\n    B {y: str},\n    C {z: Fn{args: \[\], return: int}},\n    D,"
+    } {
+        lindex [petClass $order R] 0
+    }
+} -result {none none none}
+
+# The mutually recursive struct and enum of the order test, sendable or not.
+set ::petMutual {
+struct Holder:
+    edge: Edge
+    tag: str
+
+enum Edge:
+    Stop,
+    Next {holders: List[Holder]},
+    Back {to: Edge},
+BAD}
+
+test pet-class-order {a mutually recursive struct and enum: each class is the same whichever is asked first and whichever is declared first, sendable or not} -body {
+    set out {}
+    foreach bad [list "" "    Bad {f: Fn{args: \[\], return: int}},"] {
+        foreach decls [list [string map [list BAD $bad] $::petMutual] [string map [list BAD $bad] "enum Edge:\n    Stop,\n    Next {holders: List\[Holder\]},\n    Back {to: Edge},\nBAD\nstruct Holder:\n    edge: Edge\n    tag: str\n"]] {
+            foreach order {{Holder Edge} {Edge Holder}} {
+                withPrivateLibrary {
+                    set hir [surface::compile [petProgram "$decls\nfn f(a: Holder, b: Edge) -> int:\n    1\n1\n"] t.bot -warnings off]
+                    hir::activate $hir
+                    hir::structs::ForgetAffinity
+                    set p [dict get $hir exprs [lindex [dict get $hir roots] end-1]]
+                    lassign [dict get [dict get $hir exprs [dict get $p value]] declaredParamTypes] holder edge
+                    set types [dict create Holder $holder Edge $edge]
+                    set got [dict create]
+                    foreach t $order {
+                        dict set got $t [lindex [hir::types::SendClass [dict get $types $t]] 0]
+                    }
+                }
+                lappend out [list [dict get $got Holder] [dict get $got Edge]]
+            }
+        }
+    }
+    set out
+} -result {{total total} {total total} {total total} {total total} {none none} {none none} {none none} {none none}}
+
+# ---------------------------------------------------------------------------
+# Admission: std::transfer, a Sendable view, constrained slots, threads,
+# std::actor::remote
+
+set ::petAdmitDecls {
+enum Bad:
+    Fine,
+    Holds {f: Fn{args: [], return: int}},
+
+struct Sealed[T satisfies Sendable]:
+    body: T
+
+fn send_view(x: Sendable) -> std::abi::bytes::Bytes:
+    std::transfer::encode(x)
+}
+
+foreach {name use good bad} {
+    encode {std::transfer::encode(@V@)} accepted NOT-SENDABLE
+    decode {std::transfer::decode[@T@](std::transfer::encode(1)):
+    on TransferMalformed:
+        @V@
+    on TransferVersion:
+        @V@
+    on TransferTypeMismatch:
+        @V@
+    on TransferInvalidValue:
+        @V@
+    on TransferLimit:
+        @V@} accepted NOT-SENDABLE
+    view {send_view(@V@)} accepted TRAIT-NOT-SATISFIED
+    slot {Sealed[@T@] {body: @V@}} accepted TRAIT-NOT-SATISFIED
+} {
+    test pet-admit-$name "admission of a payload enum by $name: a sendable one is admitted, one with a non-sendable case is refused" -body {
+        set out {}
+        foreach {type value} {Message {Message::Text {body: "t"}} Bad Bad::Fine} {
+            lappend out [lindex [petKinds [petProgram "$::petDecls\n$::petAdmitDecls\n[string map [list @T@ $type @V@ $value] $use]\n"]] 0]
+        }
+        set out
+    } -result [list $good $bad]
+}
+
+test pet-admit-remote-types {std::actor::remote's capability types take a payload enum as a message, a request and a response exactly when it is sendable} -body {
+    set out {}
+    foreach t {Message Bad} {
+        lappend out [lindex [petKinds [petProgram "import std::actor::remote\n$::petDecls\n$::petAdmitDecls\nfn f(r: std::actor::remote::Remote\[$t\], s: std::actor::remote::Service\[$t, $t\]) -> int:\n    1\n1\n"]] 0]
+    }
+    set out
+} -result {accepted TRAIT-NOT-SATISFIED}
+
+test pet-admit-reason {the refusal names the enum, the case and the field, with the path to the component} -body {
+    petMessage [petProgram "$::petDecls\n$::petAdmitDecls\nstd::transfer::encode(Sealed\[Message\] {body: Message::Ping})\nstd::transfer::encode(\[Bad::Fine\])\n"]
+} -result {the argument of std::transfer::encode is not sendable: List[Bad]{length: 1} cannot be reconstructed in another VM
+its elements (Bad): field "f" of case Bad::Holds (Fn{args: [], return: int, errors: []}): a function or closure is code of this program and the environment it captured: neither is a value another VM can rebuild}
+
+# A thread entry's initialization value and result: an application module.
+test pet-admit-thread-entry {a thread entry's parameter and result may be payload enums exactly when they are sendable (THREAD-ENTRY-SIGNATURE otherwise)} -constraints botlishThreads -body {
+    set dir [makeDirectory pet-entry-[pid]]
+    set out {}
+    foreach {t value} {Message Message::Ping Bad Bad::Fine} {
+        set f [open [file join $dir jobs.bot] w]
+        puts $f "import std::thread\nimport std::str\nimport std::byte\nimport std::mutable_vector\n$::petDecls\nenum Bad:\n    Fine,\n    Holds {f: Fn{args: \[\], return: int}},\n\nthread fn job(m: $t) -> $t:\n    m\n"
+        close $f
+        set f [open [file join $dir main.bot] w]
+        puts $f "import jobs\nimport std::thread\n\nfn go(context t: std::thread::Threads) -> int errors std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:\n    {thread} = std::thread::start(std::thread::entry(jobs::job), jobs::$value)\n    m = std::thread::join(thread)\n    1\n\nwith context std::thread::create(1)\ngo():\n    on std::thread::ThreadLimit:\n        0\n    on std::thread::ThreadStartFailed {reason}:\n        0\n    on std::thread::ThreadFailed {identity, message}:\n        0\n"
+        close $f
+        if {[catch {surface::readProgramFile [file join $dir main.bot] -warnings off} message options]} {
+            lappend out [lsort -unique [lmap d [dict getdef $options -diagnostics {}] {lindex [dict get $d errorcode] end}]]
+        } else {
+            lappend out accepted
+        }
+    }
+    removeDirectory pet-entry-[pid]
+    set out
+} -result {accepted THREAD-ENTRY-SIGNATURE}
+
+test pet-semantic-rollback {a generic helper constrained by Sendable, specialized for two payload enums and a struct holding one, compiles under the semantic rollback audit (every instance walk restores the HIR exactly), and each specialization encodes its own schema} -body {
+    set audit $::hir::semantic::auditRollback
+    set ::hir::semantic::auditRollback 1
+    try {
+        petAgree "$::petDecls\nstruct Box\[T satisfies Sendable\]:\n    v: T\n\nfn bytes_of(b: Box\[T\]) -> std::abi::bytes::Bytes:\n    std::transfer::encode(b.v)\n\nfn back(x) -> int:\n    1\n\nfn sizes(m: Message, t: Tree, e: Envelope) -> List\[int\]:\n    \[size(bytes_of(Box\[Message\] {v: m})), size(bytes_of(Box\[Tree\] {v: t})), size(bytes_of(Box\[Envelope\] {v: e})), back(m), back(t)\]\n\nsizes(Message::Number {value: 300}, Tree::Leaf {value: 1}, Envelope {id: 1, message: Message::Ping})\n"
+    } finally {
+        set ::hir::semantic::auditRollback $audit
+    }
+} -result {[17, 16, 16, 1, 1]}
+
+# ---------------------------------------------------------------------------
+# The schema: canonical, nominal, the whole declaration
+
+# The pinned schema texts (hir/transfer.tcl's header: nodes numbered in the
+# order a walk in sorted order meets them; a payload-free case "-").
+set ::petTexts {
+Color {botlish-transfer 1
+0 enum Color {Blue Green Red}}
+Message {botlish-transfer 1
+0 penum Message {Batch 1 Number 4 Ping - Text 5}
+1 struct {} {items 2}
+2 list 3
+3 int
+4 struct {} {value 3}
+5 struct {} {body 6}
+6 str}
+Shape {botlish-transfer 1
+0 penum Shape {Dot - Rect 1}
+1 struct {} {filled 2 h 3 label 4 w 3}
+2 bool
+3 int
+4 str}
+Outer {botlish-transfer 1
+0 penum Outer {Empty - Wrap 1}
+1 struct {} {inner 2}
+2 penum Message {Batch 3 Number 6 Ping - Text 7}
+3 struct {} {items 4}
+4 list 5
+5 int
+6 struct {} {value 5}
+7 struct {} {body 8}
+8 str}
+Tree {botlish-transfer 1
+0 penum Tree {Branch 1 Leaf 3}
+1 struct {} {children 2}
+2 list 0
+3 struct {} {value 4}
+4 int}
+Expr {botlish-transfer 1
+0 penum Expr {Add 1 Lit 2 Neg 4}
+1 struct {} {left 0 right 0}
+2 struct {} {value 3}
+3 int
+4 struct {} {e 0}}
+Labeled {botlish-transfer 1
+0 penum Labeled {Anonymous - Named 1}
+1 struct {} {name 2}
+2 through Name 3 name_text name_of
+3 str}
+}
+
+foreach {type text} $::petTexts {
+    test pet-schema-$type "the schema of $type: its canonical text, and its fingerprint the FNV-1a of that text" -body {
+        set schema [petSchema $::petDecls $type]
+        list [expr {[dict get $schema text] eq $text}] [expr {[dict get $schema fingerprint] eq [petFnv $text]}]
+    } -result {1 1}
+}
+
+test pet-schema-payload-free-unchanged {a payload-free enum's schema is the one it had before payload-bearing enums were sendable: fingerprints pinned from the revision before this milestone} -body {
+    list [petFingerprint $::petDecls Color] [petFingerprint $::petDecls {List[Color]}] \
+        [petFingerprint "enum Color:\n    Red, Green, Blue\n\nstruct Point:\n    x: int\n    c: Color\n" Point]
+} -result {81952409bbdce335 ee91bd573f69614d e56e5cf49fe2da4a}
+
+# Declarations of one enum T and of an enum U holding it, before and after
+# each change.
+set ::petBase {
+enum T:
+    A,
+    B {x: int, y: str},
+}
+
+foreach {name decls} {
+    field-added {
+enum T:
+    A,
+    B {x: int, y: str, z: bool},
+}
+    field-removed {
+enum T:
+    A,
+    B {x: int},
+}
+    field-type {
+enum T:
+    A,
+    B {x: str, y: str},
+}
+    field-renamed {
+enum T:
+    A,
+    B {x: int, w: str},
+}
+    case-added {
+enum T:
+    A,
+    B {x: int, y: str},
+    C,
+}
+    case-removed {
+enum T:
+    B {x: int, y: str},
+}
+    case-renamed {
+enum T:
+    Z,
+    B {x: int, y: str},
+}
+    payload-added {
+enum T:
+    A {q: int},
+    B {x: int, y: str},
+}
+    payload-moved {
+enum T:
+    A {x: int, y: str},
+    B,
+}
+    list-element {
+enum T:
+    A,
+    B {x: List[int], y: str},
+}
+} {
+    test pet-fingerprint-changes-$name "an incompatible declaration change changes the fingerprint ($name), of the enum and of an enum holding it" -body {
+        set holder "\nenum U:\n    P,\n    Q {t: T},\n"
+        list [expr {[petFingerprint $::petBase T] ne [petFingerprint $decls T]}] \
+            [expr {[petFingerprint "$::petBase$holder" U] ne [petFingerprint "$decls$holder" U]}]
+    } -result {1 1}
+}
+
+test pet-fingerprint-changes-identity {a nominal identity is part of the schema: the same declaration in a module, and an enum of another name with the same cases and fields, have other fingerprints} -body {
+    set here [petFingerprint $::petBase T]
+    set module [petFingerprint "import std::shapes\n" std::shapes::T [list shapes.bot [string trim $::petBase]\n]]
+    set renamed [petFingerprint "enum V:\n    A,\n    B {x: int, y: str},\n" V]
+    list [expr {$here ne $module}] [expr {$here ne $renamed}] [expr {$module ne $renamed}]
+} -result {1 1 1}
+
+test pet-fingerprint-changes-through {a nested opaque representation is part of the schema: another representation type or other owner functions change the fingerprint of an enum carrying it} -body {
+    set base "opaque struct N:\n    t: str\n    sendable through(n_out, n_in) as str\n\nfn n_out(n: N) -> str:\n    n.t\n\nfn n_in(t: str) -> N:\n    N {t: t}\n\nfn n_out2(n: N) -> str:\n    n.t\n\nfn n_in2(t: str) -> N:\n    N {t: t}\n\nenum E:\n    None,\n    Has {n: N},\n"
+    set other [string map {"through(n_out, n_in)" "through(n_out2, n_in2)"} $base]
+    set list "opaque struct N:\n    t: str\n    sendable through(n_out, n_in) as List\[str\]\n\nfn n_out(n: N) -> List\[str\]:\n    \[n.t\]\n\nfn n_in(t: List\[str\]) -> N:\n    N {t: \"\"}\n\nenum E:\n    None,\n    Has {n: N},\n"
+    set fp [petFingerprint $base E]
+    list [expr {$fp ne [petFingerprint $other E]}] [expr {$fp ne [petFingerprint $list E]}]
+} -result {1 1}
+
+test pet-fingerprint-stable {the fingerprint is the declaration's, not its spelling: cases and payload fields reordered, unrelated declarations before it, integer domains (checked by the receiver, never compared), module import order} -body {
+    set fp [petFingerprint $::petBase T]
+    set out {}
+    lappend out [expr {$fp eq [petFingerprint "enum T:\n    B {y: str, x: int},\n    A,\n" T]}]
+    lappend out [expr {$fp eq [petFingerprint "enum Other:\n    Q {z: int},\n\nstruct S:\n    a: str\n\n$::petBase" T]}]
+    lappend out [expr {$fp eq [petFingerprint "enum T:\n    A,\n    B {x: std::byte::Byte, y: str},\n" T]}]
+    set files [list a.bot "enum Unrelated:\n    P,\n    Q {r: int},\n" b.bot "import std::a\n\nenum T:\n    A,\n    B {x: int, y: str},\n"]
+    lappend out [expr {[petFingerprint "import std::a\nimport std::b\n" std::b::T $files] eq [petFingerprint "import std::b\nimport std::a\n" std::b::T $files]}]
+    set out
+} -result {1 1 1 1}
+
+test pet-fingerprint-literal {the fingerprint is the type's intent: a List literal's length-refined static type has the fingerprint of the List the receiver names, so a literal of a recursive enum or struct -- whose List[Self] child would otherwise be another node than the root -- decodes as List[T] (it was TransferTypeMismatch for a recursive struct before this milestone), and a declared length in a field is checked, not compared} -body {
+    set out {}
+    set decls "$::petDecls\ntree struct Node:\n    name: str\n    kids: List\[Node\]\n"
+    lappend out [expr {[petFingerprint $decls {List[Tree]{length: 2}}] eq [petFingerprint $decls {List[Tree]}]}]
+    lappend out [expr {[petFingerprint $decls {List[Node]{length: 2}}] eq [petFingerprint $decls {List[Node]}]}]
+    lappend out [expr {[petFingerprint "struct P:\n    a: List\[int\]{length: 2}\n    b: List\[int\]\n" P] eq [petFingerprint "struct P:\n    a: List\[int\]\n    b: List\[int\]\n" P]}]
+    lappend out [petAgree "$decls\nfn back(d: std::abi::bytes::Bytes) -> int:\n    xs = std::transfer::decode\[List\[Tree\]\](d):\n        on TransferTypeMismatch:\n            return -1\n        on TransferMalformed:\n            return -2\n        on TransferVersion:\n            return -3\n        on TransferInvalidValue:\n            return -4\n        on TransferLimit:\n            return -5\n    xs.length()\n\nfn nodes(d: std::abi::bytes::Bytes) -> int:\n    xs = std::transfer::decode\[List\[Node\]\](d):\n        on TransferTypeMismatch:\n            return -1\n        on TransferMalformed:\n            return -2\n        on TransferVersion:\n            return -3\n        on TransferInvalidValue:\n            return -4\n        on TransferLimit:\n            return -5\n    xs.length()\n\n\[back(std::transfer::encode(\[Tree::Leaf {value: 1}, Tree::Branch {children: \[\]}\])), nodes(std::transfer::encode(\[Node {name: \"a\", kids: \[\]}\]))\]"]
+    set out
+} -result {1 1 1 {[2, 1]}}
+
+test pet-fingerprint-compatible {every type without a List length refinement or positional shape keeps the fingerprint it had before this milestone (pinned from the revision before it): scalars, structs, trees, applications, opaque statements, collections, integer domains} -body {
+    set decls "enum Color:\n    Red, Green, Blue\n\nstruct Point:\n    x: int\n    y: int\n    label: str\n\ntree struct Node:\n    name: str\n    color: Color\n    kids: List\[Node\]\n\nstruct Box\[T\]:\n    value: T\n\nstruct Mixed:\n    b: std::byte::Byte\n    i: int\n    xs: List\[std::byte::Byte\]\n"
+    lmap type {Point Node {Box[List[Box[str]]]} Mixed {List[Node]} {List[List[int]]} std::byte::Byte {List[Mixed]} {ImmutableSet[str]}} {
+        petFingerprint $decls $type
+    }
+} -result {e522e677f41a2ce9 e4be2f0f3915e674 9571d96ffa965344 b622f93155393dee 96954bb3c772bba4 3acfc1571a19edea aa0332f076b0974e d186d7663c6e5761 776de1364db0ca36}
+
+test pet-schema-recursive-finite {a recursive enum's schema is finite and deterministic: direct recursion and recursion through a List and a struct refer back to the enum's own node, whichever type of the cycle is the root} -body {
+    set decls "enum E:\n    Leaf,\n    Wrap {e: E},\n    Many {es: List\[E\], h: H},\n\nstruct H:\n    back: E\n"
+    set a [petSchema $decls E]
+    set b [petSchema $decls E]
+    set h [petSchema $decls H]
+    list [llength [dict get $a nodes]] [expr {[dict get $a text] eq [dict get $b text]}] [dict get $a text] [dict get $h text]
+} -result {5 1 {botlish-transfer 1
+0 penum E {Leaf - Many 1 Wrap 4}
+1 struct {} {es 2 h 3}
+2 list 0
+3 struct H {back 0}
+4 struct {} {e 0}} {botlish-transfer 1
+0 struct H {back 1}
+1 penum E {Leaf - Many 2 Wrap 4}
+2 struct {} {es 3 h 0}
+3 list 1
+4 struct {} {e 1}}}
+
+test pet-plan-validated {native lowering checks a payload enum's schema against the program's own declaration before it resolves a plan: a schema that omits a case's payload, gives a case another case's payload, or names other cases is NATIVE INVALID-HIR, never a plan} -constraints nativeBuilt -body {
+    set hir [surface::compile [petProgram "$::petDecls\nstd::transfer::encode(Message::Text {body: \"t\"})\n"] t.bot -warnings off]
+    set call ""
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [hir::decimal::CalledNative $hir $e] eq "transfer#encode"} {
+            set call $e
+        }
+    }
+    set const [lindex [dict get $hir exprs $call args] 1]
+    lassign [core::value::strOf [dict get $hir exprs $const value]] version fingerprint nodes
+    # Message's node: {penum Message {{Batch 1} {Number 4} {Ping {}} {Text 5}}}.
+    set root [lindex $nodes 0]
+    set forgeries [list \
+        [lreplace $root 2 2 [lreplace [lindex $root 2] 3 3 {Text {}}]] \
+        [lreplace $root 2 2 [lreplace [lindex $root 2] 1 1 {Number 5}]] \
+        [lreplace $root 2 2 [lreplace [lindex $root 2] 2 2 {Pong {}}]] \
+        [lreplace $root 2 2 [lrange [lindex $root 2] 0 2]]]
+    set out {}
+    foreach forged [concat [list $root] $forgeries] {
+        set h $hir
+        dict set h exprs $const value [core::value::str [list $version $fingerprint [lreplace $nodes 0 0 $forged]]]
+        if {[catch {native::evalHir $h} message options]} {
+            lappend out [lrange [dict get $options -errorcode] 0 1]
+        } else {
+            lappend out ok
+        }
+    }
+    set out
+} -result {ok {NATIVE INVALID-HIR} {NATIVE INVALID-HIR} {NATIVE INVALID-HIR} {NATIVE INVALID-HIR}}
+
+# ---------------------------------------------------------------------------
+# The format: fixed vectors, on every backend
+
+# Each: a name, the static type, the value, the module files and imports it
+# needs, and the bytes after the header written out by hand from the format
+# (core/transfer.tcl's header): the case's index among the sorted case names,
+# then the payload's fields in sorted order (an Int: its byte count and
+# minimal two's complement; a String: its UTF-8 byte count and bytes; a
+# List: its count and elements; a Bool: one byte; a `through`: the
+# representation's encoding).
+set ::petVectors {
+    payload-free-enum      Color         {Color::Green}                                             {} {1}
+    payload-free-case      Message       {Message::Ping}                                            {} {2}
+    one-int                Message       {Message::Number {value: 300}}                             {} {1 2 44 1}
+    several-fields         Shape         {Shape::Rect {w: 3, h: -1, label: "é", filled: true}}      {} {1 1 1 255 2 195 169 1 3}
+    fields-reordered       Shape         {Shape::Rect {label: "é", filled: true, h: -1, w: 3}}      {} {1 1 1 255 2 195 169 1 3}
+    nested-enum            Outer         {Outer::Wrap {inner: Message::Text {body: "x"}}}           {} {1 3 1 120}
+    list-payload           Message       {Message::Batch {items: [1, 300]}}                         {} {0 2 1 1 2 44 1}
+    recursive              Tree          {Tree::Branch {children: [Tree::Leaf {value: 1}, Tree::Branch {children: []}]}} {} {0 2 1 1 1 0 0}
+    direct-recursion       Expr          {Expr::Neg {e: Expr::Add {left: Expr::Lit {value: 2}, right: Expr::Lit {value: -2}}}} {} {2 0 1 1 2 1 1 254}
+    module                 std::geom::Cmd {std::geom::Cmd::Move {dx: 2}}                            {geom.bot {enum Cmd:
+    Stop,
+    Move {dx: int},
+}} {0 1 2}
+    opaque-representation  Labeled       {Labeled::Named {name: name_of("hi")}}                     {} {1 2 104 105}
+}
+
+foreach {name type value files bytes} $::petVectors {
+    test pet-vector-$name "the format's bytes of $value, on every backend: written out by hand from the format, with the fingerprint of the type's pinned text" -body {
+        set imports [expr {$files eq {} ? "" : "import std::geom\n"}]
+        withPrivateLibrary {
+            petWriteModules $files
+            set fp [dict get [petSchema "$imports$::petDecls" $type $files] fingerprint]
+            set expected [concat {66 79 84 88 1} [petFpBytes $fp] $bytes]
+            set out [petAgree "$imports$::petDecls\nfn typed(x: $type) -> $type:\n    x\n\nfn same(d: std::abi::bytes::Bytes, v: $type) -> bool:\n    back = std::transfer::decode\[$type\](d):$::petFalse\n    back == v\n\nencoded = std::transfer::encode(typed($value))\n\[encoded == [petLiteral $expected], same(encoded, typed($value))\]"]
+        }
+        set out
+    } -result {[true, true]}
+}
+
+test pet-vector-fingerprints {the fixed vectors' fingerprints, pinned (each the FNV-1a of the type's text above)} -body {
+    withPrivateLibrary {
+        petWriteModules [list geom.bot "enum Cmd:\n    Stop,\n    Move {dx: int},\n"]
+        set out [lmap type {Color Message Shape Outer Tree Expr std::geom::Cmd Labeled} {
+            petFingerprint "import std::geom\n$::petDecls" $type [list geom.bot "enum Cmd:\n    Stop,\n    Move {dx: int},\n"]
+        }]
+    }
+    set out
+} -result {81952409bbdce335 627b87415786bd05 dc9e61e6ea435f1a ee4c21aa86f3ed94 35f0957bd1ce64a5 3ecf4892df3b00a2 14d2be2202c90e71 b541982001838983}
+
+# ---------------------------------------------------------------------------
+# Round trips, matches and independent values, on every backend
+
+foreach {name type value} {
+    payload-free   Message        {Message::Ping}
+    text           Message        {Message::Text {body: "héllo😀\nline"}}
+    big-int        Message        {Message::Number {value: -123456789012345678901234567890}}
+    list           {List[Message]} {[Message::Ping, Message::Text {body: ""}, Message::Number {value: 0}, Message::Batch {items: []}, Message::Batch {items: [4611686018427387904, -1]}]}
+    several        Shape          {Shape::Rect {w: 0, h: 9223372036854775807, label: "", filled: false}}
+    nested         {List[Outer]}  {[Outer::Empty, Outer::Wrap {inner: Message::Ping}, Outer::Wrap {inner: Message::Batch {items: [1]}}]}
+    tree           Tree           {Tree::Branch {children: [Tree::Leaf {value: 1}, Tree::Branch {children: [Tree::Leaf {value: 2}, Tree::Branch {children: []}]}]}}
+    expr           Expr           {Expr::Add {left: Expr::Neg {e: Expr::Lit {value: 5}}, right: Expr::Add {left: Expr::Lit {value: 1}, right: Expr::Lit {value: 2}}}}
+    domain         {List[Blob]}   {[Blob::Nothing, Blob::One {b: std::byte::from_int(255)}, Blob::One {b: std::byte::from_int(0)}]}
+    in-struct      Envelope       {Envelope {id: 7, message: Message::Text {body: "in"}}}
+    labeled        {List[Labeled]} {[Labeled::Anonymous, Labeled::Named {name: name_of("hé")}]}
+    payload-free-list {List[Shape]} {[Shape::Dot, Shape::Dot, Shape::Dot, Shape::Dot]}
+} {
+    test pet-roundtrip-$name "a value of $type round-trips to an equal value on every backend" -body {
+        petAgree "$::petDecls\n[petRoundTrip $type $value]"
+    } -result {"equal"}
+}
+
+test pet-roundtrip-rebuilt {an opaque payload field is rebuilt by its owner in the receiver: its derived state computed again} -body {
+    petAgree "$::petDecls\nfn back(l: Labeled) -> Labeled:\n    std::transfer::decode\[Labeled\](std::transfer::encode(l)):\n        on TransferMalformed:\n            Labeled::Anonymous\n        on TransferVersion:\n            Labeled::Anonymous\n        on TransferTypeMismatch:\n            Labeled::Anonymous\n        on TransferInvalidValue:\n            Labeled::Anonymous\n        on TransferLimit:\n            Labeled::Anonymous\n\nmatch back(Labeled::Named {name: name_of(\"héllo\")}):\n    case Labeled::Named {name}:\n        \[name_text(name), name_size(name)\]\n    case Labeled::Anonymous:\n        \[\]\n"
+} -result {["héllo", 5]}
+
+test pet-match-decoded {decoded values are ordinary values of their enum: an exhaustive match selects each one's case and binds its payload's fields with their declared types} -body {
+    petAgree "$::petDecls
+fn copy(xs: List\[Message\]) -> List\[Message\]:
+    std::transfer::decode\[List\[Message\]\](std::transfer::encode(xs)):
+        on TransferMalformed:
+            \[\]
+        on TransferVersion:
+            \[\]
+        on TransferTypeMismatch:
+            \[\]
+        on TransferInvalidValue:
+            \[\]
+        on TransferLimit:
+            \[\]
+
+fn eval(e: Expr) -> int:
+    match e:
+        case Expr::Lit {value}:
+            value
+        case Expr::Neg {e}:
+            0 - eval(e)
+        case Expr::Add {left, right}:
+            eval(left) + eval(right)
+
+fn expr_copy(e: Expr) -> Expr:
+    std::transfer::decode\[Expr\](std::transfer::encode(e)):
+        on TransferMalformed:
+            Expr::Lit {value: 0}
+        on TransferVersion:
+            Expr::Lit {value: 0}
+        on TransferTypeMismatch:
+            Expr::Lit {value: 0}
+        on TransferInvalidValue:
+            Expr::Lit {value: 0}
+        on TransferLimit:
+            Expr::Lit {value: 0}
+
+shown = loop m in copy(\[Message::Batch {items: \[2, 3\]}, Message::Ping, Message::Number {value: 40}, Message::Text {body: \"hé\"}\]):
+    match m:
+        case Message::Ping:
+            0
+        case Message::Text {body}:
+            body.length()
+        case Message::Number {value}:
+            value + 2
+        case Message::Batch {items}:
+            a = items.at(0):
+                on IndexNotFound:
+                    -1
+            b = items.at(1):
+                on IndexNotFound:
+                    -1
+            a * b
+\[shown, eval(expr_copy(Expr::Add {left: Expr::Neg {e: Expr::Lit {value: 5}}, right: Expr::Lit {value: 12}}))\]
+"
+} -result {[[6, 0, 42, 2], 7]}
+
+test pet-mutable-independent {a mutable collection in a payload is a value of its own in the receiver: mutating the source after encoding leaves the bytes, mutating a decoded copy in place leaves the source and every other decode of the same bytes} -body {
+    petAgree "$::petDecls
+fn back(data: std::abi::bytes::Bytes) -> Counter:
+    std::transfer::decode\[Counter\](data):
+        on TransferMalformed:
+            Counter::Idle
+        on TransferVersion:
+            Counter::Idle
+        on TransferTypeMismatch:
+            Counter::Idle
+        on TransferInvalidValue:
+            Counter::Idle
+        on TransferLimit:
+            Counter::Idle
+
+fn vtotal(v: MutableVector\[int\]) -> int:
+    fold i from 0 to v.length() with intermediate s 0:
+        x = v.at(i):
+            on IndexNotFound:
+                0
+        s + x
+
+fn total(c: Counter) -> int:
+    match c:
+        case Counter::Idle:
+            -1
+        case Counter::Counts {numbers}:
+            vtotal(numbers)
+
+v = std::mutable_vector::from_list(\[1, 2, 3\])
+source = Counter::Counts {numbers: v}
+data = std::transfer::encode(source)
+v.push(50)
+one = back(data)
+two = back(data)
+bumped = match one:
+    case Counter::Idle:
+        -1
+    case Counter::Counts {numbers}:
+        numbers.push(1000)
+        vtotal(numbers)
+\[total(source), bumped, total(two), total(back(data)), vtotal(v)\]
+"
+} -result {[6, 1006, 6, 6, 56]}
+
+test pet-collections {payload enums inside every sendable aggregate round-trip on every backend: a MutableVector and a MutableArray of them, an ImmutableSet of them (a Hashable enum: every payload field is), a MutableMap from them and to them, a tree struct holding one -- each rebuilt by the receiver, sets and maps with its own hashes} -body {
+    petAgree "import std::mutable_array
+import std::mutable_map
+import std::immutable_set
+$::petDecls
+tree struct Log:
+    entry: Message
+    more: List\[Log\]
+
+struct All:
+    v: MutableVector\[Message\]
+    a: MutableArray\[Tree\]
+    s: ImmutableSet\[Message\]
+    keys: std::mutable_map::MutableMap\[Message, int\]
+    values: std::mutable_map::MutableMap\[str, Outer\]
+    log: Log
+
+fn main() -> List\[any\] errors TransferMalformed, TransferVersion, TransferTypeMismatch, TransferInvalidValue, TransferLimit:
+    keys = std::mutable_map::create\[Message, int\]()
+    keys.set(Message::Text {body: \"k1\"}, 1)
+    keys.set(Message::Ping, 2)
+    keys.set(Message::Batch {items: \[3\]}, 3)
+    values = std::mutable_map::create\[str, Outer\]()
+    values.set(\"w\", Outer::Wrap {inner: Message::Number {value: 9}})
+    values.set(\"e\", Outer::Empty)
+    all = All {v: std::mutable_vector::from_list(\[Message::Ping, Message::Number {value: 4}\]), a: std::mutable_array::from_list(\[Tree::Leaf {value: 1}, Tree::Branch {children: \[\]}\]), s: std::immutable_set::from_list(\[Message::Text {body: \"s\"}, Message::Ping, Message::Text {body: \"s\"}\]), keys: keys, values: values, log: Log {entry: Message::Ping, more: \[Log {entry: Message::Text {body: \"deep\"}, more: \[\]}\]}}
+    c = std::transfer::decode\[All\](std::transfer::encode(all))
+    k = c.keys.at(Message::Batch {items: \[3\]}):
+        on std::mutable_map::KeyNotFound:
+            -1
+    w = c.values.at(\"w\"):
+        on std::mutable_map::KeyNotFound:
+            Outer::Empty
+    v1 = c.v.at(1):
+        on IndexNotFound:
+            Message::Ping
+    \[c.v.length(), v1, std::mutable_array::capacity(c.a), c.s.contains(Message::Text {body: \"s\"}), c.s.contains(Message::Text {body: \"t\"}), k, w, c.log.more.length(), c.s == all.s\]
+
+main():
+    on TransferMalformed:
+        \[\"malformed\"\]
+    on TransferVersion:
+        \[\"version\"\]
+    on TransferTypeMismatch:
+        \[\"mismatch\"\]
+    on TransferInvalidValue:
+        \[\"invalid\"\]
+    on TransferLimit:
+        \[\"limit\"\]
+"
+} -result {[2, Message::Number {value: 4}, 2, true, false, 3, Outer::Wrap {inner: Message::Number {value: 9}}, 1, true]}
+
+test pet-wide {a wide value -- 3000 payload enums of every case in one List -- round-trips on every backend, its count admitted against the bytes} -body {
+    petAgree "$::petDecls
+fn message(i: int) -> Message:
+    k = i.mod(4)
+    if k == 0:
+        return Message::Ping
+    if k == 1:
+        return Message::Text {body: i.to_string()}
+    if k == 2:
+        return Message::Number {value: i * 7919}
+    Message::Batch {items: \[i, i + 1\]}
+
+xs = loop i from 0 to 3000:
+    message(i)
+d = std::transfer::encode(xs)
+ys = std::transfer::decode\[List\[Message\]\](d):
+    on TransferMalformed:
+        \[\]
+    on TransferVersion:
+        \[\]
+    on TransferTypeMismatch:
+        \[\]
+    on TransferInvalidValue:
+        \[\]
+    on TransferLimit:
+        \[\]
+\[ys.length(), ys == xs, size(d)\]
+"
+} -result {[3000, true, 15158]}
+
+test pet-source-unchanged {encoding observes its value: a payload value is equal to its copy, and to itself, afterwards} -body {
+    petAgree "$::petDecls\nfn same(d: std::abi::bytes::Bytes, v: Message) -> bool:\n    y = std::transfer::decode\[Message\](d):$::petFalse\n    v == y\n\nx = Message::Batch {items: \[1, 2\]}\nd = std::transfer::encode(x)\n\[x == Message::Batch {items: \[1, 2\]}, same(d, x)\]"
+} -result {[true, true]}
+
+test pet-hash-equal {a decoded value hashes and compares like the value it copies} -body {
+    petAgree "$::petDecls\nx = \[Message::Text {body: \"a b\"}, Message::Ping, Message::Batch {items: \[3\]}\]\ny = std::transfer::decode\[List\[Message\]\](std::transfer::encode(x)):\n    on TransferMalformed:\n        \[\]\n    on TransferVersion:\n        \[\]\n    on TransferTypeMismatch:\n        \[\]\n    on TransferInvalidValue:\n        \[\]\n    on TransferLimit:\n        \[\]\n\[x == y, hash(x) == hash(y)\]"
+} -result {[true, true]}
+
+# ---------------------------------------------------------------------------
+# Every backend's bytes, decoded by every other
+
+set ::petSender {xs = [Message::Ping, Message::Text {body: "é"}, Message::Number {value: -129}, Message::Batch {items: [1, 300]}, Message::Batch {items: []}]
+t = Tree::Branch {children: [Tree::Leaf {value: 7}, Tree::Branch {children: [Tree::Leaf {value: -7}]}]}
+v = std::mutable_vector::from_list([5, 6])
+std::transfer::encode(Bundle {messages: xs, tree: t, counter: Counter::Counts {numbers: v}, outer: Outer::Wrap {inner: Message::Number {value: 9}}, shape: Shape::Rect {w: 1, h: 2, label: "r", filled: true}})
+}
+
+set ::petBundle {
+struct Bundle:
+    messages: List[Message]
+    tree: Tree
+    counter: Counter
+    outer: Outer
+    shape: Shape
+}
+
+set ::petReceiver {fn leaves(t: Tree) -> int:
+    match t:
+        case Tree::Leaf {value}:
+            value
+        case Tree::Branch {children}:
+            fold c in children with intermediate s 0:
+                s + leaves(c)
+
+fn kinds(xs: List[Message]) -> List[int]:
+    loop m in xs:
+        match m:
+            case Message::Ping:
+                0
+            case Message::Text {body}:
+                body.length()
+            case Message::Number {value}:
+                value
+            case Message::Batch {items}:
+                items.length()
+
+fn main() -> List[any]:
+    got = std::transfer::decode[Bundle](BYTES):
+        on TransferMalformed:
+            return ["malformed"]
+        on TransferVersion:
+            return ["version"]
+        on TransferTypeMismatch:
+            return ["mismatch"]
+        on TransferInvalidValue:
+            return ["invalid"]
+        on TransferLimit:
+            return ["limit"]
+    n = match got.counter:
+        case Counter::Idle:
+            -1
+        case Counter::Counts {numbers}:
+            numbers.push(1)
+            numbers.length()
+    o = match got.outer:
+        case Outer::Empty:
+            -1
+        case Outer::Wrap {inner}:
+            k = kinds([inner]).at(0):
+                on IndexNotFound:
+                    -2
+            k
+    s = match got.shape:
+        case Shape::Dot:
+            ""
+        case Shape::Rect {w, h, label, filled}:
+            label
+    fourth = got.messages.at(3):
+        on IndexNotFound:
+            Message::Ping
+    [kinds(got.messages), leaves(got.tree), n, o, s, fourth == Message::Batch {items: [1, 300]}]
+
+main()
+}
+
+test pet-cross-backend {the bytes every backend writes for one value are identical, and every backend decodes every backend's bytes into the same value (sixteen sender-receiver pairs)} -body {
+    set sends [dict create]
+    set hir [surface::compile [petProgram "$::petDecls\n$::petBundle\n$::petSender"] sender.bot -warnings off]
+    foreach b [petBackends] {
+        dict set sends $b [petCodesOf [petRun $b $hir]]
+    }
+    set distinct [llength [lsort -unique [dict values $sends]]]
+    set results {}
+    foreach from [petBackends] {
+        set receiver [surface::compile [petProgram "$::petDecls\n$::petBundle\n[string map [list BYTES [petLiteral [dict get $sends $from]]] $::petReceiver]"] receiver.bot -warnings off]
+        foreach to [petBackends] {
+            lappend results [core::value::show [petRun $to $receiver] 1]
+        }
+    }
+    list $distinct [llength $results] [lsort -unique $results]
+} -result [list 1 [expr {[llength [petBackends]] ** 2}] {{[[0, 1, -129, 2, 0], 0, 3, 9, "r", true]}}]
+
+# ---------------------------------------------------------------------------
+# Refusals: bytes are never trusted
+
+foreach {name type setup bytes result} {
+    case-index           Message {good = std::transfer::encode(Message::Ping)}                       {poke(good, 13, std::byte::from_int(4))}  invalid
+    case-index-large     Message {good = std::transfer::encode(Message::Ping)}                       {append(poke(good, 13, std::byte::from_int(128)), [std::byte::from_int(1)])} invalid
+    case-varuint         Message {good = std::transfer::encode(Message::Ping)}                       {append(poke(good, 13, std::byte::from_int(130)), [std::byte::from_int(0)])} malformed
+    missing-payload      Message {good = std::transfer::encode(Message::Number {value: 5})}          {prefix(good, 14)}                         malformed
+    payload-free-extra   Message {good = std::transfer::encode(Message::Ping)}                       {append(good, [std::byte::from_int(0)])}  malformed
+    payload-extra        Message {good = std::transfer::encode(Message::Number {value: 5})}          {append(good, [std::byte::from_int(5)])}  malformed
+    truncated-list       Message {good = std::transfer::encode(Message::Batch {items: [1, 2]})}      {prefix(good, size(good) - 1)}             malformed
+    truncated-struct     Shape   {good = std::transfer::encode(Shape::Rect {w: 1, h: 2, label: "ab", filled: true})} {prefix(good, size(good) - 3)} malformed
+    utf8                 Message {good = std::transfer::encode(Message::Text {body: "ab"})}          {poke(good, 15, std::byte::from_int(255))} invalid
+    domain               Blob    {good = std::transfer::encode(Blob::One {b: std::byte::from_int(255)})} {poke(poke(good, 15, std::byte::from_int(44)), 16, std::byte::from_int(1))} invalid
+    int-minimal          Message {good = std::transfer::encode(Message::Number {value: 1})}          {append(poke(good, 14, std::byte::from_int(2)), [std::byte::from_int(0)])} invalid
+    bool-byte            Shape   {good = std::transfer::encode(Shape::Rect {w: 1, h: 2, label: "", filled: true})} {poke(good, 14, std::byte::from_int(2))} invalid
+    list-count           Message {good = std::transfer::encode(Message::Batch {items: [1]})}         {poke(good, 14, std::byte::from_int(100))} malformed
+    outer-count          {List[Message]} {good = std::transfer::encode([Message::Ping])}             {poke(good, 13, std::byte::from_int(3))}  malformed
+    nested-enum          Outer   {good = std::transfer::encode(Outer::Wrap {inner: Message::Ping})}  {poke(good, 14, std::byte::from_int(9))}  invalid
+    nested-payload       Outer   {good = std::transfer::encode(Outer::Wrap {inner: Message::Number {value: 3}})} {prefix(good, 15)} malformed
+    recursive-truncated  Tree    {good = std::transfer::encode(Tree::Branch {children: [Tree::Branch {children: [Tree::Leaf {value: 1}]}]})} {prefix(good, size(good) - 2)} malformed
+    recursive-index      Expr    {good = std::transfer::encode(Expr::Neg {e: Expr::Neg {e: Expr::Lit {value: 1}}})} {poke(good, 15, std::byte::from_int(3))} invalid
+    wrong-type           Message {good = std::transfer::encode(Color::Red)}                          good                                        mismatch
+    other-enum           Outer   {good = std::transfer::encode(Message::Ping)}                       good                                        mismatch
+    payload-free-bytes   Color   {good = std::transfer::encode(Message::Ping)}                       good                                        mismatch
+    ok                   Message {good = std::transfer::encode(Message::Batch {items: [1]})}         good                                        ok
+} {
+    test pet-refuse-$name "decode refuses $name bytes with a declared error, and never builds a partial value" -body {
+        petAgree "$::petDecls\n[petRefusal $type $setup $bytes]"
+    } -result "\"$result\""
+}
+
+test pet-refuse-forged-fingerprint {bytes whose fingerprint is forged to the receiver's are decoded against the receiver's own schema: values that do not satisfy it are refused, and values that do decode into a valid value of the receiver's type -- never anything else} -body {
+    set fp [petFingerprint "enum T:\n    A,\n    B {x: bool},\n" T]
+    set out {}
+    foreach {sent value} {{enum T:
+    A,
+    B {x: int},
+} {T::B {x: 5}} {enum T:
+    A,
+    B {x: int},
+} {T::B {x: 300}} {enum T:
+    A,
+    B {x: int},
+} {T::B {x: 0}} {enum T:
+    A,
+    B {x: int},
+    C,
+} {T::C}} {
+        set codes [petCodesOf [core::evalProgram [hir::lower [surface::compile [petProgram "$sent\nstd::transfer::encode($value)\n"] t.bot -warnings off]]]]
+        set codes [concat [lrange $codes 0 4] [petFpBytes $fp] [lrange $codes 13 end]]
+        lappend out [petAgree "enum T:\n    A,\n    B {x: bool},\n[petRefusal T {} [petLiteral $codes]]"]
+    }
+    set out
+} -result {{"malformed"} {"invalid"} {"ok"} {"invalid"}}
+
+test pet-refuse-mutations {a thousand mutations of a rich encoding (every byte after the header, every value) decode, on every backend, into a value or a declared refusal -- the same on every backend, never a crash or an internal error -- and none of them is taken for another version or type} -body {
+    petAgree "$::petDecls
+fn attempt(data: std::abi::bytes::Bytes) -> int:
+    v = std::transfer::decode\[List\[Outer\]\](data):
+        on TransferMalformed:
+            return 1
+        on TransferVersion:
+            return 2
+        on TransferTypeMismatch:
+            return 3
+        on TransferInvalidValue:
+            return 4
+        on TransferLimit:
+            return 5
+    0
+
+good = std::transfer::encode(\[Outer::Wrap {inner: Message::Batch {items: \[1, 300, -5\]}}, Outer::Empty, Outer::Wrap {inner: Message::Text {body: \"héllo\"}}, Outer::Wrap {inner: Message::Number {value: 77}}\])
+n = size(good)
+fold i from 0 to 1000 with intermediate t \[0, 0, 0\]:
+    at = 13 + (i * 7919).mod(n - 13)
+    b = (i * 104729 + 17).mod(256)
+    r = attempt(poke(good, at, std::byte::from_int(b)))
+    if r == 2 or r == 3:
+        \[t.at(0) + 1, t.at(1), t.at(2) + r\]
+    elif r == 0:
+        \[t.at(0), t.at(1) + 1, t.at(2)\]
+    else:
+        \[t.at(0), t.at(1), t.at(2) + r\]
+"
+} -result {[0, 298, 1927]}
+
+test pet-limits {resource limits stay effective: a List count of payload enums is bounded by the bytes left (every value takes at least its case index's byte), and a deep recursion through a payload is encoded and decoded by work stacks, bounded by its bytes} -body {
+    petAgree "$::petDecls
+struct Walk:
+    n: int
+    e: Expr
+
+fn deep(n: int) -> Expr:
+    fold i from 0 to n with intermediate e Expr::Lit {value: 1}:
+        Expr::Neg {e: e}
+
+fn depth(e: Expr) -> int:
+    w = fold with intermediate w Walk {n: 0, e: e}:
+        next = match w.e:
+            case Expr::Neg {e}:
+                Walk {n: w.n + 1, e: e}
+            case Expr::Lit {value}:
+                break
+            case Expr::Add {left, right}:
+                break
+        next
+    w.n
+
+fn attempt(data: std::abi::bytes::Bytes) -> str:
+    v = std::transfer::decode\[List\[Message\]\](data):$::petHandlers
+    \"ok\"
+
+good = std::transfer::encode(\[Message::Ping\])
+claim = append(prefix(good, 13), \[std::byte::from_int(255), std::byte::from_int(255), std::byte::from_int(255), std::byte::from_int(127), std::byte::from_int(2), std::byte::from_int(2)\])
+d = std::transfer::encode(deep(20000))
+back = std::transfer::decode\[Expr\](d):
+    on TransferMalformed:
+        Expr::Lit {value: 0}
+    on TransferVersion:
+        Expr::Lit {value: 0}
+    on TransferTypeMismatch:
+        Expr::Lit {value: 0}
+    on TransferInvalidValue:
+        Expr::Lit {value: 0}
+    on TransferLimit:
+        Expr::Lit {value: 0}
+\[attempt(claim), size(d), depth(back)\]
+"
+} -result {["malformed", 20016, 20000]}
+
+# ---------------------------------------------------------------------------
+# Programs: values cross between independently compiled programs
+
+# The bytes (Ints) program SOURCE's value -- a std::abi::bytes::Bytes --
+# holds, run on the interp backend; FILES library modules.
+proc petBytesOf {source {files {}}} {
+    withPrivateLibrary {
+        petWriteModules $files
+        set codes [petCodesOf [core::evalProgram [hir::lower [surface::compile [petProgram $source] t.bot -warnings off]]]]
+    }
+    return $codes
+}
+
+test pet-program-compatible {a value made by one program is rebuilt by another compiled independently: cases and payload fields declared in another order, other enums and structs before them (other native enum and shape numbers), and the receiver matches it} -body {
+    set codes [petBytesOf {enum Message:
+    Ping,
+    Text {body: str},
+    Number {value: int},
+    Batch {items: List[int]},
+
+std::transfer::encode([Message::Text {body: "two"}, Message::Batch {items: [3, 4]}, Message::Ping, Message::Number {value: -5}])
+}]
+    petAgree "enum Other:
+    Q {z: str},
+    R,
+
+struct Unrelated:
+    a: str
+
+enum Message:
+    Batch {items: List\[int\]},
+    Number {value: int},
+    Text {body: str},
+    Ping,
+
+u = Unrelated {a: \"u\"}
+o = Other::Q {z: \"z\"}
+xs = std::transfer::decode\[List\[Message\]\]([petLiteral $codes]):
+    on TransferMalformed:
+        \[\]
+    on TransferVersion:
+        \[\]
+    on TransferTypeMismatch:
+        \[\]
+    on TransferInvalidValue:
+        \[\]
+    on TransferLimit:
+        \[\]
+loop m in xs:
+    match m:
+        case Message::Ping:
+            \"ping\"
+        case Message::Text {body}:
+            body
+        case Message::Number {value}:
+            value.to_string()
+        case Message::Batch {items}:
+            a = items.at(0):
+                on IndexNotFound:
+                    -1
+            b = items.at(1):
+                on IndexNotFound:
+                    -1
+            (a + b).to_string()
+"
+} -result {["two", "7", "ping", "-5"]}
+
+test pet-program-incompatible {a same-named enum whose payload differs in another program is refused: a field's type, a field more, a case more, the same cases and fields in another nominal enum, the same short name in another module} -body {
+    set codes [petBytesOf "enum T:\n    A,\n    B {x: int},\n\nstd::transfer::encode(T::B {x: 1})\n"]
+    set out {}
+    foreach decls [list "enum T:\n    A,\n    B {x: str},\n" "enum T:\n    A,\n    B {x: int, y: int},\n" "enum T:\n    A,\n    B {x: int},\n    C,\n" "enum T:\n    A,\n    B {x: int},\n"] {
+        lappend out [petAgree "$decls\n[petRefusal T {} [petLiteral $codes]]"]
+    }
+    lappend out [petAgree "enum V:\n    A,\n    B {x: int},\n\n[petRefusal V {} [petLiteral $codes]]"]
+    withPrivateLibrary {
+        petWriteModules [list other.bot "enum T:\n    A,\n    B {x: int},\n"]
+        lappend out [petAgree "import std::other\n[petRefusal std::other::T {} [petLiteral $codes]]"]
+    }
+    set out
+} -result {{"mismatch"} {"mismatch"} {"mismatch"} {"ok"} {"mismatch"} {"mismatch"}}
+
+# ---------------------------------------------------------------------------
+# Processes: separate VMs, separate heaps; the sender has exited
+
+proc petWrite {path text} {
+    set f [open $path w]
+    fconfigure $f -encoding utf-8
+    puts -nonewline $f $text
+    close $f
+}
+
+# A driver run in a process of its own (tests/value-transfer.test's).
+set ::petDriver {
+set root [lindex $argv 0]
+lassign [lrange $argv 1 end] mode backend source path
+set argv {}
+set argc 0
+source [file join $root tests helpers.tcl]
+source [file join $root surface surface.tcl]
+proc readText {path} {
+    set f [open $path r]
+    fconfigure $f -encoding utf-8
+    set text [read $f]
+    close $f
+    return $text
+}
+proc run {backend hir} {
+    switch -- $backend {
+        interp { return [core::evalProgram [hir::lower $hir]] }
+        compile { return [core::compiler::evalHir $hir] }
+        cranelift { return [native::evalHir $hir] }
+        cranelift-generic { return [native::evalHir $hir -specialize 0] }
+    }
+}
+set text [readText $source]
+if {$mode eq "send"} {
+    set value [run $backend [surface::compile $text sender.bot -warnings off]]
+    set f [open $path wb]
+    puts -nonewline $f [binary decode hex [lindex $value 2 0 1]]
+    close $f
+    puts sent
+} else {
+    set f [open $path rb]
+    binary scan [read $f] cu* codes
+    close $f
+    set literal "std::abi::bytes::from_list(\[[join [lmap b $codes {string cat "std::byte::from_int($b)"}] {, }]\])"
+    set hir [surface::compile [string map [list BYTES $literal] $text] receiver.bot -warnings off]
+    puts [core::value::show [run $backend $hir] 1]
+}
+}
+
+foreach {from to} {interp compile compile interp interp cranelift cranelift interp cranelift-generic cranelift cranelift cranelift-generic} {
+    test pet-process-$from-$to "payload enums sent by a $from process are rebuilt and matched by a $to process after the sender exited" -constraints [expr {$from in {cranelift cranelift-generic} || $to in {cranelift cranelift-generic} ? "nativeBuilt" : ""}] -body {
+        set dir [makeDirectory pet-process-[pid]-$from-$to]
+        petWrite [file join $dir driver.tcl] $::petDriver
+        petWrite [file join $dir sender.bot] [petProgram "$::petDecls\n$::petBundle\n$::petSender"]
+        petWrite [file join $dir receiver.bot] [petProgram "$::petDecls\n$::petBundle\n$::petReceiver"]
+        set data [file join $dir message.bin]
+        set sent [exec [info nameofexecutable] [file join $dir driver.tcl] $::projectRoot send $from [file join $dir sender.bot] $data 2>@1]
+        set received [exec [info nameofexecutable] [file join $dir driver.tcl] $::projectRoot receive $to [file join $dir receiver.bot] $data 2>@1]
+        removeDirectory pet-process-[pid]-$from-$to
+        list [lindex [split [string trim $sent] \n] end] [lindex [split [string trim $received] \n] end]
+    } -result {sent {[[0, 1, -129, 2, 0], 0, 3, 9, "r", true]}}
+}
+
+# ---------------------------------------------------------------------------
+# GC stress: the native codec under a collection at every allocation site
+
+test pet-gc-stress {round trips of payload enums -- nested, recursive, holding Lists, MutableVectors and opaque representations -- under BOTLISH_NATIVE_GC_STRESS=1 on the native backends} -constraints nativeBuilt -body {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        sourceAgree [petProgram "$::petDecls
+fn main() -> List\[any\] errors TransferMalformed, TransferVersion, TransferTypeMismatch, TransferInvalidValue, TransferLimit:
+    xs = loop i from 0 to 40:
+        Outer::Wrap {inner: Message::Batch {items: \[i, i * i\]}}
+    ts = loop i from 0 to 40:
+        Tree::Branch {children: \[Tree::Leaf {value: i}, Tree::Branch {children: \[Tree::Leaf {value: 0 - i}\]}\]}
+    ls = loop i from 0 to 40:
+        Labeled::Named {name: name_of(i.to_string())}
+    cs = loop i from 0 to 40:
+        Counter::Counts {numbers: std::mutable_vector::from_list(\[i, i + 1\])}
+    a = std::transfer::decode\[List\[Outer\]\](std::transfer::encode(xs))
+    b = std::transfer::decode\[List\[Tree\]\](std::transfer::encode(ts))
+    c = std::transfer::decode\[List\[Labeled\]\](std::transfer::encode(ls))
+    d = std::transfer::decode\[List\[Counter\]\](std::transfer::encode(cs))
+    \[a == xs, b == ts, c.length(), d.length()\]
+
+main():
+    on TransferMalformed:
+        \[\"malformed\"\]
+    on TransferVersion:
+        \[\"version\"\]
+    on TransferTypeMismatch:
+        \[\"mismatch\"\]
+    on TransferInvalidValue:
+        \[\"invalid\"\]
+    on TransferLimit:
+        \[\"limit\"\]
+"] {cranelift-generic cranelift}
+    } finally {
+        if {!$had} {
+            unset ::env(BOTLISH_NATIVE_GC_STRESS)
+        }
+    }
+} -result {value {[true, true, 40, 40]}}
+
+# ---------------------------------------------------------------------------
+# The principal application: typed remote messages and calls between threads
+
+set petSources [file join $::projectRoot tests payload-enum-transfer]
+set petApp [file join [temporaryDirectory] pet-app-[pid]]
+
+# The application directory -- the programs and the Linux driver package
+# installed as an application installs it -- built once.
+proc petBuild {} {
+    if {[info exists ::petBuilt]} {
+        return $::petBuilt
+    }
+    set ::petBuilt [expr {![catch {
+        file delete -force $::petApp
+        file mkdir $::petApp
+        foreach path [glob -directory $::petSources *.bot] {
+            file copy $path $::petApp
+        }
+        eventLoopLinux::install $::petApp
+    } ::petBuildError]}]
+    return $::petBuilt
+}
+
+# Program NAME of the application compiled (-warnings error) and run on
+# cranelift: {value SHOWN} or {error CODE MESSAGE}; ENVIRONMENT: variable
+# pairs set for the run.
+proc petRemote {name {environment {}}} {
+    if {![petBuild]} {
+        return [list error BUILD $::petBuildError]
+    }
+    if {![info exists ::petHirs($name)]} {
+        if {[catch {surface::readProgramFile [file join $::petApp $name.bot] -warnings error} message]} {
+            return [list error COMPILE $message]
+        }
+        set ::petHirs($name) $message
+    }
+    set o [withEnvironment $environment {outcomeUnderHir cranelift $::petHirs($name)}]
+    return [lrange $o 0 [expr {[lindex $o 0] eq "value" ? 1 : 2}]]
+}
+
+set ::petMessages {value {[["calc 1 42", "store kéy 6", "update 24 4", "update 34 5", "nested 2 calc 2 2 stop", "ordered 200 received 200"], true, "count 3 three"]}}
+
+test pet-remote-messages {a worker thread sends every case of a payload-bearing Request -- payload-free, scalar fields, a String, a List, a MutableVector sent, changed by its sender and sent again, a List of Requests -- through a Remote endpoint into a mailbox of 4 of this VM; the receiving actor matches each reconstructed value exhaustively, in the order sent, the 200 numbered requests behind them too, and each received vector is its own; a thread entry's payload-enum initialization value and result cross both ways} -constraints threadTransport -body {
+    petRemote messages
+} -result $::petMessages
+
+test pet-remote-messages-gc-stress {the same under GC stress: every VM's collector at every allocation site while the bytes are rebuilt in the receiving VM} -constraints threadTransport -body {
+    petRemote messages {BOTLISH_NATIVE_GC_STRESS 1}
+} -result $::petMessages
+
+test pet-remote-calls {typed calls into another VM whose request and response are payload enums (Service[Query, Outcome]): the worker's service matches each request exhaustively and replies with an Outcome case, which this VM's caller matches; every call is answered} -constraints threadTransport -body {
+    petRemote calls
+} -result {value {[["pong", "sum 42", "text héllo!", "count 3 bbbb"], true, 4]}}
+
+test pet-remote-calls-gc-stress {the same under GC stress} -constraints threadTransport -body {
+    petRemote calls {BOTLISH_NATIVE_GC_STRESS 1}
+} -result {value {[["pong", "sum 42", "text héllo!", "count 3 bbbb"], true, 4]}}
+
+test pet-actor-same-thread {a same-thread std::actor message is an ordinary value of its VM, no transfer involved: a payload enum posted to an actor's mailbox is received, matched and answered as it was sent, on every backend} -body {
+    sourceAgree [petProgram "import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+
+enum Work:
+    Stop,
+    Add {a: int, b: int},
+    Name {text: str},
+
+fn worker(inbox: std::actor::Inbox\[Work\], out: std::actor::Address\[str\], context ev: std::event_loop::Loop, resume std::actor::Answer) -> std::actor::Exit:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    n = fold with intermediate n 0:
+        w = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        line = match w:
+            case Work::Stop:
+                break
+            case Work::Add {a, b}:
+                (a + b).to_string()
+            case Work::Name {text}:
+                text
+        out.send(line)
+        n + 1
+    std::event_loop::stop():
+        on std::event_loop::SchedulerFault:
+            return std::actor::exit(-2)
+    std::actor::exit(n)
+
+fn go(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors) -> List\[str\] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to, inbox} = std::actor::open\[Work\](4)
+    {to: out, inbox: result} = std::actor::open\[str\](4)
+    a = inject context std::event_loop::Loop:
+        coroutine {step, first} = worker(inbox, out)
+        std::actor::spawned(step, first)
+    std::actor::start(a)
+    std::actor::post(to, Work::Add {a: 40, b: 2})
+    std::actor::post(to, Work::Name {text: \"hé\"})
+    std::actor::post(to, Work::Stop)
+    std::event_loop::run()
+    std::actor::drain(result)
+
+with context std::event_loop::create(16)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+go():
+    on std::event_loop::SchedulerFault:
+        \[\"scheduler fault\"\]
+    on std::event_loop::DriverFault {code}:
+        \[\"driver fault\"\]
+    on std::event_loop::LoopReentered:
+        \[\"reentered\"\]
+"] [petBackends]
+} -result {value {["42", "hé"]}}
+
+cleanupTests

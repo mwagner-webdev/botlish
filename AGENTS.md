@@ -3543,6 +3543,54 @@ one (native/src/runtime/transfer.rs) read. Keep it so:
 * std::actor's same-VM messages stay ordinary values: never require
   Sendable of them.
 
+### Sendable payload-bearing enums
+
+A payload-bearing enum is Sendable exactly when every payload field of
+every declared case is (PORTABILITY-PAYLOAD-ENUM-TRANSFER-MILESTONE-1.md):
+`hir::types::SendClass` walks `hir::enums::payloadParts`, an enum met again
+adding nothing, and its reason names the case and the field. Its schema is
+the `penum ID {CASE NODE|- ...}` node: every declared case, sorted, each
+payload an anonymous struct node of its fields (sorted); its bytes the
+case's index among the sorted names, then the payload. Keep it so:
+
+* The judgement and the schema are the declaration's, never a value's: a
+  payload-free case adds nothing, the case one value holds decides
+  nothing, and no case-specific exemption makes an enum sendable.
+* A payload-free enum keeps its `enum ID CASES` node, text, fingerprint
+  and bytes: never move it to `penum`.
+* No program-relative number in the bytes or the text: the native plan
+  maps names to this program's enum and case numbers and shapes
+  (`TransferPlan`'s `penum`, checked against the declaration first: the
+  cases exactly, each payload present exactly when declared, its fields
+  exactly the case's -- NATIVE INVALID-HIR otherwise), never the reverse.
+  A payload-free case decodes to its immediate word, a payload-bearing one
+  to an EnumCaseObj of the receiver's own (the payload rooted until the
+  object holds it: `Work::Wrap`).
+* The fingerprint is the schema of the type's intent (`hir::transfer::
+  Intent`: List lengths and positional shapes erased in every part), so a
+  literal's `List[T]{length: N}` has the fingerprint of the receiver's
+  `List[T]`; never key the text by the refined type again (a recursive
+  enum's or struct's `List[Self]` would become another node). Integer
+  domains stay in the type, as they always were.
+* `core::transfer::MinSizes` is a deterministic lower bound (upward
+  fixpoint, capped rounds): a penum's is 1 and its least case's payload.
+  Never use a largest case's, or one case's: a count is admitted before
+  any case is read. The oracle (`audit/payload-enum-transfer/tools/
+  oracle.py`) restates the procedure: change both.
+* No new transport: std::actor::remote, thread entries and std::transfer
+  carry payload enums with no API of their own.
+
+If you change payload-enum sendability, the `penum` node, `Intent`,
+`MinSizes` or either codec's or the plan's penum case, also run
+`tests/payload-enum-transfer.test` (its remote tests need the thread
+transport; also under `BOTLISH_NATIVE_GC_STRESS=1`), `python3 -I
+audit/payload-enum-transfer/tools/oracle.py selftest`,
+`audit/payload-enum-transfer/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`) and `audit/payload-enum-transfer/tools/mutate.tcl` (every
+mutant in its `mutants.txt` must still apply and be killed by a detector
+its `!!` line names; an INCOMPLETE file is no kill). `bench/payload-enum-
+transfer.tcl` is the performance report.
+
 If you change any of that (SendClass, the clause, `-sending`,
 hir/transfer.tcl, either codec, the owners' TO and FROM functions), run
 `tests/sendability.test`, `tests/value-transfer.test` (also under
@@ -3885,8 +3933,9 @@ so:
   (`hir::enums::IsPayloadFree`). Never box a payload-free case, read a word
   as a discriminant, or expose either.
 * Every analysis that answers for a value from its components walks an
-  enum's payloads (affinity, Totality, Sendable -- refused for payload enums
-  until a transfer encoding exists --, MentionsMutable, MayHoldVector,
+  enum's payloads (affinity, Totality, Sendable -- every case's payload
+  fields: PORTABILITY-PAYLOAD-ENUM-TRANSFER-MILESTONE-1.md --,
+  MentionsMutable, MayHoldVector,
   Bearing, CarriedInto, CanCarry, MutableComponent, the DecimalRounded
   guard, privacy), an enum met again adding nothing; a new component
   analysis does too. An affine enum's values are released by a descriptor
@@ -3894,8 +3943,10 @@ so:
   position, never the letters `r`/`C`), and a recursive affine enum is
   AFFINE-CONTAINER-UNSUPPORTED (hir::enums::VerifyRecursion).
 * A boundary that commits to a representation refuses a payload enum with
-  its reason (C UNSUPPORTED, EXPORT-SIGNATURE, NOT-SENDABLE, a context
-  struct's native layout); never emit a guessed one.
+  its reason (C UNSUPPORTED, EXPORT-SIGNATURE, a context struct's native
+  layout); never emit a guessed one. The value transfer is no such
+  boundary: it encodes meaning, not representation (next section but
+  many: "Sendable payload-bearing enums").
 
 If you change any of that (hir/enums.tcl's payload section, CaseConstruction,
 core/enums.tcl, the enum cases of core/value.tcl, core/hashing.tcl,

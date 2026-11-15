@@ -30,7 +30,10 @@ value is checked against T as it is read.
     checked by the receiver), UnicodeChar, Float64, DecimalRounded, raw C
     floating values, str; Lists, ImmutableSets, MutableVectors and
     MutableArrays of sendable elements; structs, anonymous structs and tree
-    structs of sendable fields; enum cases; and an opaque struct whose
+    structs of sendable fields; enums whose every case's payload fields
+    are sendable (a payload-free case adds nothing: a value of the enum may
+    be any case, so one function-valued field in one case makes the whole
+    enum not sendable); and an opaque struct whose
     owning module states how it is rebuilt (its `sendable` clause:
     std::abi::bytes::Bytes and MutableBytes, std::mutable_map::MutableMap,
     std::mutable_set::MutableSet and std::immutable_map::ImmutableMap state
@@ -50,6 +53,12 @@ value is checked against T as it is read.
   * A copy is a new value: mutating a received MutableVector or MutableMap
     changes nothing in the sender, and the reverse. A map's or set's index
     and stored hashes are computed again by the receiver.
+  * An enum value is its enum's identity, its case's name and its payload:
+    the receiver finds the case by name in its own declaration (cases and
+    fields may be declared in any order) and matches it like any value it
+    made. A receiver whose declaration differs -- another case, another
+    field, another field type, another module -- refuses the bytes
+    (TransferTypeMismatch); nothing migrates.
   * Sending carries no authority: a decoded value is data; the receiver's
     contexts are its own.
   * std::actor's messages between actors of one VM are ordinary values and
@@ -80,6 +89,44 @@ copy.tags.push("copied")
 [copy.id, std::mutable_vector::length(copy.tags), std::mutable_vector::length(job.tags)]
 @caption A copy is a new value: pushing onto the copy's vector leaves the original's alone
 @value [7, 2, 1]
+@end
+
+@example accept
+import std::transfer
+import std::abi::bytes
+import std::list
+
+enum Request:
+    Stop,
+    Calculate {requestId: int, x: int, y: int},
+    Store {key: str, value: List[int]},
+
+fn handled(r: Request) -> int:
+    match r:
+        case Request::Stop:
+            0
+        case Request::Calculate {requestId, x, y}:
+            x * y
+        case Request::Store {key, value}:
+            value.length()
+
+fn copy(rs: List[Request]) -> List[Request]:
+    std::transfer::decode[List[Request]](std::transfer::encode(rs)):
+        on TransferMalformed:
+            []
+        on TransferVersion:
+            []
+        on TransferTypeMismatch:
+            []
+        on TransferInvalidValue:
+            []
+        on TransferLimit:
+            []
+
+loop r in copy([Request::Calculate {requestId: 1, x: 6, y: 7}, Request::Store {key: "key", value: [1, 2]}, Request::Stop]):
+    handled(r)
+@caption An application's message protocol as a payload-bearing enum: every payload field is sendable, so the enum is, and a decoded value is matched like any other
+@value [42, 2, 0]
 @end
 
 @topic error.not-sendable
@@ -125,6 +172,22 @@ fn ident(x: int) -> int:
 
 send(Job {id: 1, run: ident})
 @caption A struct holding a function is not sendable
+@error CORE SEMANTIC NOT-SENDABLE
+@end
+
+@example reject
+import std::transfer
+import std::abi::bytes
+
+enum Request:
+    Stop,
+    Execute {work: Fn{args: [], return: int}},
+
+fn send(r: Request) -> std::abi::bytes::Bytes:
+    std::transfer::encode(r)
+
+send(Request::Stop)
+@caption An enum is sendable only when every case's payload is: Stop carries nothing, but a Request may be Execute, whose field "work" is a function (the message names the case and the field)
 @error CORE SEMANTIC NOT-SENDABLE
 @end
 

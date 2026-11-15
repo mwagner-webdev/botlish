@@ -1,0 +1,146 @@
+# messages.bot -- tests/payload-enum-transfer.test: a worker thread sends
+# protocol::Request values -- every case, payload-free and payload-bearing --
+# into a mailbox of this VM through a Remote endpoint; the receiving actor
+# matches each reconstructed value exhaustively and reports what it did.
+# Then a thread entry whose initialization value and result are payload
+# enums. Every value crossed as bytes: encoded in the sending VM, decoded by
+# this VM's own constructors (std::actor::remote, std::transfer).
+import event_loop_linux
+import protocol
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::int
+import std::list
+import std::mutable_vector
+import std::str
+import std::thread
+
+fn line(parts: List[str]) -> str:
+    fold p in parts with intermediate s "":
+        if s == "":
+            p
+        else:
+            s.append_char(' ').concat(p)
+
+fn sum(xs: List[int]) -> int:
+    fold x in xs with intermediate s 0:
+        s + x
+
+fn vsum(v: MutableVector[int]) -> int:
+    fold i from 0 to v.length() with intermediate s 0:
+        x = v.at(i):
+            on IndexNotFound:
+                0
+        s + x
+
+# What the actor did with R (Stop: "stop").
+fn handled(r: protocol::Request) -> str:
+    match r:
+        case protocol::Request::Stop:
+            "stop"
+        case protocol::Request::Calculate {requestId, x, y}:
+            line(["calc", requestId.to_string(), (x * y).to_string()])
+        case protocol::Request::Store {key, value}:
+            line(["store", key, sum(value).to_string()])
+        case protocol::Request::Update {numbers}:
+            # The received vector is this VM's own: changing it changes no
+            # other copy.
+            before = vsum(numbers)
+            numbers.push(99)
+            line(["update", before.to_string(), numbers.length().to_string()])
+        case protocol::Request::Nested {inner}:
+            parts = loop x in inner:
+                handled(x)
+            line(["nested", inner.length().to_string(), line(parts)])
+
+fn request_id(r: protocol::Request) -> int:
+    id = match r:
+        case protocol::Request::Calculate {requestId, x, y}:
+            requestId
+        case protocol::Request::Stop:
+            -1
+        case protocol::Request::Store {key, value}:
+            -1
+        case protocol::Request::Update {numbers}:
+            -1
+        case protocol::Request::Nested {inner}:
+            -1
+    id
+
+# Receives requests until Stop: the first five handled in full, then how
+# many numbered calculations arrived in order and how many arrived at all.
+fn collector(inbox: std::actor::Inbox[protocol::Request], out: std::actor::Address[List[str]], context ev: std::event_loop::Loop, resume std::actor::Answer) -> std::actor::Exit:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    firsts = loop i from 0 to 5:
+        r = std::actor::receive(rx):
+            on std::actor::Closed:
+                return std::actor::exit(-2)
+        handled(r)
+    counts = fold with intermediate c [0, 0, 100]:
+        r = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        if r == protocol::Request::Stop:
+            break
+        id = request_id(r)
+        if id == c.at(2):
+            [c.at(0) + 1, c.at(1) + 1, id + 1]
+        else:
+            [c.at(0), c.at(1) + 1, c.at(2)]
+    out.send(firsts.append(line(["ordered", counts.at(0).to_string(), "received", counts.at(1).to_string()])))
+    std::event_loop::stop():
+        on std::event_loop::SchedulerFault:
+            return std::actor::exit(-3)
+    std::actor::exit(0)
+
+fn go(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, t: std::thread::Threads, p: std::thread::Port, db: std::thread::Doorbell) -> List[any] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    std::thread::serve()
+    {to, inbox} = std::actor::open[protocol::Request](4)
+    {to: out, inbox: result} = std::actor::open[List[str]](1)
+    remote = std::actor::remote::export(to, 4)
+    c = inject context std::event_loop::Loop:
+        coroutine {step, first} = collector(inbox, out)
+        std::actor::spawned(step, first)
+    std::actor::start(c)
+    {thread} = std::thread::start(std::thread::entry(protocol::send_requests), protocol::Plan {to: remote, count: 200})
+    std::event_loop::run()
+    refused = std::thread::join(thread)
+    {thread: job} = std::thread::start(std::thread::entry(protocol::compute), protocol::Query::Split {words: ["one", "three", "xy"]})
+    o = std::thread::join(job)
+    computed = match o:
+        case protocol::Outcome::Count {n, longest}:
+            line(["count", n.to_string(), longest])
+        case protocol::Outcome::Pong:
+            "pong"
+        case protocol::Outcome::Sum {value}:
+            "sum"
+        case protocol::Outcome::Text {text}:
+            "text"
+    std::thread::close_port()
+    lines = std::actor::drain(result).at(0):
+        on IndexNotFound:
+            ["no result"]
+    [lines, refused >= 0, computed]
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context std::actor::create()
+with context std::thread::create(4)
+with context std::thread::port()
+go():
+    on std::event_loop::SchedulerFault:
+        ["scheduler fault"]
+    on std::event_loop::DriverFault {code}:
+        ["driver fault", code]
+    on std::event_loop::LoopReentered:
+        ["reentered"]
+    on std::thread::ThreadLimit:
+        ["thread limit"]
+    on std::thread::ThreadStartFailed {reason}:
+        ["start failed", reason]
+    on std::thread::ThreadFailed {identity, message}:
+        ["failed", identity, message]
