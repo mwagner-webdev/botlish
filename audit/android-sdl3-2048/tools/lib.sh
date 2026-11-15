@@ -37,6 +37,10 @@ waitLines() { # NAME PATTERN COUNT LIMIT
         sleep 1
     done
     appLog >"$OUT/$name.log"
+    # Counted again in what was kept: a line may arrive between the count
+    # and an early end (SDL's "activity finished" follows game_main's
+    # return within milliseconds).
+    seen=$(grep -c -E "$pattern" "$OUT/$name.log" || true)
     (( seen >= count ))
 }
 waitFor() { # NAME PATTERN COUNT LIMIT
