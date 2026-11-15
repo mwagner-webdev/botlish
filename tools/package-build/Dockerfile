@@ -81,10 +81,30 @@ RUN --mount=type=secret,id=build-ca,required=true \
     rm -rf /var/lib/apt/lists/*; \
     dpkg-query -W -f '${Package} ${Version} ${Architecture}\n' | sort > /etc/botlish-author-packages; \
     RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo /usr/local/cargo/bin/rustc --version >> /etc/botlish-author-environment
+# The sdl3 package's android-aarch64 view (RN-BOTLISH-ANDROID-SDL3-2048-
+# PACKAGE-MILESTONE-1.md, "SDL3 Android distribution"): SDL built for
+# arm64-v8a with the Android NDK r29 (29.0.14206865), Google's release
+# archive pinned by SHA-256 (the c-bindgen workflow's), at /opt/android-ndk-r29
+# (ANDROID_NDK_ROOT, below).
+RUN --mount=type=secret,id=build-ca,required=true \
+    set -eu; \
+    install -m 0644 /run/secrets/build-ca /tmp/build-ca.crt; \
+    echo 'Acquire::https::CaInfo "/tmp/build-ca.crt";' > /etc/apt/apt.conf.d/99build; \
+    if [ -n "${HTTPS_PROXY:-}" ]; then \
+      echo "Acquire::https::Proxy \"$HTTPS_PROXY\";" >> /etc/apt/apt.conf.d/99build; \
+    fi; \
+    apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=8 update; \
+    DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=8 install -y --no-install-recommends unzip; \
+    curl -fsSL --cacert /tmp/build-ca.crt --retry 3 -o /tmp/ndk.zip https://dl.google.com/android/repository/android-ndk-r29-linux.zip; \
+    echo "4abbbcdc842f3d4879206e9695d52709603e52dd68d3c1fff04b3b5e7a308ecf  /tmp/ndk.zip" | sha256sum -c -; \
+    unzip -q /tmp/ndk.zip -d /opt; \
+    rm -f /tmp/ndk.zip /etc/apt/apt.conf.d/99build /tmp/build-ca.crt; \
+    rm -rf /var/lib/apt/lists/*; \
+    grep Pkg.Revision /opt/android-ndk-r29/source.properties >> /etc/botlish-author-environment
 # RUSTUP_TOOLCHAIN: the image's own Rust (1.97.0, above) wins over the
 # checkout's rust-toolchain.toml, which names the development toolchain:
 # recorded releases reproduce with the toolchain that built them, and the
 # image fetches no other.
-ENV LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_CACHE_DIR=/cache RUSTUP_TOOLCHAIN=1.97.0 \
+ENV LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_CACHE_DIR=/cache RUSTUP_TOOLCHAIN=1.97.0 ANDROID_NDK_ROOT=/opt/android-ndk-r29 \
     RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WORKDIR /src

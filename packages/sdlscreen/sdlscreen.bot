@@ -1,0 +1,739 @@
+# sdlscreen -- an SDL3 airlock for a touch-screen application
+# (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md, "Reusable UI and
+# rendering abstractions"): one context, Screen, which owns SDL's lifetime
+# and every SDL object an application draws with, and ordinary operations
+# under it -- open and close the screen, wait for the next event as a
+# value, measure the drawable area, fill rectangles, draw text, and keep a
+# small text file in the application's private storage -- none of which
+# takes or returns a C pointer. Below it is the generated SDL3 binding of
+# the compilation's target (the package sdl3: one source for Linux, macOS,
+# Windows and Android); nothing here names a platform.
+#
+# It follows Icy Tower's airlock (examples/games/icy-tower/sdl.bot,
+# ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md) and adds what a touch application
+# needs: SDL's touch-finger and lifecycle events, decoded here into the
+# enum Event, so an application's input interpretation and lifecycle
+# policy are ordinary Botlish over values.
+#
+# Authority (DIRECT-MODULES.md). Every function here that makes a retaining
+# C call or a native view or edit requires Screen, the context this module
+# declares: the authority reaches an application only as that capability,
+# `with context sdlscreen::create()` in its entry program.
+#
+# Privacy and ownership (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md,
+# CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md). The open session -- SDL's
+# window and renderer and the native scratch memory of the calls, all
+# affine C pointers -- lives in the installed Screen's vector: `open` moves
+# it in, `close` moves it out to release it, and every operation reaches a
+# pointer where it is stored (`screen.open.element(0)`), handing it to SDL,
+# which only observes it. Every function that takes or returns a pointer or
+# a native view or edit, the session and the layouts of native memory are
+# private.
+#
+# Lifetime. `close` releases the renderer before the window and both before
+# SDL_Quit; an operation of a closed Screen does nothing and reports so.
+#
+# Threads. Every function runs on the thread of the VM that installed the
+# Screen -- SDL's main thread when that thread calls `open` (on Android,
+# SDLThread). Events other threads produce (Android's touch events come
+# from its UI thread) reach the program only through SDL's queue, which
+# `wait` and `poll` read on this thread: no SDL event filter or watch ever
+# enters the VM.
+#
+# Memory. SDL takes its rectangles, sizes, strings and file data by
+# pointer, and Botlish byte storage is lent only to a C call whose contract
+# allows it (C-POINTER-BORROWING.md), which the binding states for
+# SDL_CreateWindow's title alone. So the scratch memory every other call
+# needs is native, from SDL_malloc, written and read through layouts
+# (std::binary::native::edit/view), allocated by `open` (the strings before
+# SDL_Init: a hint is set first) and freed by `close`.
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::binary::native
+import std::byte
+import std::char
+import std::ffi::c
+import std::float64
+import std::list
+import std::mutable_vector
+import std::str
+import sdl3::ctypes
+import sdl3::events
+import sdl3::error_h
+import sdl3::filesystem
+import sdl3::hints
+import sdl3::init
+import sdl3::iostream
+import sdl3::layouts
+import sdl3::render
+import sdl3::stdinc
+import sdl3::timer
+import sdl3::video
+
+# An open session: the window, its renderer, the native scratch memory of
+# the calls -- a rectangle, a text line, an event, two ints, a rectangle of
+# ints, two strings, the file data and its size -- and whether presenting
+# waits for the display. Private and opaque.
+private opaque struct Session:
+    window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window]
+    renderer: std::ffi::c::Ptr[sdl3::ctypes::SDL_Renderer]
+    rect: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect]
+    line: std::ffi::c::Ptr[std::ffi::c::Char]
+    event: std::ffi::c::Ptr[sdl3::ctypes::SDL_Event]
+    wide: std::ffi::c::Ptr[std::ffi::c::Int]
+    high: std::ffi::c::Ptr[std::ffi::c::Int]
+    area: std::ffi::c::Ptr[sdl3::ctypes::SDL_Rect]
+    first: std::ffi::c::Ptr[std::ffi::c::Char]
+    second: std::ffi::c::Ptr[std::ffi::c::Char]
+    data: std::ffi::c::Ptr[std::ffi::c::Char]
+    count: std::ffi::c::Ptr[std::ffi::c::ULong]
+    synced: bool
+
+# The capability to call SDL, and SDL's state: the open session, if any.
+opaque context struct Screen:
+    open: MutableVector[Session]
+
+# SDL, closed. Makes no SDL call: the entry program installs it, and `open`
+# starts SDL.
+fn create() -> Screen:
+    Screen {open: std::mutable_vector::from_list([])}
+
+# An SDL call failed: CALL, and REASON, SDL_GetError's text ("" when there
+# was no buffer to read it into).
+error ScreenFailed:
+    call: str
+    reason: str
+
+# A hint SDL reads when it starts: NAME (SDL_HINT_...'s string, which the
+# binding does not emit as a constant) and VALUE.
+struct Hint:
+    name: str
+    value: str
+
+# The hint that keeps SDL from blocking in its event pump while an Android
+# application is in the background (SDL_HINT_ANDROID_BLOCK_ON_PAUSE "0"):
+# the application's own loop then receives the background and foreground
+# events when they happen, and decides itself what to do meanwhile.
+fn nonblocking_pause() -> Hint:
+    Hint {name: "SDL_ANDROID_BLOCK_ON_PAUSE", value: "".append_char('0')}
+
+# The drawable area in pixels.
+struct Size:
+    width: int
+    height: int
+
+# The part of the window not covered by system interface (status and
+# navigation bars, a display cutout), in pixels.
+struct Area:
+    x: int
+    y: int
+    width: int
+    height: int
+
+# An event, as a value. A finger's X and Y are pixels of the renderer's
+# output (SDL's coordinates, 0 to 1 across the window, scaled by the output
+# size), FINGER SDL's finger identity.
+enum Event:
+    Idle,
+    Quit,
+    Terminating,
+    LowMemory,
+    WillEnterBackground,
+    DidEnterBackground,
+    WillEnterForeground,
+    DidEnterForeground,
+    FingerDown {finger: int, x: int, y: int},
+    FingerMotion {finger: int, x: int, y: int},
+    FingerUp {finger: int, x: int, y: int},
+    FingerCanceled {finger: int},
+    Resized,
+    RenderReset,
+    Other,
+
+# What `load` found: whether the file exists, and its text.
+struct Loaded:
+    found: bool
+    text: str
+
+# ---------------------------------------------------------------------------
+# Native memory
+
+# A NUL-terminated line of at most 127 bytes.
+private layout Line:
+    size 128
+    align 1
+    field bytes: array 128 of std::ffi::c::UChar at 0
+
+# A NUL-terminated string of at most 1023 bytes (a hint, a path).
+private layout Text:
+    size 1024
+    align 1
+    field bytes: array 1024 of std::ffi::c::UChar at 0
+
+# File data: at most 4096 bytes.
+private layout Data:
+    size 4096
+    align 1
+    field bytes: array 4096 of std::ffi::c::UChar at 0
+
+private layout IntCell:
+    size 4
+    align 4
+    field value: std::ffi::c::Int at 0
+
+private layout SizeCell:
+    size 8
+    align 8
+    field value: std::ffi::c::ULong at 0
+
+private fn byte(c: std::ffi::c::UChar) -> std::byte::Byte:
+    c
+
+private fn nul() -> std::byte::Byte:
+    0
+
+# Writes BYTES and a NUL through the edit E of a string buffer of LIMIT
+# bytes (BYTES cut to LIMIT - 1).
+private fn store_text(e: NativeEdit[Text], bytes: List[std::byte::Byte]) errors IndexNotFound:
+    n = std::list::length(bytes)
+    last = if n > 1023:
+        1023
+    else:
+        n
+    loop i from 0 to last:
+        std::binary::store_element(e.bytes, i, bytes.get(i, 0))
+    std::binary::store_element(e.bytes, last, 0)
+
+
+# The length of the C string the view V holds from byte I (at most LIMIT).
+private fn text_length(v: NativeView[Text], i: int, limit: int) -> int errors IndexNotFound:
+    if i >= limit:
+        return limit
+    if std::binary::element(v.bytes, i) == 0:
+        return i
+    v.text_length(i + 1, limit)
+
+# The C string the view V of a string buffer holds, decoded strictly (""
+# if it is no UTF-8).
+private fn read_text(v: NativeView[Text]) -> str errors IndexNotFound:
+    n = v.text_length(0, 1023)
+    bytes = loop i from 0 to n:
+        byte(std::binary::element(v.bytes, i))
+    text = std::abi::bytes::decode_utf8(std::abi::bytes::from_list(bytes)):
+        on InvalidUtf8:
+            ""
+    text
+
+# Printable ASCII, codes 32 to 126 in order.
+private fn printable() -> str:
+    " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+
+# Writes TEXT, at most 127 characters, through the edit E of a line:
+# printable ASCII as itself, any other character as '?' (SDL's debug font
+# draws ASCII), then the NUL.
+private fn store_line(e: NativeEdit[Line], text: str) errors IndexNotFound:
+    n = std::str::length(text)
+    last = if n > 127:
+        127
+    else:
+        n
+    loop i from 0 to last:
+        c = std::char::scalar_value(text.char_at(i))
+        code = if c >= 32 and c < 127:
+            c
+        else:
+            63
+        std::binary::store_element(e.bytes, i, code)
+    std::binary::store_element(e.bytes, last, 0)
+
+# The line in the view V from byte I to its NUL, as printable ASCII after
+# TEXT.
+private fn line_text(v: NativeView[Line], i: int, text: str) -> str errors IndexNotFound:
+    c = if i < 127:
+        std::binary::element(v.bytes, i)
+    else:
+        0
+    if c == 0:
+        return text
+    shown = if c >= 32 and c < 127:
+        printable().char_at(c - 32)
+    else:
+        '?'
+    v.line_text(i + 1, text.append_char(shown))
+
+# SDL_GetError's text, copied into the line BUFFER first (SDL_strlcpy: the
+# string SDL_GetError returns is SDL's, bounded only by its own NUL).
+private fn error_text(buffer: std::ffi::c::Ptr[std::ffi::c::Char], context screen: Screen) -> str:
+    message = sdl3::error_h::SDL_GetError()
+    copied = buffer.SDL_strlcpy(message, 128)
+    v = std::binary::native::view(Line, buffer):
+        on NativeViewNull:
+            return ""
+    text = v.line_text(0, ""):
+        on IndexNotFound:
+            ""
+    text
+
+# ---------------------------------------------------------------------------
+# Opening and closing
+
+private fn free_chars(p: std::ffi::c::Ptr[std::ffi::c::Char], context screen: Screen):
+    memory = std::ffi::c::erase(p)
+    sdl3::stdinc::SDL_free(memory)
+
+private fn free_ints(p: std::ffi::c::Ptr[std::ffi::c::Int], context screen: Screen):
+    memory = std::ffi::c::erase(p)
+    sdl3::stdinc::SDL_free(memory)
+
+# Frees the scratch memory (SDL_free of a null pointer does nothing).
+private nomethod fn free_scratch(rect: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect], line: std::ffi::c::Ptr[std::ffi::c::Char], event: std::ffi::c::Ptr[sdl3::ctypes::SDL_Event], wide: std::ffi::c::Ptr[std::ffi::c::Int], high: std::ffi::c::Ptr[std::ffi::c::Int], area: std::ffi::c::Ptr[sdl3::ctypes::SDL_Rect], first: std::ffi::c::Ptr[std::ffi::c::Char], second: std::ffi::c::Ptr[std::ffi::c::Char], data: std::ffi::c::Ptr[std::ffi::c::Char], count: std::ffi::c::Ptr[std::ffi::c::ULong], context screen: Screen):
+    rect_memory = std::ffi::c::erase(rect)
+    sdl3::stdinc::SDL_free(rect_memory)
+    event_memory = std::ffi::c::erase(event)
+    sdl3::stdinc::SDL_free(event_memory)
+    area_memory = std::ffi::c::erase(area)
+    sdl3::stdinc::SDL_free(area_memory)
+    count_memory = std::ffi::c::erase(count)
+    sdl3::stdinc::SDL_free(count_memory)
+    line.free_chars()
+    first.free_chars()
+    second.free_chars()
+    data.free_chars()
+    wide.free_ints()
+    high.free_ints()
+
+private fn chars(n: std::ffi::c::ULong, context screen: Screen) -> std::ffi::c::Ptr[std::ffi::c::Char]:
+    std::ffi::c::retype[std::ffi::c::Char](sdl3::stdinc::SDL_malloc(n))
+
+private fn ints(context screen: Screen) -> std::ffi::c::Ptr[std::ffi::c::Int]:
+    std::ffi::c::retype[std::ffi::c::Int](sdl3::stdinc::SDL_malloc(8))
+
+# Sets the hints HINTS through the string buffers FIRST and SECOND; the
+# names of those SDL did not take.
+private nomethod fn set_hints(hints: List[Hint], first: std::ffi::c::Ptr[std::ffi::c::Char], second: std::ffi::c::Ptr[std::ffi::c::Char], context screen: Screen) -> List[str] errors NativeEditNull, IndexNotFound:
+    refused = loop hint in hints:
+        std::binary::native::edit(Text, first).store_text(std::str::encode_utf8(hint.name))
+        std::binary::native::edit(Text, second).store_text(std::str::encode_utf8(hint.value))
+        if first.SDL_SetHint(second):
+            continue
+        hint.name
+    refused
+
+# A resizable window of high pixel density: SDL_WINDOW_RESIZABLE (0x20)
+# | SDL_WINDOW_HIGH_PIXEL_DENSITY (0x2000), the same on every target.
+private fn window_flags() -> std::ffi::c::ULong:
+    8224
+
+# Starts SDL: the hints HINTS set first, then SDL with video, a resizable
+# high-density window titled TITLE of WIDTH x HEIGHT (a desktop's; a
+# phone's window is the whole screen whatever is asked), its renderer with
+# vertical sync when SYNC asks for it, and the scratch memory: the session
+# of this Screen from now on. On a failure everything made before it is
+# released again (SDL_Quit included), and ScreenFailed carries SDL's error,
+# read before that. Opening an open Screen changes nothing. (nomethod: a
+# title is not a receiver.)
+nomethod fn open(title: str, width: std::ffi::c::Int, height: std::ffi::c::Int, sync: bool, hints: List[Hint], context screen: Screen) errors ScreenFailed:
+    if not screen.open.empty?():
+        return unit
+    rect = std::ffi::c::retype[sdl3::ctypes::SDL_FRect](sdl3::stdinc::SDL_malloc(16))
+    line = chars(128)
+    event = std::ffi::c::retype[sdl3::ctypes::SDL_Event](sdl3::stdinc::SDL_malloc(128))
+    wide = ints()
+    high = ints()
+    area = std::ffi::c::retype[sdl3::ctypes::SDL_Rect](sdl3::stdinc::SDL_malloc(16))
+    first = chars(1024)
+    second = chars(1024)
+    data = chars(4096)
+    count = std::ffi::c::retype[std::ffi::c::ULong](sdl3::stdinc::SDL_malloc(8))
+    if rect.null?() or line.null?() or event.null?() or wide.null?() or high.null?() or area.null?() or first.null?() or second.null?() or data.null?() or count.null?():
+        free_scratch(rect, line, event, wide, high, area, first, second, data, count)
+        fail ScreenFailed {call: "SDL_malloc", reason: ""}
+    refused = set_hints(hints, first.clone(), second.clone()):
+        on NativeEditNull:
+            ["(no buffer)"]
+        on IndexNotFound:
+            ["(no buffer)"]
+    if std::list::length(refused) > 0:
+        reason = line.clone().error_text()
+        free_scratch(rect, line, event, wide, high, area, first, second, data, count)
+        fail ScreenFailed {call: "SDL_SetHint ".concat(refused.get(0, "")), reason: reason}
+    if not sdl3::init::SDL_Init(sdl3::init::SDL_INIT_VIDEO):
+        reason = line.clone().error_text()
+        free_scratch(rect, line, event, wide, high, area, first, second, data, count)
+        fail ScreenFailed {call: "SDL_Init", reason: reason}
+    window = std::abi::bytes::from_list(std::str::encode_utf8(title).append(nul())).SDL_CreateWindow(width, height, window_flags())
+    if window.null?():
+        reason = line.clone().error_text()
+        free_scratch(rect, line, event, wide, high, area, first, second, data, count)
+        sdl3::init::SDL_Quit()
+        fail ScreenFailed {call: "SDL_CreateWindow", reason: reason}
+    no_name = std::ffi::c::null[std::ffi::c::Char]()
+    renderer = window.SDL_CreateRenderer(no_name)
+    if renderer.null?():
+        reason = line.clone().error_text()
+        free_scratch(rect, line, event, wide, high, area, first, second, data, count)
+        window.SDL_DestroyWindow()
+        sdl3::init::SDL_Quit()
+        fail ScreenFailed {call: "SDL_CreateRenderer", reason: reason}
+    synced = sync and renderer.SDL_SetRenderVSync(1)
+    screen.open.push(Session {window: window, renderer: renderer, rect: rect, line: line, event: event, wide: wide, high: high, area: area, first: first, second: second, data: data, count: count, synced: synced})
+
+# Whether the screen is open.
+fn open?(context screen: Screen) -> bool:
+    not screen.open.empty?()
+
+# Releases the open session -- the renderer, then the window, then the
+# scratch memory -- and SDL. FAILURE, unless it is "", names what failed:
+# the result is then SDL's error, read before anything is released; else
+# "". Closing a closed Screen does nothing and gives "".
+fn close(failure: str, context screen: Screen) -> str:
+    session = screen.open.pop():
+        on IndexNotFound:
+            return ""
+    {window, renderer, rect, line, event, wide, high, area, first, second, data, count} = session
+    reason = if failure != "":
+        line.clone().error_text()
+    else:
+        ""
+    if not renderer.null?():
+        renderer.SDL_DestroyRenderer()
+    window.SDL_DestroyWindow()
+    free_scratch(rect, line, event, wide, high, area, first, second, data, count)
+    sdl3::init::SDL_Quit()
+    reason
+
+# Whether presenting a frame waits for the display (false when closed).
+private fn session_synced?(context screen: Screen) -> bool errors IndexNotFound:
+    screen.open.element(0).synced
+
+fn synced?(context screen: Screen) -> bool:
+    synced = session_synced?():
+        on IndexNotFound:
+            return false
+    synced
+
+# ---------------------------------------------------------------------------
+# Measuring
+
+private fn session_size(context screen: Screen) -> Size errors IndexNotFound, NativeViewNull:
+    got = screen.open.element(0).renderer.SDL_GetCurrentRenderOutputSize(screen.open.element(0).wide, screen.open.element(0).high)
+    if not got:
+        return Size {width: 0, height: 0}
+    w = std::binary::native::view(IntCell, screen.open.element(0).wide).value
+    h = std::binary::native::view(IntCell, screen.open.element(0).high).value
+    Size {width: w, height: h}
+
+# The renderer's current output size in pixels (0 x 0 when closed or when
+# SDL cannot say).
+fn size(context screen: Screen) -> Size:
+    s = session_size():
+        on IndexNotFound:
+            Size {width: 0, height: 0}
+        on NativeViewNull:
+            Size {width: 0, height: 0}
+    s
+
+private fn session_area(context screen: Screen) -> Area errors IndexNotFound, NativeViewNull:
+    if not screen.open.element(0).window.SDL_GetWindowSafeArea(screen.open.element(0).area):
+        s = size()
+        return Area {x: 0, y: 0, width: s.width, height: s.height}
+    v = std::binary::native::view(sdl3::layouts::SDL_Rect, screen.open.element(0).area)
+    Area {x: v.x, y: v.y, width: v.w, height: v.h}
+
+# The window's safe area (SDL_GetWindowSafeArea), the whole output when SDL
+# cannot say. In window coordinates, which are pixels on Android and on a
+# desktop without display scaling.
+fn safe_area(context screen: Screen) -> Area:
+    a = session_area():
+        on IndexNotFound:
+            Area {x: 0, y: 0, width: 0, height: 0}
+        on NativeViewNull:
+            Area {x: 0, y: 0, width: 0, height: 0}
+    a
+
+# ---------------------------------------------------------------------------
+# Events
+
+# V (0 to 1 across the window) as a pixel of an output EXTENT pixels long.
+nomethod fn pixel(v: Float64, extent: int) -> int errors NonFiniteFloat:
+    std::float64::truncate(v * std::float64::from_int(extent))
+
+private fn finger_down(v: NativeView[sdl3::layouts::SDL_TouchFingerEvent], s: Size) -> Event errors NonFiniteFloat:
+    Event::FingerDown {finger: v.fingerID, x: pixel(v.x, s.width), y: pixel(v.y, s.height)}
+
+private fn finger_motion(v: NativeView[sdl3::layouts::SDL_TouchFingerEvent], s: Size) -> Event errors NonFiniteFloat:
+    Event::FingerMotion {finger: v.fingerID, x: pixel(v.x, s.width), y: pixel(v.y, s.height)}
+
+private fn finger_up(v: NativeView[sdl3::layouts::SDL_TouchFingerEvent], s: Size) -> Event errors NonFiniteFloat:
+    Event::FingerUp {finger: v.fingerID, x: pixel(v.x, s.width), y: pixel(v.y, s.height)}
+
+# The finger event of type T in the view V.
+private fn finger(t: std::ffi::c::UInt, v: NativeView[sdl3::layouts::SDL_TouchFingerEvent], context screen: Screen) -> Event:
+    if t == sdl3::events::SDL_EVENT_FINGER_CANCELED:
+        return Event::FingerCanceled {finger: v.fingerID}
+    s = size()
+    # (A coordinate SDL never makes -- not finite -- is no finger event.)
+    if t == sdl3::events::SDL_EVENT_FINGER_DOWN:
+        return v.finger_down(s):
+            on NonFiniteFloat:
+                Event::Other
+    if t == sdl3::events::SDL_EVENT_FINGER_MOTION:
+        return v.finger_motion(s):
+            on NonFiniteFloat:
+                Event::Other
+    v.finger_up(s):
+        on NonFiniteFloat:
+            Event::Other
+
+# The event in the session's event buffer, as a value.
+private fn decoded(context screen: Screen) -> Event errors NativeViewNull, IndexNotFound:
+    t = std::binary::native::view(sdl3::layouts::SDL_CommonEvent, screen.open.element(0).event).type_
+    if t == sdl3::events::SDL_EVENT_QUIT:
+        return Event::Quit
+    if t == sdl3::events::SDL_EVENT_TERMINATING:
+        return Event::Terminating
+    if t == sdl3::events::SDL_EVENT_LOW_MEMORY:
+        return Event::LowMemory
+    if t == sdl3::events::SDL_EVENT_WILL_ENTER_BACKGROUND:
+        return Event::WillEnterBackground
+    if t == sdl3::events::SDL_EVENT_DID_ENTER_BACKGROUND:
+        return Event::DidEnterBackground
+    if t == sdl3::events::SDL_EVENT_WILL_ENTER_FOREGROUND:
+        return Event::WillEnterForeground
+    if t == sdl3::events::SDL_EVENT_DID_ENTER_FOREGROUND:
+        return Event::DidEnterForeground
+    if t == sdl3::events::SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED or t == sdl3::events::SDL_EVENT_WINDOW_RESIZED:
+        return Event::Resized
+    if t == sdl3::events::SDL_EVENT_RENDER_DEVICE_RESET or t == sdl3::events::SDL_EVENT_RENDER_TARGETS_RESET:
+        return Event::RenderReset
+    if t == sdl3::events::SDL_EVENT_FINGER_DOWN or t == sdl3::events::SDL_EVENT_FINGER_MOTION or t == sdl3::events::SDL_EVENT_FINGER_UP or t == sdl3::events::SDL_EVENT_FINGER_CANCELED:
+        return t.finger(std::binary::native::view(sdl3::layouts::SDL_TouchFingerEvent, screen.open.element(0).event))
+    Event::Other
+
+# Milliseconds of a wait SDL accepts: -1 (until an event arrives) to 2^31-1.
+private fn timeout_ms(timeout: int) -> std::ffi::c::Int:
+    if timeout < -1:
+        return -1
+    if timeout > 2147483647:
+        return 2147483647
+    timeout
+
+private fn session_wait(timeout: std::ffi::c::Int, context screen: Screen) -> Event errors IndexNotFound, NativeViewNull:
+    if not screen.open.element(0).event.SDL_WaitEventTimeout(timeout):
+        return Event::Idle
+    decoded()
+
+# The next event, waiting for it at most TIMEOUT milliseconds (-1: until
+# one arrives; 0: not at all); Idle when none arrived. A closed Screen has
+# only Quit.
+fn wait(timeout: int, context screen: Screen) -> Event:
+    e = session_wait(timeout_ms(timeout)):
+        on IndexNotFound:
+            Event::Quit
+        on NativeViewNull:
+            Event::Other
+    e
+
+# The next waiting event, without waiting; Idle when none is waiting.
+fn poll(context screen: Screen) -> Event:
+    wait(0)
+
+# Milliseconds since SDL started.
+fn ticks(context screen: Screen) -> int:
+    sdl3::timer::SDL_GetTicks()
+
+# ---------------------------------------------------------------------------
+# Drawing, in integer pixels. Each returns whether SDL drew (false when the
+# screen is closed).
+
+private fn channel(v: int) -> std::ffi::c::UChar:
+    if v < 0:
+        return 0
+    if v > 255:
+        return 255
+    v
+
+private nomethod fn session_color(r: std::ffi::c::UChar, g: std::ffi::c::UChar, b: std::ffi::c::UChar, context screen: Screen) -> bool errors IndexNotFound:
+    screen.open.element(0).renderer.SDL_SetRenderDrawColor(r, g, b, 255)
+
+# The current color: R, G, B (each 0 to 255; outside it, the nearest),
+# opaque.
+nomethod fn color(r: int, g: int, b: int, context screen: Screen) -> bool:
+    drawn = session_color(channel(r), channel(g), channel(b)):
+        on IndexNotFound:
+            return false
+    drawn
+
+private fn session_clear(context screen: Screen) -> bool errors IndexNotFound:
+    screen.open.element(0).renderer.SDL_RenderClear()
+
+# Fills the whole output with the current color.
+fn clear(context screen: Screen) -> bool:
+    drawn = session_clear():
+        on IndexNotFound:
+            return false
+    drawn
+
+private fn session_present(context screen: Screen) -> bool errors IndexNotFound:
+    screen.open.element(0).renderer.SDL_RenderPresent()
+
+# Shows what was drawn since the last present.
+fn present(context screen: Screen) -> bool:
+    drawn = session_present():
+        on IndexNotFound:
+            return false
+    drawn
+
+private nomethod fn session_fill(x: int, y: int, w: int, h: int, context screen: Screen) -> bool errors NonFiniteFloat, IndexNotFound, NativeEditNull:
+    e = std::binary::native::edit(sdl3::layouts::SDL_FRect, screen.open.element(0).rect)
+    std::binary::store(e, sdl3::layouts::SDL_FRect.x, std::float64::from_int(x))
+    std::binary::store(e, sdl3::layouts::SDL_FRect.y, std::float64::from_int(y))
+    std::binary::store(e, sdl3::layouts::SDL_FRect.w, std::float64::from_int(w))
+    std::binary::store(e, sdl3::layouts::SDL_FRect.h, std::float64::from_int(h))
+    screen.open.element(0).renderer.SDL_RenderFillRect(screen.open.element(0).rect)
+
+# Fills the rectangle at X, Y (its top left corner) of W x H pixels in the
+# current color.
+nomethod fn fill(x: int, y: int, w: int, h: int, context screen: Screen) -> bool:
+    drawn = session_fill(x, y, w, h):
+        on IndexNotFound:
+            return false
+        on NativeEditNull:
+            return false
+        on NonFiniteFloat:
+            return false
+    drawn
+
+private nomethod fn session_text(x: int, y: int, scale: int, text: str, context screen: Screen) -> bool errors NonFiniteFloat, IndexNotFound, NativeEditNull:
+    std::binary::native::edit(Line, screen.open.element(0).line).store_line(text)
+    factor = std::float64::from_int(scale)
+    scaled = screen.open.element(0).renderer.SDL_SetRenderScale(factor, factor)
+    drawn = screen.open.element(0).renderer.SDL_RenderDebugText(std::float64::from_int(x) / factor, std::float64::from_int(y) / factor, screen.open.element(0).line)
+    reset = screen.open.element(0).renderer.SDL_SetRenderScale(1.0, 1.0)
+    scaled and drawn and reset
+
+# TEXT (printable ASCII; any other character drawn as '?'; at most 127) in
+# SDL's built-in 8 x 8 debug font scaled by SCALE (at least 1), its top
+# left corner at X, Y: each character is 8 * SCALE pixels wide and high.
+nomethod fn text(x: int, y: int, scale: int, text: str, context screen: Screen) -> bool:
+    if scale < 1:
+        return false
+    drawn = session_text(x, y, scale, text):
+        on IndexNotFound:
+            return false
+        on NativeEditNull:
+            return false
+        on NonFiniteFloat:
+            return false
+    drawn
+
+# The width in pixels of TEXT drawn at SCALE.
+fn text_width(text: str, scale: int) -> int:
+    std::str::length(text) * 8 * scale
+
+# ---------------------------------------------------------------------------
+# Files: one small text file in the application's private storage
+# (SDL_GetPrefPath: on Android the app's internal files directory, on a
+# desktop the user's data directory). A save writes a temporary file and
+# renames it over the old one, so an interrupted save leaves the previous
+# text whole.
+
+private nomethod fn session_storage(org: str, app: str, context screen: Screen) -> str errors IndexNotFound, NativeEditNull, NativeViewNull:
+    std::binary::native::edit(Text, screen.open.element(0).first).store_text(std::str::encode_utf8(org))
+    std::binary::native::edit(Text, screen.open.element(0).second).store_text(std::str::encode_utf8(app))
+    path = screen.open.element(0).first.SDL_GetPrefPath(screen.open.element(0).second)
+    if path.null?():
+        return ""
+    text = std::binary::native::view(Text, path).read_text()
+    path.free_chars()
+    text
+
+# The directory of ORG's application APP's private files, ending in its
+# separator ("" when SDL cannot give one, or the screen is closed).
+nomethod fn storage(org: str, app: str, context screen: Screen) -> str:
+    text = session_storage(org, app):
+        on IndexNotFound:
+            ""
+        on NativeEditNull:
+            ""
+        on NativeViewNull:
+            ""
+    text
+
+private fn store_data(e: NativeEdit[Data], bytes: List[std::byte::Byte]) errors IndexNotFound:
+    n = std::list::length(bytes)
+    loop i from 0 to n:
+        std::binary::store_element(e.bytes, i, bytes.get(i, 0))
+
+private nomethod fn session_save(path: str, text: str, context screen: Screen) -> bool errors IndexNotFound, NativeEditNull:
+    bytes = std::str::encode_utf8(text)
+    n = std::list::length(bytes)
+    if n > 4096:
+        return false
+    std::binary::native::edit(Data, screen.open.element(0).data).store_data(bytes)
+    std::binary::native::edit(Text, screen.open.element(0).first).store_text(std::str::encode_utf8(path.concat(".tmp")))
+    std::binary::native::edit(Text, screen.open.element(0).second).store_text(std::str::encode_utf8(path))
+    data = std::ffi::c::erase(screen.open.element(0).data.clone())
+    if not screen.open.element(0).first.SDL_SaveFile(data, n):
+        return false
+    screen.open.element(0).first.SDL_RenamePath(screen.open.element(0).second)
+
+# Writes TEXT (at most 4096 bytes of UTF-8) as the file PATH, replacing it
+# whole: through PATH.tmp, renamed over PATH. Whether it was written.
+nomethod fn save(path: str, text: str, context screen: Screen) -> bool:
+    saved = session_save(path, text):
+        on IndexNotFound:
+            false
+        on NativeEditNull:
+            false
+    saved
+
+private fn data_text(v: NativeView[Data], n: int) -> Loaded errors IndexNotFound:
+    bytes = loop i from 0 to n:
+        byte(std::binary::element(v.bytes, i))
+    text = std::abi::bytes::decode_utf8(std::abi::bytes::from_list(bytes)):
+        on InvalidUtf8:
+            return Loaded {found: true, text: ""}
+    Loaded {found: true, text: text}
+
+private nomethod fn session_load(path: str, context screen: Screen) -> Loaded errors IndexNotFound, NativeEditNull, NativeViewNull:
+    std::binary::native::edit(Text, screen.open.element(0).first).store_text(std::str::encode_utf8(path))
+    loaded = screen.open.element(0).first.SDL_LoadFile(screen.open.element(0).count)
+    if loaded.null?():
+        return Loaded {found: false, text: ""}
+    n = std::binary::native::view(SizeCell, screen.open.element(0).count).value
+    data = std::ffi::c::retype[std::ffi::c::UChar](loaded)
+    # (A file larger than the buffer is no file this module wrote.)
+    result = if n <= 4096:
+        std::binary::native::view(Data, data).data_text(n)
+    else:
+        Loaded {found: true, text: ""}
+    memory = std::ffi::c::erase(data)
+    sdl3::stdinc::SDL_free(memory)
+    result
+
+# The text of the file PATH, strictly UTF-8 ("" with found true when it is
+# not, or larger than 4096 bytes); found false when it cannot be read.
+fn load(path: str, context screen: Screen) -> Loaded:
+    loaded = session_load(path):
+        on IndexNotFound:
+            Loaded {found: false, text: ""}
+        on NativeEditNull:
+            Loaded {found: false, text: ""}
+        on NativeViewNull:
+            Loaded {found: false, text: ""}
+    loaded
+
+private fn session_remove(path: str, context screen: Screen) -> bool errors IndexNotFound, NativeEditNull:
+    std::binary::native::edit(Text, screen.open.element(0).first).store_text(std::str::encode_utf8(path))
+    screen.open.element(0).first.SDL_RemovePath()
+
+# Removes the file PATH; whether it was removed.
+fn remove(path: str, context screen: Screen) -> bool:
+    removed = session_remove(path):
+        on IndexNotFound:
+            false
+        on NativeEditNull:
+            false
+    removed

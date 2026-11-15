@@ -232,13 +232,27 @@ proc native::library {hir args} {
     if {$target ne $host} {
         lappend targetArgs --target [dict get [core::cabi::target $target] triple]
     }
+    # The program's own native library directories -- its target package
+    # tree's .lib (surface/modules.tcl, "Target package trees"), where the
+    # package manager places the libraries its packages bundle -- are
+    # searched after -L's, for the link plan and the link, as an
+    # executable's link searches them (native::WithProgramDirs): a library
+    # that links a package's bundled shared library (an Android
+    # application's libSDL3.so) needs no -L of its own
+    # (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md, "A compiler
+    # defect").
+    set savedLinkDirs $::native::linkDirs
+    foreach dir [dict getdef $hir nativeDirs {}] {
+        if {$dir ni $::native::linkDirs} { lappend ::native::linkDirs $dir }
+    }
+    set work ""
+    try {
     set dependencies {}
     if {[hir::foreign::linkPlan $hir] ne {}} {
         set dependencies [LinkPlanOf $text {*}$targetArgs]
     }
     file mkdir $out
     set work [file tempdir]
-    try {
         set object [file join $work $name.program.o]
         set public [library::PublicNames $name $records $application]
         if {$windows} {
@@ -303,7 +317,8 @@ proc native::library {hir args} {
         }
         library::Write $manifest [library::Manifest $hir $name $records [expr {$shared ne ""}] $dependencies $digests $target $support $application]
     } finally {
-        file delete -force $work
+        if {$work ne ""} { file delete -force $work }
+        set ::native::linkDirs $savedLinkDirs
     }
     return [dict create static $static shared $shared import "" header $header manifest $manifest exports $records application $application]
 }

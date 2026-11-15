@@ -24,8 +24,13 @@
 #                bundled, entry; optional targetDefines {TARGET-GLOB
 #                {DEFINE ...}}
 #   targets      the Botlish targets (core/cabi.tcl's names) it supports
-#   modules      {stripPrefix PREFIX}: a header's module is its file stem
-#                without PREFIX, lowercased
+#   modules      {stripPrefix PREFIX ?always {HEADER ...}?}: a header's
+#                module is its file stem without PREFIX, lowercased; a
+#                header listed in always (relative to the source root) has
+#                its module on every target, empty where the header
+#                declares nothing for the target (so that one package
+#                release offers one set of modules on every target it
+#                names: a target-aware package's rule)
 #   libraries    rules {headers GLOBS targets GLOBS names {LIB ...}}: each
 #                module declares the names of every rule matching its
 #                header and the target, in rule order (the linker's -lNAME);
@@ -127,6 +132,12 @@ proc ::cbind::profile::Validate {p} {
             error "c-bindgen: profile [dict get $p name]: unknown target \"$t\" (known: [join [core::cabi::targetNames] {, }])"
         }
     }
+    foreach k [dict keys [dict get $p modules]] {
+        if {$k ni {stripPrefix always}} {
+            error "c-bindgen: profile [dict get $p name]: modules has an unknown key \"$k\" (stripPrefix, always)"
+        }
+    }
+    if {![dict exists $p modules stripPrefix]} { dict set p modules stripPrefix "" }
     if {[dict get $p stubs] ni {thunk unsupported}} {
         error "c-bindgen: profile [dict get $p name]: stubs is thunk or unsupported, not \"[dict get $p stubs]\""
     }

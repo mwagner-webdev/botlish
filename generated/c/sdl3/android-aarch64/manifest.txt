@@ -1,7 +1,7 @@
 c-bindgen manifest (C-BINDGEN.md, "Manifest")
 generator_version 2
 profile sdl3
-profile_file tools/c-bindgen/profiles/sdl3.tcl 6b99b250
+profile_file tools/c-bindgen/profiles/sdl3.tcl bcda2308
 target android-aarch64
 library sdl3
 source {url https://github.com/libsdl-org/SDL tag release-3.4.18 commit 829a65d769d935c4852f8159e964312c0957260a}
@@ -77,7 +77,7 @@ shim_library botlish_shim_sdl3_c54c5df8
 file layouts-check.c 883 d5c9129e
 file layouts.tsv 1030 5d17e611
 file report.tsv 4999 532e9c0b
-file report.txt 156 2384ee02
+file report.txt 156 c84cb51c
 file sdl3/assert.bot 47 06348de4
 file sdl3/asyncio.bot 88 8de98116
 file sdl3/atomic.bot 88 0cfbc26c
@@ -88,6 +88,7 @@ file sdl3/clipboard.bot 54 b741fa8a
 file sdl3/cpuinfo.bot 66 25cebb61
 file sdl3/ctypes.bot 459 231d8211
 file sdl3/dialog.bot 50 8a74c503
+file sdl3/dlopennote.bot 5 e9c52747
 file sdl3/endian.bot 9 b5d557e8
 file sdl3/error_h.bot 21 a49d1cfc
 file sdl3/events.bot 236 56ce4036

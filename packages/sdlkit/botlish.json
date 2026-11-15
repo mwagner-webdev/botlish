@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "name": "sdlkit",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "dependencies": {
-    "sdl3": "0.2"
+    "sdl3": "0.3"
   },
   "lock": {
-    "sdl3": "0.2.1"
+    "sdl3": "0.3.0"
   }
 }

@@ -1,0 +1,88 @@
+# android_io -- std::io::IO for Android applications, over Android's log
+# (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md, "Android IO
+# package"). No standard namespace is Android's platform interface
+# (std::linux is the Linux platform's: UNSUPPORTED-PLATFORM for
+# android-aarch64), so an Android application that reports through std::io
+# installs this package's context in its entry program:
+#
+#     import android_io
+#     with context android_io::create()           # tag "Botlish"
+#     with context android_io::create_tagged("MyApp")
+#
+# Each write is one __android_log_write call (liblog, a platform library of
+# every Android release, never bundled): output at ANDROID_LOG_INFO, error
+# output at ANDROID_LOG_ERROR, under the context's tag. logcat shows each
+# call as one entry (it drops a trailing newline; liblog truncates an entry
+# past about 4,000 bytes; a text holding U+0000 ends there, as a C string
+# does).
+#
+# Ownership. The tag and the text are Botlish byte storage lent to the one
+# call (`read noescape`: liblog copies both before it returns), never
+# copied into native memory and never kept by C. The context holds no
+# pointer and no handle: every VM that installs it has its own, and nothing
+# about it is process-wide. Heap pointer tagging (Android 11 and later) is
+# the runtime's business: the exposure is the full tagged address
+# (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md).
+#
+# Authority. The extern is private; the module mediates its one C call
+# through its own context (DIRECT-MODULES.md), so an importer needs no
+# `direct module` to log.
+import std::abi::bytes
+import std::byte
+import std::ffi::c
+import std::io
+import std::list
+import std::mutable_vector
+import std::str
+
+extern c library "log"
+
+# int __android_log_write(int prio, const char *tag, const char *text):
+# both strings are only read during the call.
+private extern c fn android_log_write named "__android_log_write"(prio: std::ffi::c::Int, tag: std::ffi::c::Ptr[std::ffi::c::Char] read noescape, text: std::ffi::c::Ptr[std::ffi::c::Char] read noescape) -> std::ffi::c::Int
+
+# The log environment: the priorities of output and of error output, and
+# the tag (one text, kept in a vector: a context member of type str has no
+# native context slot).
+opaque context struct AndroidIO:
+    output: std::ffi::c::Int
+    failures: std::ffi::c::Int
+    tags: MutableVector[str]
+
+# The default tag.
+fn default_tag() -> str:
+    "Botlish"
+
+# ANDROID_LOG_INFO (4) for output and ANDROID_LOG_ERROR (6) for errors,
+# under the tag TAG.
+fn create_tagged(tag: str) -> AndroidIO:
+    AndroidIO {output: 4, failures: 6, tags: std::mutable_vector::from_list([tag])}
+
+# The same under the default tag.
+fn create() -> AndroidIO:
+    create_tagged(default_tag())
+
+# The tag this context logs under.
+fn tag(context log: AndroidIO) -> str:
+    log.tags.at(0):
+        on IndexNotFound:
+            default_tag()
+
+private fn nul() -> std::byte::Byte:
+    0
+
+# TEXT's UTF-8 bytes and the NUL a C string ends with.
+private fn cstring(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(text).append(nul()))
+
+# (nomethod: a priority is not a receiver.)
+private nomethod fn logged(priority: std::ffi::c::Int, text: str, context log: AndroidIO) -> unit errors std::io::WriteFailed:
+    if priority.android_log_write(cstring(tag()), cstring(text)) < 0:
+        fail std::io::WriteFailed
+    unit
+
+fn write_text(text: str, context log: AndroidIO) -> unit errors std::io::WriteFailed:
+    logged(log.output, text)
+
+fn write_error_text(text: str, context log: AndroidIO) -> unit errors std::io::WriteFailed:
+    logged(log.failures, text)

@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "name": "sdlscreen",
+  "version": "0.1.0",
+  "dependencies": {
+    "sdl3": "0.3"
+  },
+  "lock": {
+    "sdl3": "0.3.0"
+  }
+}

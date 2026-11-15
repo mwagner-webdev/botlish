@@ -1,0 +1,153 @@
+# counter.bot -- the smallest touch application over sdlscreen
+# (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md, "Generic generator
+# acceptance with a second application"): a window, a colored rectangle and
+# a counter that each tap on the screen increments, then a clean exit when
+# the system asks (SDL_EVENT_QUIT or SDL_EVENT_TERMINATING). It is the first
+# integration gate of the milestone -- SDL initialized, a window and a
+# renderer made, drawn, used and released from Botlish, on SDL's thread --
+# and the proof that the Android generator knows nothing of 2048: it has no
+# board, no game package and its own names.
+#
+# Every line it prints is a protocol line the acceptance harness reads:
+#   counter: ready WIDTHxHEIGHT      the first frame was presented
+#   counter: taps N                   a tap counted (N taps so far)
+#   counter: done N frames F          the loop ended; F frames presented
+import sdlscreen
+import sdlscreen::gesture
+import sdlscreen::layout
+import std::int
+import std::io
+import std::list
+import std::str
+
+struct State:
+    taps: int
+    frames: int
+    tracker: sdlscreen::gesture::Tracker
+    dirty: bool
+    visible: bool
+
+fn say(text: str, context io: std::io::IO):
+    std::io::print_line("counter: ".concat(text)):
+        on std::io::WriteFailed:
+            unit
+
+# Draws STATE on the screen: a dark background, a rectangle whose color
+# changes with every tap, the count.
+fn draw(state: State, context screen: sdlscreen::Screen) -> bool:
+    s = sdlscreen::size()
+    area = sdlscreen::layout::whole(s.width, s.height)
+    box = area.inset(sdlscreen::layout::quotient(area.w, 8)).square()
+    shade = (state.taps * 37).mod(200)
+    sdlscreen::color(24, 28, 36)
+    sdlscreen::clear()
+    sdlscreen::color(40 + shade, 120, 220 - shade)
+    sdlscreen::fill(box.x, box.y, box.w, box.h)
+    scale = sdlscreen::layout::larger(sdlscreen::layout::quotient(s.width, 160), 1)
+    label = "taps ".concat(state.taps.to_string())
+    w = label.text_width(scale)
+    sdlscreen::color(255, 255, 255)
+    sdlscreen::text(box.x + sdlscreen::layout::quotient(box.w - w, 2), box.y + sdlscreen::layout::quotient(box.h, 2) - 4 * scale, scale, label)
+    sdlscreen::present()
+
+# The least movement of a swipe: a twentieth of the screen's width.
+fn threshold(context screen: sdlscreen::Screen) -> int:
+    sdlscreen::layout::quotient(sdlscreen::size().width, 20)
+
+# STATE after a gesture step.
+fn stepped(state: State, step: sdlscreen::gesture::Step, context io: std::io::IO) -> State:
+    taps = match step.gesture:
+        case sdlscreen::gesture::Gesture::Tap:
+            state.taps + 1
+        case sdlscreen::gesture::Gesture::Swipe:
+            state.taps
+        case sdlscreen::gesture::Gesture::Nothing:
+            state.taps
+    if taps != state.taps:
+        say("taps ".concat(taps.to_string()))
+    State {taps: taps, frames: state.frames, tracker: step.tracker, dirty: state.dirty or taps != state.taps, visible: state.visible}
+
+# What an event does: the state after it, and whether the loop ends.
+struct Reaction:
+    done: bool
+    state: State
+
+fn next(state: State) -> Reaction:
+    Reaction {done: false, state: state}
+
+fn shown(state: State, visible: bool) -> Reaction:
+    next(State {taps: state.taps, frames: state.frames, tracker: state.tracker, dirty: visible, visible: visible})
+
+fn redraw(state: State) -> Reaction:
+    next(State {taps: state.taps, frames: state.frames, tracker: state.tracker, dirty: true, visible: state.visible})
+
+# STATE after the event E.
+fn react(state: State, e: sdlscreen::Event, context io: std::io::IO, screen: sdlscreen::Screen) -> Reaction:
+    match e:
+        case sdlscreen::Event::Quit:
+            Reaction {done: true, state: state}
+        case sdlscreen::Event::Terminating:
+            Reaction {done: true, state: state}
+        case sdlscreen::Event::FingerDown {finger, x, y}:
+            next(state.stepped(state.tracker.down(finger, x, y)))
+        case sdlscreen::Event::FingerMotion {finger, x, y}:
+            next(state.stepped(state.tracker.motion(finger, x, y)))
+        case sdlscreen::Event::FingerUp {finger, x, y}:
+            next(state.stepped(state.tracker.up(finger, x, y, threshold())))
+        case sdlscreen::Event::FingerCanceled {finger}:
+            next(state.stepped(state.tracker.cancel(finger)))
+        case sdlscreen::Event::WillEnterBackground:
+            State {taps: state.taps, frames: state.frames, tracker: state.tracker.reset(), dirty: false, visible: false}.shown(false)
+        case sdlscreen::Event::DidEnterForeground:
+            state.shown(true)
+        case sdlscreen::Event::Resized:
+            state.redraw()
+        case sdlscreen::Event::RenderReset:
+            state.redraw()
+        case sdlscreen::Event::DidEnterBackground:
+            state.next()
+        case sdlscreen::Event::WillEnterForeground:
+            state.next()
+        case sdlscreen::Event::LowMemory:
+            state.next()
+        case sdlscreen::Event::Idle:
+            state.next()
+        case sdlscreen::Event::Other:
+            state.next()
+
+# The loop: draws when something changed and the app is visible, then waits
+# for the next event (no busy wait: an idle counter sleeps in SDL, and a
+# hidden one waits until an event arrives).
+fn run(state: State, context io: std::io::IO, screen: sdlscreen::Screen) -> State:
+    frames = if state.dirty and state.visible:
+        drawn = draw(state)
+        if state.frames == 0:
+            s = sdlscreen::size()
+            say("ready ".concat(s.width.to_string()).append_char('x').concat(s.height.to_string()))
+        state.frames + 1
+    else:
+        state.frames
+    current = State {taps: state.taps, frames: frames, tracker: state.tracker, dirty: false, visible: state.visible}
+    timeout = if current.visible:
+        1000
+    else:
+        -1
+    r = current.react(sdlscreen::wait(timeout))
+    if r.done:
+        return r.state
+    run(r.state)
+
+# The application: SDL opened (Android's lifecycle events delivered to the
+# loop, never blocked in SDL: SDL_ANDROID_BLOCK_ON_PAUSE 0), the loop, SDL
+# closed. Returns whether it ran to its end.
+fn main(context io: std::io::IO, screen: sdlscreen::Screen) -> bool:
+    hints = [sdlscreen::nonblocking_pause()]
+    sdlscreen::open("Botlish counter", 480, 800, true, hints):
+        on sdlscreen::ScreenFailed {call, reason}:
+            say("failed ".concat(call).concat(": ").concat(reason))
+            return false
+    start = State {taps: 0, frames: 0, tracker: sdlscreen::gesture::idle(), dirty: true, visible: true}
+    finished = run(start)
+    sdlscreen::close("")
+    say("done ".concat(finished.taps.to_string()).concat(" frames ").concat(finished.frames.to_string()))
+    true

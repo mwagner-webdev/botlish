@@ -16,6 +16,11 @@
 # (examples/games/icy-tower/build-windows.sh, ICY-TOWER-WINDOWS.md), and
 # none is committed.
 #
+# Modules: SDL_dlopennote.h declares its ELF note constant on Linux only
+# (SDL disables dlopen notes on Android), and one release of the sdl3
+# package offers one set of modules on every target it names, so its module
+# exists on every target, empty where it declares nothing (modules always).
+#
 # Manual policy: the window-title contracts the acceptance needs (SDL
 # copies the title: SDL_video.h documents it as the window's title in
 # UTF-8, which SDL_CreateWindow stores in its own window structure), so a
@@ -33,7 +38,7 @@ dict create \
         entry {SDL3/SDL.h}
     } \
     targets {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64 android-aarch64} \
-    modules {stripPrefix SDL_} \
+    modules {stripPrefix SDL_ always {include/SDL3/SDL_dlopennote.h}} \
     libraries {
         {headers * targets * names {SDL3}}
     } \

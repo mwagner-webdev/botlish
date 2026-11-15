@@ -175,6 +175,18 @@ proc ::cbind::emit::files {theModel} {
             lappend converters [dict get $c type]
         }
     }
+    # A module the profile has on every target (modules always), which its
+    # header declares nothing of on this target: empty, after the others.
+    set empty {}
+    foreach header [dict getdef [dict get $p modules] always {}] {
+        set key [::cbind::model::ModuleOf $header]
+        if {![dict exists $groups $key]} {
+            lappend moduleOrder $key
+            dict set groups $key {constants {} externs {}}
+            dict set headerOf $key $header
+            lappend empty $key
+        }
+    }
     # Modules: plain ones in the order their header first appears, thunk
     # modules after them in the same order.
     set plain [lsearch -all -inline -not -glob $moduleOrder thunks::*]
@@ -191,7 +203,12 @@ proc ::cbind::emit::files {theModel} {
             lappend keys {*}[Keys [dict get $e result type]]
         }
         set keys [lsort -unique $keys]
-        set text [Banner "${ns}::[string map {:: ::} $key]" [ModuleWhat $key [dict get $headerOf $key]]]
+        set what [ModuleWhat $key [dict get $headerOf $key]]
+        if {$key in $empty} {
+            lappend what "On this target the header declares nothing (its declarations are another" \
+                "target's); the module exists on every target (the profile's modules always)."
+        }
+        set text [Banner "${ns}::[string map {:: ::} $key]" $what]
         set imports {}
         if {[llength [dict get $g externs]]} { lappend imports "import std::ffi::c" }
         if {[llength [dict get $g constants]] || [llength $keys]} { lappend imports "import ${ns}::ctypes" }
