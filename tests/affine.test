@@ -8,6 +8,8 @@
 # callable kinds. A generic (untyped) function given an affine argument is
 # specialized for it (a clone in the monomorphized program), never dispatched
 # at run time.
+#
+# canary: covers native/src/runtime/affine.rs core/affine.tcl
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 

@@ -10,6 +10,9 @@
 # Every value test runs on all four backends, which must agree; the inputs
 # reach the conversions through parameters and loop elements, so no call is
 # decided before a run and every backend's own implementation computes it.
+#
+# canary: toolchain -- the native runtime formats and parses numbers itself; a Rust release that changed what it relies on would show here
+# canary: covers native/src/runtime/inttext.rs native/src/runtime/decimal.rs
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]

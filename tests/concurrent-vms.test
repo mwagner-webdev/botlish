@@ -21,6 +21,8 @@
 # synchronization, not by elapsed time); their distinct context areas; the
 # one program metadata object they share; the guarded threads; and the
 # pointers the ownership check found reaching outside a Vm's own heap.
+#
+# canary: covers native/src/runtime/vm.rs native/src/runtime/platform/records.rs
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]

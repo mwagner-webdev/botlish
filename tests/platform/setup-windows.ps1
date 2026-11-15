@@ -2,8 +2,9 @@
 # for the Windows workflow (.github/workflows/windows-x86_64.yml;
 # WINDOWS-X86-64-MILESTONE-1.md, section 7): this repository's baseline Tcl
 # 9.0.1, built from its pinned source release with MSVC's nmake (no package
-# ships it), and the stable Rust toolchain for x86_64-pc-windows-msvc, the
-# one native Windows target.
+# ships it), and the Rust toolchain rust-toolchain.toml pins, built for
+# x86_64-pc-windows-msvc (the one native Windows target) and made the
+# default.
 #
 #   pwsh tests/platform/setup-windows.ps1 [-Prefix DIR] [-PathFile FILE]
 #

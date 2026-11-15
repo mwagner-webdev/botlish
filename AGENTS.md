@@ -29,7 +29,16 @@ one), check `main`'s CI at both ends of the work
   run it names. Don't merge onto a red
   `main` without telling the user. A failure on your branch that `main`'s
   latest run does not have is yours to fix before the merge. Pending runs
-  are acceptable: report them as pending, never as passed.
+  are acceptable: report them as pending, never as passed -- except for a
+  change the canary cannot see whole: one motivated by something outside
+  the repository (a new toolchain, runner image or external service), or
+  one that changes how CI builds or installs (`.github/actions/`,
+  `.devcontainer/setup.sh`, the platform setup scripts,
+  `rust-toolchain.toml`, `native/Cargo.lock`, a workflow's toolchain or
+  cache). Such a change merges only once its dispatched runs have finished,
+  green: 14937461, the rustc 1.100 follow-up, merged with them pending, and
+  its first finished job found the Unicode drift
+  (MAIN-CI-FAILURES-2026-11-13.md).
 
 A newer push cancels a running test workflow on the same ref, on `main`
 too, so a run of `main` may end `cancelled`: it was superseded, and says
@@ -40,9 +49,10 @@ them (CI-RUNS.md; next section).
 ## CI housekeeping (cancellation, pruning, the release gate, the canary, deferral)
 
 The runners are a shared, limited pool, and main's merges come in bursts
-(CI-RUNS.md). Five rules keep obsolete, doomed and repeated runs off them
+(CI-RUNS.md). Six rules keep obsolete, doomed and repeated runs off them
 and keep releases honest; `tools/ci/runs.py` implements the second, the
-third and the fifth, `tests/canary.tcl` the fourth. Keep it so:
+third and the fifth, `tests/canary.tcl` the fourth, every download and API
+read the sixth. Keep it so:
 
 * **A newer push cancels a running test workflow on the same ref, on main
   too:** a workflow that tests a push has `concurrency: group:
@@ -82,8 +92,19 @@ third and the fifth, `tests/canary.tcl` the fourth. Keep it so:
   jobs wait for it** (CI-RUNS.md, "The canary"): tests.yml, tests-arm64.yml
   and windows-x86_64.yml a `canary` job, macos-arm64.yml the smoke job's
   last step. It runs, within about ten minutes, the test files and golden
-  suites the push adds or changes, then the ones `tests/canary.tsv`'s
-  history says failed recently on that host; tests.yml's runs the mutant
+  suites the push adds or changes; then, when the toolchain changed (the
+  push changes `rust-toolchain.toml`, a setup script or action or
+  `native/Cargo.lock`, or the run's rustc is not the one `tests/canary.tsv`
+  records for the host), the items that declare `# canary: toolchain --
+  REASON`; then the items whose `# canary: covers PATTERN...` lines match a
+  path the push changes; then the ones `tests/canary.tsv`'s history says
+  failed recently on that host. It says first when the toolchain changed.
+  A test file that depends on the toolchain itself (Rust's Unicode data,
+  cargo's layout, the link, the runtime archive's system libraries)
+  declares `# canary: toolchain`; one this file names for a source ("If you
+  change X, run Y") may declare `# canary: covers X`, every pattern a file
+  of the tree (tests/canary.test). Declarations are the files' own header
+  lines, never a list beside the selection; tests.yml's runs the mutant
   catalogs and the warning gate first, as steps (a job of its own would
   wait for a runner before the expensive jobs could start: keep them steps).
   A branch push runs only the canary job, on every host (macOS: the smoke
@@ -113,6 +134,14 @@ third and the fifth, `tests/canary.tcl` the fourth. Keep it so:
   dispatched run or a pull request's run defer, never defer to a failed,
   cancelled or deferred run or to another branch's unfinished one, and never
   defer on an API error. A new job a branch push runs defers too.
+* **Infrastructure retries, tests never do.** Every network operation a
+  workflow or a CI tool makes outside a test is retried on a transient
+  failure: downloads with `curl --retry 5 --retry-all-errors`,
+  `tools/ci/runs.py`'s reads (`Api.reading`: a 5xx or a transport error).
+  A write that could act twice (a dispatch, a cancellation, a release, a
+  push) is never repeated, and a test is never run again to make it pass.
+  Five of the 14 failed runs of 2026-11-09..13 were one lost packet each
+  (MAIN-CI-FAILURES-2026-11-13.md).
 
 If you change `tools/ci/`, a workflow's concurrency or triggers, a release
 job, or the name of a workflow or of a GC-stress job a requirement names,
@@ -445,8 +474,12 @@ a build, `cranelift`/`cranelift-generic` tests and benchmarks report
   2026-11-13 with no commit: rustc 1.100's cargo wrote another target
   layout (the rustc linker found no `botlish_native`) and its Unicode 18
   tables changed `std::str::lowercase` natively
-  (MAIN-CI-FAILURES-2026-11-13.md). The one exception is a tool that needs
-  a nightly feature and names it (`fuzz/scripts/build-asan.sh`).
+  (MAIN-CI-FAILURES-2026-11-13.md). The exceptions are a tool that needs a
+  nightly feature and names it (`fuzz/scripts/build-asan.sh`) and
+  `toolchain-canary.yml`, which builds main with the newest stable Rust
+  once per release, on a schedule, and gates nothing (CI-RUNS.md, "The
+  toolchain canary"); `tools/ci/test_runs.py` checks every other workflow,
+  action and setup script.
 * The default matters as much as the file: rustup reads
   `rust-toolchain.toml` only inside the checkout, and the rustc linker
   compiles each executable's startup crate in a temporary directory, where
@@ -454,11 +487,15 @@ a build, `cranelift`/`cranelift-generic` tests and benchmarks report
   toolchain built. A setup that installs the toolchain makes it the
   default (`tools/rust-toolchain.sh install`).
 * A toolchain bump is a change of its own, on a branch: `rust-toolchain.toml`
-  and nothing else, every test workflow dispatched on it (a new rustc
-  changes no test file, so the canary selects nothing for it), merged only
-  green. Read its release notes for cargo's layout and the Unicode version
-  (`char::UNICODE_VERSION`): Botlish's Unicode data never comes from Rust's
-  (next section but many: "Unicode data is the reference's").
+  and nothing else, every test workflow dispatched on it (the canary runs
+  only the toolchain-sensitive files for it), merged only green. Start from
+  the toolchain canary's last run for that release: its failures are the
+  bump's worklist. Read its release notes for cargo's layout and the
+  Unicode version (`char::UNICODE_VERSION`): Botlish's Unicode data never
+  comes from Rust's (next section but many: "Unicode data is the
+  reference's"). Once it is on main, commit the next `ci tools` run's
+  records (`tests/canary.tsv`): until its toolchain lines name the new
+  release, every canary runs the toolchain-sensitive files first.
 * The package author image keeps its own pin
   (`tools/package-build/Dockerfile`: Rust 1.97.0, `RUSTUP_TOOLCHAIN`, which
   wins over the file): recorded releases reproduce with the toolchain that
@@ -782,9 +819,11 @@ per test file or suite, each with a private `-tmpdir`):
 
 It starts the likeliest to fail first (`-priority 1`, the default): the
 files and suites this checkout changes against origin/main, its working
-tree included, then those that failed recently in CI on this host
-(`tests/canary.tsv`), as the CI canary selects them (CI-RUNS.md, "The
-canary"). `-fail-fast 1` starts nothing more after the first failure and
+tree included, then the toolchain-sensitive ones (when this checkout's
+rustc is not CI's, or it changes a statement of the toolchain), then the
+ones covering a changed source, then those that failed recently in CI on
+this host (`tests/canary.tsv`), as the CI canary selects them (CI-RUNS.md,
+"The canary"). `-fail-fast 1` starts nothing more after the first failure and
 reports the rest as not run. It prints a line per file and suite, then
 every failure with the command that reruns it, and exits 1 on any (or on
 anything not run).
@@ -967,6 +1006,11 @@ what it depends on in its code or its constraints:
   directory, the checkout): map the paths out first (`string map [list $dir
   DIR]`). The native coverage jobs' temporary directory is
   `/tmp/native-coverage_XXXXXX`.
+* A tool that summarizes a test run (tests/native-coverage.tcl,
+  tests/platform/tier.tcl, the golden check) prints each failed test's own
+  report, never a prefix of the run's output: the cranelift coverage job's
+  first 20,000 characters were all unsupported tests', and the one failure
+  in it (vt-large, 023dfaa3) left no trace (MAIN-CI-FAILURES-2026-11-13.md).
 
 A change can break another audit's mutant: rewrite or duplicate the text it
 replaces, and that mutant guards nothing until its own harness next runs.

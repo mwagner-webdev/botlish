@@ -19,6 +19,8 @@
 # Nothing here runs a C call or a syscall. The tests that need the native
 # driver carry nativeBuilt; the rest run on any host, simulating another
 # where they say so (::tcl_platform).
+#
+# canary: covers native/src/codegen/target.rs core/cabi.tcl
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
