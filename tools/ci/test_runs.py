@@ -16,6 +16,7 @@ to every workflow a release waits for; every test workflow's expensive
 jobs wait for its canary, a branch push runs only the canary and the jobs
 its message opts into, and every job a branch push runs defers with it).
 """
+import http.client
 import io
 import itertools
 import json
@@ -686,12 +687,15 @@ class Requests(unittest.TestCase):
     def urlopen(self, req, timeout=None):
         self.requests.append(req)
         code, body = self.answers.pop(0)
+        if isinstance(code, BaseException):
+            raise code
         if code >= 400:
             raise urllib.error.HTTPError(req.full_url, code, "error", {}, io.BytesIO(json.dumps(body).encode()))
         return FakeResponse(json.dumps(body).encode() if body is not None else b"")
 
     def api(self):
-        return runs.Api("t0ken", REPO, "https://api.example/", urlopen=self.urlopen)
+        self.waits = []
+        return runs.Api("t0ken", REPO, "https://api.example/", urlopen=self.urlopen, sleep=self.waits.append)
 
     def test_get_and_headers(self):
         self.answers = [(200, {"status": "behind"})]
@@ -702,13 +706,52 @@ class Requests(unittest.TestCase):
         self.assertEqual(req.get_method(), "GET")
 
     def test_missing_and_errors(self):
-        self.answers = [(404, {"message": "Not Found"}), (404, {"message": "Not Found"}), (500, {"message": "boom"})]
+        boom = (500, {"message": "boom"})
+        self.answers = [(404, {"message": "Not Found"}), (404, {"message": "Not Found"})] + [boom] * runs.RETRY_ATTEMPTS
         api = self.api()
         self.assertIsNone(api.ref_sha("heads/claude/some-branch"))
         self.assertTrue(self.requests[0].full_url.endswith("/git/ref/heads/claude/some-branch"))
         self.assertFalse(api.release_exists("single-latest"))
         with self.assertRaises(runs.ApiError):
             api.jobs(7)
+        # A 404 is an answer, asked once; a 5xx is asked RETRY_ATTEMPTS
+        # times, then raised.
+        self.assertEqual(len(self.requests), 2 + runs.RETRY_ATTEMPTS)
+        self.assertEqual(self.waits, list(runs.RETRY_WAIT))
+        self.assertEqual(self.answers, [])
+
+    def test_transient_reads_are_asked_again(self):
+        """main's ci tools runs failed on one HTTP 502 (cfd6ecfa, ede621b1)
+        and on a body cut short (14937461): a read asks again."""
+        self.answers = [(502, {"message": "Server Error"}),
+                        (http.client.IncompleteRead(b"{", 10), None),
+                        (200, {"jobs": [{"id": 1}]})]
+        api = self.api()
+        self.assertEqual(api.jobs(7), [{"id": 1}])
+        self.assertEqual(len(self.requests), 3)
+        self.assertEqual(self.waits, list(runs.RETRY_WAIT[:2]))
+        # A lost connection, every time: an ApiError, never another error.
+        self.answers = [(ConnectionResetError("reset"), None)] * runs.RETRY_ATTEMPTS
+        with self.assertRaises(runs.ApiError):
+            api.jobs(7)
+        # Another client error is the answer, asked once.
+        self.requests.clear()
+        self.answers = [(403, {"message": "Forbidden"})]
+        with self.assertRaises(runs.ApiError):
+            api.jobs(7)
+        self.assertEqual(len(self.requests), 1)
+
+    def test_writes_are_never_repeated(self):
+        """A dispatch asked twice could be a second release run."""
+        self.answers = [(502, {"message": "Server Error"})]
+        api = self.api()
+        with self.assertRaises(runs.ApiError):
+            api.dispatch("single-executable.yml", "main", {"release": "b" * 40})
+        self.answers = [(ConnectionResetError("reset"), None)]
+        with self.assertRaises(runs.ApiError):
+            api.cancel(42)
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual(self.waits, [])
 
     def test_annotated_tag_and_paging(self):
         self.answers = [(200, {"object": {"type": "tag", "sha": "t" * 40}}),

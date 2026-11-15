@@ -120,9 +120,14 @@ jobs:
       - name: Rust (${{ matrix.toolchain }})
         shell: pwsh
         run: |
-          $toolchain = if ("${{ matrix.toolchain }}" -eq "gnu") { "stable-x86_64-pc-windows-gnu" } else { "stable-x86_64-pc-windows-msvc" }
+          # The pinned release (rust-toolchain.toml) in the matrix's build;
+          # RUSTUP_TOOLCHAIN makes it win over the file inside the checkout,
+          # whose channel names the host's (MSVC) build.
+          $channel = (Select-String -Path rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          $toolchain = if ("${{ matrix.toolchain }}" -eq "gnu") { "$channel-x86_64-pc-windows-gnu" } else { "$channel-x86_64-pc-windows-msvc" }
           rustup toolchain install $toolchain --profile minimal
           rustup default $toolchain
+          "RUSTUP_TOOLCHAIN=$toolchain" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Versions
         shell: pwsh
         run: |

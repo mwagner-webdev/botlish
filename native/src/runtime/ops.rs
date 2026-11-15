@@ -2776,29 +2776,14 @@ pub extern "C" fn rt_str_byte_len(p: *mut Vm, s: Value) -> Value {
 pub extern "C" fn rt_str_lower(p: *mut Vm, s: Value) -> Value {
     // The Unicode 16 simple (one-to-one, UnicodeData.txt) lowercase mapping,
     // identical to core::strings::lowercase (see its comment and README.md,
-    // "Strings"). Rust's tables are newer than Unicode 16 and its
-    // to_lowercase is the *full* mapping, so two adjustments:
-    fn lower(c: char) -> char {
-        // U+0130's full lowercase is "i" + U+0307 (SpecialCasing.txt's only
-        // unconditional multi-character lowercase); its simple mapping is
-        // plain U+0069.
-        if c == '\u{130}' {
-            return 'i';
-        }
-        // Scalars with a lowercase mapping that Unicode 17 added: leave them
-        // unchanged to stay at Unicode 16 (Latin Extended-D U+A7CE, U+A7D2,
-        // U+A7D4 and the Beria Erfe capitals U+16EA0..=U+16EB8). tests/
-        // native-tcl-unicode.test compares every scalar with the reference,
-        // so a toolchain whose tables add more fails there.
-        if matches!(c, '\u{A7CE}' | '\u{A7D2}' | '\u{A7D4}' | '\u{16EA0}'..='\u{16EB8}') {
-            return c;
-        }
-        let mut lower = c.to_lowercase();
-        match (lower.next(), lower.next()) {
-            (Some(l), None) => l,
-            _ => c,
-        }
-    }
+    // "Strings"): the generated table lower16.rs, never Rust's own
+    // `char::to_lowercase`, whose tables are the toolchain's (each stable
+    // Rust that moves to a newer Unicode adds mappings: rustc 1.97 Unicode
+    // 17's, rustc 1.100 more; MAIN-CI-FAILURES-2026-11-13.md) and whose
+    // mapping is the full one (U+0130 -> "i" + U+0307).
+    // tools/unicode-lowercase.tcl generates the table from the reference;
+    // tests/native-tcl-unicode.test checks it and every scalar.
+    use super::lower16::lower;
     let obj = str_of(s);
     // One allocation either way, no intermediate buffer. ASCII maps ASCII to
     // ASCII, so the result has the operand's size and is written in one
@@ -2975,13 +2960,23 @@ pub extern "C" fn rt_str_append_char(p: *mut Vm, s: Value, c: Value) -> Value {
 // (which also admits No/Nl, not just Nd) -- see NATIVE-TCL-UNICODE.md for
 // the full edge-case corpus both were checked against.
 //
-// `unicode-general-category` (Cargo.toml) supplies General_Category from
-// Unicode 16.0 data, which matches Tcl 9.0.1's own table exactly on every
-// corpus case tested, including code points assigned only as of Unicode
-// 15.0/15.1/16.0 (see NATIVE-TCL-UNICODE.md's Unicode-version-skew section)
-// -- chosen over hand-rolling a category table (spec's "avoid large
-// hand-maintained tables") and over a heavier general-purpose regex/ICU
-// dependency this reference runtime does not otherwise need.
+// `unicode-general-category` (Cargo.toml, exactly 1.1.0) supplies
+// General_Category from Unicode 16.0 data, which matches Tcl 9.0.1's own
+// classes on every scalar (tests/native-tcl-unicode.test's
+// native-tcl-unicode-classes-all-scalars) -- chosen over hand-rolling a
+// category table (spec's "avoid large hand-maintained tables") and over a
+// heavier general-purpose regex/ICU dependency this reference runtime does
+// not otherwise need. Its Unicode version is Botlish's: a release of the
+// crate with other tables fails to build here, never ships a different
+// classification (MAIN-CI-FAILURES-2026-11-13.md, "Option A").
+const _: () = {
+    let (major, minor, update) = unicode_general_category::UNICODE_VERSION;
+    assert!(
+        major == 16 && minor == 0 && update == 0,
+        "unicode-general-category must be Unicode 16.0.0, the Tcl reference's (Cargo.toml)"
+    );
+};
+
 fn tcl_alpha_char(c: char) -> bool {
     matches!(
         get_general_category(c),

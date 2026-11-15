@@ -65,14 +65,14 @@ if [ $# -ge 1 ]; then
 fi
 
 if ! command -v rustup >/dev/null 2>&1; then
-  curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+  curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain none
   export PATH="$HOME/.cargo/bin:$PATH"
   if [ $# -ge 1 ]; then
     echo "$HOME/.cargo/bin" >> "$1"
   fi
 fi
-rustup toolchain install stable --profile minimal
-rustup default stable
+# The pinned toolchain (rust-toolchain.toml), installed and made the default.
+bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/tools/rust-toolchain.sh" install
 
 tclsh9.0 <<EOF
 puts "Tcl [info patchlevel] ([info nameofexecutable]), tcltest [package require tcltest 2.5]"

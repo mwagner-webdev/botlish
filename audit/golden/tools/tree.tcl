@@ -85,13 +85,17 @@ proc goldentools::isNative {edits} {
     return 0
 }
 
-# A private copy of the checkout's sources, library, tests, examples and audit
-# tools in a fresh temporary directory. Its native/target is a real copy when
-# NATIVE (a native mutant will rebuild it), else a link to the checkout's.
+# A private copy of the checkout's sources, library, tests, examples, tools
+# and audit tools in a fresh temporary directory. Its native/target is a real
+# copy when NATIVE (a native mutant will rebuild it), else a link to the
+# checkout's. tools/ is copied because tests run its checks (the native
+# lowercase table's generator, Compilerpedia, the editor grammars): without
+# it those tests fail in every copy, and a harness would count every mutant
+# killed by them.
 proc goldentools::makeTree {native} {
     set root $::goldentools::root
     set tree [file tempdir botlish-golden-tree]
-    foreach dir {compiler core hir surface stdlib tests examples bench audit .cargo} {
+    foreach dir {compiler core hir surface stdlib tests examples bench audit tools .cargo} {
         if {![file exists [file join $root $dir]]} continue
         file mkdir [file dirname [file join $tree $dir]]
         file copy [file join $root $dir] [file join $tree $dir]

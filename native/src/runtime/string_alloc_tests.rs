@@ -364,25 +364,18 @@ fn check(v: Value, expect: &str) {
     }
 }
 
-/// Oracle for `rt_str_lower`: the Unicode 16 *simple* (one-to-one,
-/// UnicodeData.txt) lowercase mapping that core::strings::lowercase defines.
-/// Deliberately not `char::to_lowercase`'s output taken as-is: that is the
-/// full SpecialCasing mapping (U+0130 -> "i" + U+0307, whose simple mapping is
-/// plain U+0069) and, in rustc 1.97, Unicode 17 data (which adds lowercase
-/// mappings for U+A7CE, U+A7D2, U+A7D4 and U+16EA0..=U+16EB8 that Unicode 16
-/// lacks). The facts are spelled out here independently of ops.rs.
+/// Oracle for `rt_str_lower`'s mapping: the generated Unicode 16 *simple*
+/// (one-to-one, UnicodeData.txt) lowercase table that core::strings::lowercase
+/// defines (tools/unicode-lowercase.tcl; tests/native-tcl-unicode.test checks
+/// the table against the reference on every scalar). Deliberately never
+/// `char::to_lowercase`: that is the full SpecialCasing mapping (U+0130 ->
+/// "i" + U+0307) over the toolchain's Unicode data, which newer stable Rusts
+/// extend (rustc 1.97 Unicode 17's mappings, rustc 1.100 more), so an oracle
+/// built on it moves with rustc exactly as an implementation built on it
+/// did. The tests below check the constructors against the mapping; the
+/// mapping's facts are `lowercase_is_unicode_16_simple_on_known_facts`'.
 fn unicode16_simple_lower(c: char) -> char {
-    match c {
-        '\u{130}' => 'i',
-        '\u{A7CE}' | '\u{A7D2}' | '\u{A7D4}' | '\u{16EA0}'..='\u{16EB8}' => c,
-        _ => {
-            let mut l = c.to_lowercase();
-            match (l.next(), l.next()) {
-                (Some(x), None) => x,
-                _ => panic!("{c:?} has a multi-scalar lowercase other than U+0130"),
-            }
-        }
-    }
+    super::lower16::lower(c)
 }
 
 #[test]
@@ -399,6 +392,12 @@ fn lowercase_is_unicode_16_simple_on_known_facts() {
         ('\u{A7D4}', '\u{A7D4}'),
         ('\u{16EA0}', '\u{16EA0}'),
         ('\u{16EB8}', '\u{16EB8}'),
+        ('\u{A7DD}', '\u{A7DD}'), // mappings rustc 1.100's tables add stay unchanged
+        ('\u{A7E2}', '\u{A7E2}'),
+        ('\u{AB6C}', '\u{AB6C}'),
+        ('\u{AB6D}', '\u{AB6D}'),
+        ('\u{1DF40}', '\u{1DF40}'),
+        ('\u{1DF7E}', '\u{1DF7E}'),
         ('\u{1E9E}', '\u{DF}'),
         ('\u{10400}', '\u{10428}'),
     ] {
@@ -408,6 +407,32 @@ fn lowercase_is_unicode_16_simple_on_known_facts() {
         assert_eq!(str_of(l).as_str(), want.to_string(), "lowercase of {c:?}");
         vm.temp_roots.clear();
     }
+}
+
+/// The generated table's shape: sorted, disjoint runs whose every entry maps
+/// a scalar to another scalar, and 1460 mapped scalars (Unicode 16's simple
+/// lowercase mappings, as core::strings::lowercase has them).
+#[test]
+fn lowercase_table_is_sorted_disjoint_and_unicode_16_sized() {
+    use super::lower16::RUNS;
+    let mut mapped = 0;
+    let mut previous_last = None;
+    for &(first, last, step, delta) in RUNS.iter() {
+        assert!(first <= last && (step == 1 || step == 2) && delta != 0, "run {first:X}..{last:X}");
+        assert_eq!((last - first) % step, 0, "run {first:X}..{last:X} ends off its step");
+        if let Some(p) = previous_last {
+            assert!(first > p, "run {first:X} overlaps the one before");
+        }
+        previous_last = Some(last);
+        let mut cp = first;
+        while cp <= last {
+            let c = char::from_u32(cp).expect("a run holds scalars");
+            assert_ne!(super::lower16::lower(c), c);
+            mapped += 1;
+            cp += step;
+        }
+    }
+    assert_eq!(mapped, 1460);
 }
 
 #[test]

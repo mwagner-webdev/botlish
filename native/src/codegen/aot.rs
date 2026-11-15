@@ -1431,12 +1431,14 @@ const RUNTIME_ARCHIVE: &str = if cfg!(target_env = "msvc") { "botlish_runtime.li
 /// runtime is `system_link_args`'s: the static one, `crt_args_for`'s
 /// policy; `legacy_stdio_definitions.lib` is the libc crate's (the
 /// out-of-line printf family of its MSVC declarations), which
-/// runtime::library's `malloc` and `free` link on every host.
+/// runtime::library's `malloc` and `free` link on every host;
+/// `synchronization.lib` is the standard library's since rustc 1.100 (its
+/// locks wait with WaitOnAddress: MAIN-CI-FAILURES-2026-11-13.md).
 fn runtime_system_libraries(flavor: LinkerFlavor) -> &'static [&'static str] {
     match flavor {
         LinkerFlavor::Gnu => &["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"],
         LinkerFlavor::Apple => &["-liconv", "-lSystem", "-lc", "-lm"],
-        LinkerFlavor::Msvc => &["legacy_stdio_definitions.lib", "kernel32.lib", "ntdll.lib", "userenv.lib", "ws2_32.lib", "dbghelp.lib"],
+        LinkerFlavor::Msvc => &["legacy_stdio_definitions.lib", "kernel32.lib", "ntdll.lib", "userenv.lib", "ws2_32.lib", "dbghelp.lib", "synchronization.lib"],
     }
 }
 
@@ -2743,9 +2745,10 @@ mod tests {
         }
         let tail: Vec<&str> = args.iter().skip_while(|a| !a.ends_with("program.obj")).map(String::as_str).collect();
         assert_eq!(
-            &tail[..12],
+            &tail[..13],
             ["C:\\w\\program.obj", "/LIBPATH:C:\\opt lib", "first.lib", "second.lib", "C:\\rt\\botlish_runtime.lib",
-             "legacy_stdio_definitions.lib", "kernel32.lib", "ntdll.lib", "userenv.lib", "ws2_32.lib", "dbghelp.lib", "libcmt.lib"]
+             "legacy_stdio_definitions.lib", "kernel32.lib", "ntdll.lib", "userenv.lib", "ws2_32.lib", "dbghelp.lib",
+             "synchronization.lib", "libcmt.lib"]
         );
         let excluded: Vec<&str> = args.iter().filter_map(|a| a.strip_prefix("/NODEFAULTLIB:")).collect();
         assert_eq!(excluded, OTHER_MSVC_RUNTIMES);

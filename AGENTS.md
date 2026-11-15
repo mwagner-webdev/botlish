@@ -368,8 +368,11 @@ strings with `eq`/`ne`, never `==` (`"nan" == "nan"` is false,
 ### Known Tcl core bug: compiled `incr` wraps instead of promoting at the i64 boundary
 
 Confirmed directly (BYTE-NIBBLE-BIT-ARITHMETIC.md's own account has the full
-trace) and **still present as of Tcl 9.0.4 and the 9.1a1 alpha** -- not
-fixed upstream, so there is currently no newer version to pin instead.
+trace) and **still present as of Tcl 9.0.4, the 9.1a1 alpha and the 9.1.0
+release** -- not fixed upstream, so there is currently no newer version to
+pin instead (9.1.0 was built from its `core-9-1-0` tag and run on the
+reproduction on 2026-11-14, amd64 and arm64 under qemu: the compiled `incr`
+still wraps).
 A minimal standalone reproduction, for filing an upstream bug report, is
 committed at `tcl-incr-i64-wrap-bug.tcl` (run with `tclsh9.0
 tcl-incr-i64-wrap-bug.tcl`):
@@ -414,22 +417,52 @@ writing, GitHub Actions' `ubuntu-latest`) base image does not have --
 installing one over `9.0.1` breaks `tclsh9.0` outright (`GLIBC_2.42' not
 found`) until it's downgraded back. `9.0.1` remains the correct pin for
 both this reason and because it is not actually behind on this specific
-bug.
+bug. Tcl 9.1.0 (Unicode 18, the version rustc 1.100's tables have) changes
+nothing here: Ubuntu's and Debian's `tcl9.1 9.1.0+dfsg` packages need
+`libc6 >= 2.44`, no package or PPA builds it for 24.04, its `string
+tolower` still leaves U+023A and U+023E unchanged, and moving to it is a
+language change (Unicode 16 to 18) that was declined on 2026-11-14
+(MAIN-CI-FAILURES-2026-11-13.md, "Tcl 9.1 and rustc 1.100").
 
 ## Building the native (Cranelift) backend
 
-`cargo build --release --manifest-path native/Cargo.toml` needs a rustc new
-enough for the pinned `cranelift-*`/`wasmtime-internal-*` crates (rustc
-1.95+; the sandbox's preinstalled toolchain can be older and will fail with
-"is not supported by the following packages"). Fix with:
+The Rust toolchain is pinned: `rust-toolchain.toml` (the repository root)
+names the one release every build uses, rustc 1.100.0. Install it, and make
+it rustup's default, with
 
 ```sh
-rustup toolchain install stable --profile minimal
-rustup default stable
+bash tools/rust-toolchain.sh install
 ```
 
-then build as usual. Without this, `cranelift`/`cranelift-generic` tests
-and benchmarks report `{error {NATIVE NOT-BUILT}}` instead of running.
+(`.devcontainer/setup.sh` and `tests/platform/setup-macos.sh` run it,
+`tests/platform/setup-windows.ps1` does the same for MSVC's build), then
+`cargo build --release --manifest-path native/Cargo.toml` as usual. Without
+a build, `cranelift`/`cranelift-generic` tests and benchmarks report
+`{error {NATIVE NOT-BUILT}}` instead of running. Keep it so:
+
+* Never install, default to or build with `stable` (or `beta`, `nightly`)
+  in a setup script, a workflow or a tool. Stable Rust moved under main on
+  2026-11-13 with no commit: rustc 1.100's cargo wrote another target
+  layout (the rustc linker found no `botlish_native`) and its Unicode 18
+  tables changed `std::str::lowercase` natively
+  (MAIN-CI-FAILURES-2026-11-13.md). The one exception is a tool that needs
+  a nightly feature and names it (`fuzz/scripts/build-asan.sh`).
+* The default matters as much as the file: rustup reads
+  `rust-toolchain.toml` only inside the checkout, and the rustc linker
+  compiles each executable's startup crate in a temporary directory, where
+  the default compiles it against the `libbotlish_native` the pinned
+  toolchain built. A setup that installs the toolchain makes it the
+  default (`tools/rust-toolchain.sh install`).
+* A toolchain bump is a change of its own, on a branch: `rust-toolchain.toml`
+  and nothing else, every test workflow dispatched on it (a new rustc
+  changes no test file, so the canary selects nothing for it), merged only
+  green. Read its release notes for cargo's layout and the Unicode version
+  (`char::UNICODE_VERSION`): Botlish's Unicode data never comes from Rust's
+  (next section but many: "Unicode data is the reference's").
+* The package author image keeps its own pin
+  (`tools/package-build/Dockerfile`: Rust 1.97.0, `RUSTUP_TOOLCHAIN`, which
+  wins over the file): recorded releases reproduce with the toolchain that
+  built them. Change it only with a new release of what it builds.
 
 ## The single-file compiler and the stub linker
 
@@ -3652,6 +3685,52 @@ Rust tests `char_classifiers` and `inline_ascii_rule`, and
 you change the code it mutates, keeping it a mutant of the same rule). A
 change to stdlib/web.bot also runs the warning gate, its probes and
 `expect.tcl`.
+
+## Unicode data is the reference's, never the toolchain's
+
+Every Unicode fact Botlish defines -- `std::str::lowercase`'s case mapping,
+the `is_tcl_alpha`/`is_tcl_alnum` classes -- is Unicode 16's, as the Tcl
+reference has it (Tcl 9.0.1: core/strings.tcl, core/tclcompat.tcl), on
+every backend. The native runtime takes it from a table generated from the
+reference (`native/src/runtime/lower16.rs`, written by
+`tools/unicode-lowercase.tcl` from `core::strings::lowercase`) or from a
+crate pinned to exactly the reference's Unicode version
+(`unicode-general-category = "=1.1.0"`, Unicode 16.0, which
+runtime/ops.rs asserts at compile time), never from Rust's standard
+library: `char::to_lowercase`, `to_uppercase`, `is_alphabetic`,
+`is_alphanumeric`, `is_numeric`, `is_whitespace`, `is_control`,
+`str::to_lowercase`, `trim` and `split_whitespace`, and the escapes of
+`{:?}`, read tables the toolchain carries, which a Rust release updates
+(rustc 1.97 Unicode 17's, rustc 1.100 Unicode 18's:
+MAIN-CI-FAILURES-2026-11-13.md). Keep it so:
+
+* Never let one of those std functions decide a value, an error or text a
+  Botlish program can observe. UTF-8 encoding and decoding (`from_utf8`,
+  `chars`, `len_utf8`, `char::from_u32`) and the ASCII functions are no
+  Unicode data and stay free to use; so does a std function on text no
+  program wrote (the NIR tokenizer reads ASCII by construction).
+* A Rust test's oracle never uses them either: an oracle that moves with
+  the toolchain moves with the implementation and passes (the lowercase
+  oracle did, until rustc 1.100).
+* A new Unicode-dependent operation (an uppercase, a trim, a grapheme
+  operation) gets its own table generated from the reference, a check that
+  the committed table is the generator's, and a test of every scalar on the
+  native backends against the reference, as lowercase and the classes have
+  (`native-tcl-unicode-lowercase-table-generated`,
+  `native-tcl-unicode-lowercase-all-scalars`,
+  `native-tcl-unicode-classes-all-scalars`).
+* Botlish's Unicode version changes only as a language change: the
+  reference first (another Tcl, and its packages on every host), then every
+  table regenerated and the crate moved to the same version. Never as a
+  side effect of a Rust, crate or runner update.
+
+If you change the table, its generator, `core::strings::lowercase`,
+`core::tclcompat::Classify`, the crate's version or what reads them, run
+`tclsh9.0 tools/unicode-lowercase.tcl check`, `tests/native-tcl-unicode.test`,
+`tests/argv.test`, `cargo test --release --manifest-path native/Cargo.toml
+--lib -- lowercase string_alloc char_classifiers` and
+`audit/char-classifiers/tools/mutate.tcl` (its `rs-classes-unicode-15`
+models a crate a Unicode version behind the reference).
 
 ## List length refinements
 
