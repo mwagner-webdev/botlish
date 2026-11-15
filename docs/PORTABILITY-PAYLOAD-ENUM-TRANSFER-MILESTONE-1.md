@@ -273,8 +273,9 @@ Decisions **[inspection]**, each checked **[observed]**:
   persistent storage promise and no schema evolution. A receiver whose
   declaration differs refuses the bytes.
 
-The fingerprint distinguishes every incompatible change and nothing else
-(`pet-fingerprint-changes-*`, `pet-fingerprint-stable`) **[observed]**:
+The fingerprint changes under every incompatible change tested and stays
+under every compatible one (`pet-fingerprint-changes-*`,
+`pet-fingerprint-stable`, `pet-fingerprint-literal`) **[observed]**:
 
 | Change | Fingerprint |
 |---|---|
@@ -285,7 +286,7 @@ The fingerprint distinguishes every incompatible change and nothing else
 | a nested opaque representation, or its owner functions | changes |
 | cases reordered, payload fields reordered, fields initialized in another order | same |
 | unrelated declarations before it, module import order | same |
-| an integer domain (`x: std::byte::Byte` for `x: int`) | same: checked by the receiver |
+| an integer domain (`x: std::byte::Byte` for `x: int`) | same: checked by the receiver (but see section 20) |
 | a literal's List length | same: checked by the receiver |
 
 ## 6. The wire format, with annotated bytes
@@ -388,8 +389,9 @@ objects poisoned) and by `pet-gc-stress` (section 15).
 
 A decoded value belongs to the receiving VM alone **[observed]**:
 
-* Rust: values encoded by one `Vm`, the `Vm` dropped (every object freed
-  and poisoned), decoded by a second `Vm` of another program numbering
+* Rust: values encoded by one `Vm` (every allocation collecting first,
+  freed objects poisoned), that `Vm` dropped, then decoded by a second
+  `Vm` of another program numbering
   every shape and enum otherwise and declaring the cases in another order
   (`transfer_payload_enums_between_independent_vms`); two decodes are two
   objects; re-encoding in the receiver's numbering gives the sender's
@@ -430,8 +432,8 @@ Bytes stay untrusted; the existing declared refusals apply **[observed]**
 
 A thousand mutations of a rich encoding decode into the same outcome on
 every backend, none taken for another version or type, never a crash
-(`pet-refuse-mutations`); the fuzzer compares 38 400 mutated decodes over
-60 seeds, on four backends, with the oracle's prediction (section 14).
+(`pet-refuse-mutations`); the fuzzer compares 104 320 mutated decodes over
+170 seeds with the oracle's prediction (section 14).
 
 **Minimum sizes.** A count is admitted against its element's minimum
 size before any element is read, so the minimum must hold whatever case
@@ -526,9 +528,12 @@ schema is computed by `hir::transfer::Elaborate` after the checks
 **[inspection]**.
 
 HIR text and interchange carry the schema as the transfer call's String
-constant, as before; a reader that did not build it is checked where it
-matters: native lowering validates a `penum` against the declaration
-(section 8). The static decisions read no schema: `hir/staticdeps.tcl` is
+constant, as before: a program written as interchange text and read back
+runs as built, on every backend (`pet-interchange`) **[observed]**.
+Native lowering validates a `penum` against the receiving program's
+declaration (section 8); the Tcl backends read the schema constant of the
+HIR they run, which only a front end writes (interchange text is accepted
+only from the front end that wrote it, HIR-INTERCHANGE.md) **[inspection]**. The static decisions read no schema: `hir/staticdeps.tcl` is
 unchanged, and the batched and sequential schedulers' comparison runs in
 CI (section 18) **[inspection]**.
 
@@ -558,7 +563,9 @@ same bytes); each mutation's outcome against the oracle's.
 | Run | Seeds | Backends | Judgements | Encodings | Decodes | Mutated decodes | Disagreements |
 |---|---|---|---:|---:|---:|---:|---:|
 | `-cases 10 -mutations 16` | 1-60 | four | 541 | 2 400 | 2 400 | 38 400 | 0 |
+| `-cases 10 -mutations 16` | 61-160 | four | 925 | 4 000 | 4 000 | 64 000 | 0 |
 | `-gc-stress 1` | 100-109 | cranelift-generic, cranelift | 99 | 160 | 160 | 1 920 | 0 |
+| total | 170 seeds | | 1 565 | 6 560 | 6 560 | 104 320 | 0 |
 
 Its first runs failed on two defects of the fuzzer itself (it took a
 standard-library function for one of the functions whose parameter type it
@@ -783,6 +790,7 @@ the transfer tests on all four backends by `sourceAgree`):
 | audit/golden/migration/merge.tcl -check | no problem of this milestone (two of main's: c-bindgen census rows for Android tests that did not run here) |
 | tests/golden.test, tests/golden-duplicates.test (the regenerated manifest) | 9 of 9, 4 of 4 |
 | `cargo test --release --lib` (the whole native crate) | 359 of 359 |
+| `tests/local.tcl` narrowed to payload-enum-transfer, payload-enums, value-transfer, sendability, exhaustive-match and enums (both passes, the golden suites holding their ports on four backends, through the front-end cache) | 396 passed on interp and on compile; golden collections, exhaustive-match, structs-and-enums, representation, payload-enums: 208 of 208 on each backend |
 
 CI-RESULTS
 
