@@ -897,7 +897,7 @@ shown = loop m in copy(\[Message::Batch {items: \[2, 3\]}, Message::Ping, Messag
 "
 } -result {[[6, 0, 42, 2], 7]}
 
-test pet-mutable-independent {a mutable collection in a payload is a value of its own in the receiver: mutating the source after encoding leaves the bytes, mutating a decoded copy in place leaves the source and every other decode of the same bytes} -body {
+test pet-mutable-independent {a mutable collection in a payload is a value of its own in the receiver, built from the bytes alone: mutating the source after encoding leaves the bytes, a later encoding of another value leaves them too, and mutating a decoded copy leaves the source and every other decode of the same bytes} -body {
     petAgree "$::petDecls
 fn back(data: std::abi::bytes::Bytes) -> Counter:
     std::transfer::decode\[Counter\](data):
@@ -929,6 +929,7 @@ fn total(c: Counter) -> int:
 v = std::mutable_vector::from_list(\[1, 2, 3\])
 source = Counter::Counts {numbers: v}
 data = std::transfer::encode(source)
+later = std::transfer::encode(Counter::Counts {numbers: std::mutable_vector::from_list(\[9\])})
 v.push(50)
 one = back(data)
 two = back(data)

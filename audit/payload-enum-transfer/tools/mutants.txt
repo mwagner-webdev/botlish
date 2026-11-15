@@ -235,7 +235,7 @@
     if {0} {
 >>>>
 
-@@ decoded-payload-shared the decoder hands out the payload of the value last encoded in the process instead of a value of its own: the copy and its source share their mutable payload
+@@ decoded-payload-shared the decoder hands out the payload of the value last encoded in the process instead of one built from the bytes: copy and source share their mutable payload (unobservable under value semantics: every read of a payload is a logical copy), and bytes decoded after a later encoding take that later value's payload
 !! pet-mutable-independent
 ## core/transfer.tcl
 <<<<
