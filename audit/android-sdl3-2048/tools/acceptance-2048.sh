@@ -106,6 +106,28 @@ screenshot start
 python3 -I "$here/screen.py" "$OUT/start.png" "$layout" "$(sed -n 1p "$oracle")" "$offset" >"$OUT/start-screen.txt" 2>&1 \
     && pass "the screen shows the new game ($(tail -1 "$OUT/start-screen.txt"))" || fail "the screen: $(tail -3 "$OUT/start-screen.txt" | tr '\n' ' ')"
 
+# The restart button before any background: whether a touch at the top of
+# the window reaches the program in a fresh process (runs 4 and 6 found the
+# restart tap after a background and a foreground delivered to no window).
+inputState restart-fresh
+adb logcat -c
+shellp input tap $(( rx + rw / 2 )) $(( ry + rh / 2 + offset ))
+if waitLines restart-fresh "2048: restart" 1 15; then
+    pass "the restart button in a fresh process: a new game"
+else
+    fail "the restart button in a fresh process: no restart line; InputDispatcher: $(undelivered | head -1 | sed 's/.*InputDispatcher: //')"
+fi
+# Seed 42's game again for the play: a new process with the same arguments.
+shellp am force-stop "$PKG"
+adb logcat -c
+shellp am start -W -n "$activity" --esa org.botlish.android.ARGUMENTS --seed,42,--fresh >"$OUT/start2.txt"
+if waitFor start2 "$TAG.*2048: ready" 1 90; then
+    [[ $(last "$OUT/start2.log" new) == "$(sed -n 1p "$oracle")" ]] && pass "seed 42's new game again in a new process" || fail "the second start's game $(last "$OUT/start2.log" new)"
+fi
+pid=$(appPid)
+tid=$(grep "2048: ready" "$OUT/start2.log" | head -1 | awk '{print $4}')
+sleep 1
+
 # ------------------------------------------------------------------ 2. play
 cx=$(( bx + bs / 2 )) cy=$(( by + bs / 2 + offset )) d=$(( bs / 3 ))
 swipe() { # DIRECTION
@@ -192,8 +214,10 @@ sdl=$(threadDelta "$OUT/fg-threads-0.txt" "$OUT/fg-threads-1.txt" "$tid")
 (( ${sdl:-999} <= 25 )) && pass "the idle program does not spin (SDLThread: ${sdl:-?} ticks in 5 s)" || fail "the idle program's thread used ${sdl:-?} ticks in 5 s"
 
 # --------------------------------------------------------------- 4. restart
+inputState restart
+adb logcat -c
 shellp input tap $(( rx + rw / 2 )) $(( ry + rh / 2 + offset ))
-waitFor restart "2048: restart" 1 20
+waitFor restart "2048: restart" 1 20 || note "  InputDispatcher: $(undelivered | head -1 | sed 's/.*InputDispatcher: //')"
 restarted=$(last "$OUT/restart.log" restart)
 python3 -I - "$restarted" <<'PY' && pass "restart: a new game ($restarted)" || fail "restart: \"$restarted\" is no new game"
 import sys

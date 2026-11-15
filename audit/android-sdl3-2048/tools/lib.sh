@@ -166,3 +166,18 @@ settle() {
 recreationEnded() {
     appLog | grep -m1 -E " SDL +: activity finished"
 }
+
+# The input and window state as OUT/NAME-input.txt (dumpsys input: the
+# windows InputDispatcher holds, their frames, touchable regions and input
+# configuration; dumpsys window's focus and windows), for a touch that may
+# not arrive.
+inputState() { # NAME
+    { shellp dumpsys window | grep -E "mCurrentFocus|mFocusedApp|mFocusedWindow|mTopFullscreen"
+      echo "--- dumpsys input"; shellp dumpsys input
+      echo "--- dumpsys window windows"; shellp dumpsys window windows; } >"$OUT/$1-input.txt" 2>&1
+}
+# InputDispatcher's lines about a touch it delivered to no application
+# window, since the last clear.
+undelivered() {
+    adb logcat -d -v threadtime -s InputDispatcher:W | tr -d '\r' | grep "Not sending touch" || true
+}
