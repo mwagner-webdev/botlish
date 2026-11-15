@@ -902,7 +902,23 @@ Run on the branch (Linux x86-64, the pinned toolchain) [test]:
 Nothing in `core/`, `surface/`, `compiler/`, `native/`, `ccompile/`,
 `stdlib/` or any backend changed; `hir/hir.tcl` only loads the new file.
 
-CI: the branch push runs each host's canary (which selects this test file); tests.yml dispatched on the branch tip. Their outcomes are recorded below once finished.
+CI at commit 07fc8057, read 2026-11-15 23:25 UTC [test]:
+
+* `tests.yml` dispatched on the branch (run 43766991744):
+  - passed: the canary (linux x86-64), which selected
+    `tests/storage-lifetime.test` as changed and ran it with seven
+    recently failing files on interp (588 tests, 0 failed); the native
+    Rust unit tests; the stub-linked executables; the system-linked
+    executables, also under GC stress; the golden suites, shards 1-4;
+  - **pending**: tests (interp), tests (compile), the cranelift and
+    cranelift-generic coverage, and the method-call decision job;
+  - skipped: native GC stress, which runs only on pushes to main.
+* The branch push's runs, which run each host's canary only: tests
+  (linux arm64), tests (macos arm64) and tests (windows x86-64) passed,
+  and so did icy-tower (windows x86-64) and icy-tower (macos arm64).
+* Not run yet: `tests-arm64.yml`, `macos-arm64.yml` and
+  `windows-x86_64.yml` dispatched on the branch, which AGENTS.md asks for
+  before a merge into main.
 
 ## 23. Known limitations and conservative cases
 
