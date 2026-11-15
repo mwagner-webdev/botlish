@@ -1,0 +1,46 @@
+# case: protocol -- eager construction (arguments, then the body to its first yield), one segment per resume, done? false while suspended and true after the root returns, the cached result on every later resume with no body code (the log counts body steps)
+# class: intended
+# expect: precise
+# value: [1, 2, 0, 3, 0, 400, 1, 400, 400, 4]
+import std::coroutine
+import std::mutable_array
+
+context struct Log:
+    a: MutableArray[int]
+
+fn tick(context log: Log) -> int:
+    v = std::mutable_array::at(log.a, 0):
+        on IndexNotFound:
+            0
+    std::mutable_array::set(log.a, 0, v + 1):
+        on IndexNotFound:
+            unit
+    v + 1
+
+fn steps(context log: Log) -> int:
+    std::mutable_array::at(log.a, 0):
+        on IndexNotFound:
+            -1
+
+fn source(k: int) -> int:
+    yield tick()
+    yield tick()
+    tick() * 100
+
+fn flag(b: bool) -> int:
+    if b:
+        1
+    else:
+        0
+
+with context Log {a: std::mutable_array::create(1, 0)}
+argument = tick()
+coroutine {step, first} = source(argument)
+d0 = flag(std::coroutine::done?(step))
+second = step()
+d1 = flag(std::coroutine::done?(step))
+final = step()
+d2 = flag(std::coroutine::done?(step))
+again = step()
+again2 = step()
+[argument, first, d0, second, d1, final, d2, again, again2, steps()]

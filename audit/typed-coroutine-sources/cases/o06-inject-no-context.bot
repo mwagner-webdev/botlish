@@ -1,0 +1,17 @@
+# case: contexts -- a source constructed and resumed inside `inject no context:`: it needs no authority, and its yields and result are typed as anywhere else
+# class: intended
+# expect: facts-widened
+# value: [1, 2]
+import std::coroutine
+
+fn source() -> int:
+    yield 1
+    2
+
+fn run() -> List[int]:
+    inject no context:
+        coroutine {step, first} = source()
+        final = step()
+        [first, final]
+
+run()

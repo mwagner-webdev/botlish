@@ -1,0 +1,23 @@
+# case: emits -- the certified byte source's first value passed to a Byte parameter: rejected, the certificate does not reach the type checker (by design: emits defines no yield type)
+# class: narrowing
+# expect: rejected TYPE
+import std::coroutine
+import std::dfa
+import std::byte
+
+dfa two_bytes over bytes:
+    start:
+        0..255 -> one
+    one:
+        0..255 -> accept
+
+fn source() -> int emits two_bytes:
+    yield 65
+    yield 66
+    2
+
+fn take(b: std::byte::Byte) -> int:
+    b
+
+coroutine {step, first} = source()
+take(first)

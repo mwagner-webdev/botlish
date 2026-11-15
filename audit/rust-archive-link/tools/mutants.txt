@@ -1,0 +1,318 @@
+# Mutants of HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md
+# (audit/rust-archive-link/tools/mutate.tcl): deliberate breaks of the
+# Rust unit's localization (tools/rust-unit.tcl), of the package manager's
+# archive symbol index (pm/binary.tcl: the SQLite package's F-16) and of
+# the fixture's binding's ownership of a block the unit lends out. Each
+# must be killed by one of the tests its `!!` line names -- the test that
+# states the rule it breaks, never an unrelated failure.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...            the tests, one of which must fail
+#   %% FILE.test ...       the test files to run (default
+#                          tests/rust-archive-link.test)
+#   ?? HOST-GLOB           only on hosts whose target matches (linux-*,
+#                          macos-*); elsewhere reported as not for this host
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# Localization (tools/rust-unit.tcl)
+
+@@ elf-unlocalized ELF: objcopy keeps every global definition (no --keep-global-symbols): the unit's whole Rust standard library stays global beside the runtime's
+!! ral-localized-surface ral-localized-without_provider-rustc ral-localized-with_provider-rustc ral-localized-without_provider-system ral-localized-with_provider-system
+?? linux-*
+## tools/rust-unit.tcl
+<<<<
+            exec objcopy --strip-debug {*}$rename --keep-global-symbols=$keep $object
+====
+            exec objcopy --strip-debug {*}$rename $object
+>>>>
+
+@@ elf-comdat-kept ELF: Rust's personality-reference COMDAT group keeps its signature, which the final link deduplicates against the runtime's (the http census's B3)
+!! ral-localized-comdat
+?? linux-*
+## tools/rust-unit.tcl
+<<<<
+                lappend rename --redefine-sym $sig=[dict get $opts -label].$sig
+====
+                lappend rename
+>>>>
+
+@@ macho-unlocalized Mach-O: ld -r without the exported-symbols list: every global definition of the unit stays global
+!! ral-localized-surface ral-localized-without_provider-rustc ral-localized-with_provider-rustc ral-localized-without_provider-system ral-localized-with_provider-system
+?? macos-*
+## tools/rust-unit.tcl
+<<<<
+            exec ld -r -arch $arch {*}$platform -S -force_load $raw -exported_symbols_list $keep -o $object 2>@stderr
+====
+            exec ld -r -arch $arch {*}$platform -S -force_load $raw -o $object 2>@stderr
+>>>>
+
+@@ macho-no-platform Mach-O: ld -r without -platform_version: the localized object records no platform, and every final link warns that it assumes macOS
+!! ral-localized-build-version
+?? macos-*
+## tools/rust-unit.tcl
+<<<<
+            set platform [MacosPlatform [dict get $opts -macos]]
+====
+            set platform {}
+>>>>
+
+@@ build-version-shortest LC_BUILD_VERSION read with a non-greedy first quantifier: Tcl then matches every quantifier as little as it can, and the deployment target 11.0 reads as 1
+!! ral-build-version-reader ral-localized-build-version
+## tools/rust-unit.tcl
+<<<<
+    if {[regexp {cmd LC_BUILD_VERSION\s+cmdsize\s+\d+\s+platform\s+(\S+)\s+minos\s+(\S+)\s+sdk\s+(\S+)} \
+====
+    if {[regexp {cmd LC_BUILD_VERSION.*?platform\s+(\S+)\s+minos\s+(\S+)\s+sdk\s+(\S+)} \
+>>>>
+
+@@ keep-everything every global definition matches the keep list: the localized archive is the raw one's surface
+!! ral-localized-surface ral-localized-without_provider-rustc ral-localized-with_provider-rustc ral-localized-without_provider-system ral-localized-with_provider-system
+## tools/rust-unit.tcl
+<<<<
+            if {[string match $g $name]} {
+====
+            if {1} {
+>>>>
+
+@@ require-ignored an export the unit was meant to have and does not passes the localizer (the consumer's link would find out)
+!! ral-require-missing-export
+## tools/rust-unit.tcl
+<<<<
+        if {$missing ne ""} {
+====
+        if {0} {
+>>>>
+
+@@ check-lenient the surface check accepts any archive
+!! ral-check-refuses-raw
+## tools/rust-unit.tcl
+<<<<
+    if {$have ne $want} {
+====
+    if {0} {
+>>>>
+
+@@ fallback-localized the fixture's recipe keeps only the C ABI global: the weak fallback of botlish_event_post2 becomes local, and a program with the provider calls the fallback (the provider is silently ignored)
+!! ral-localized-surface ral-localized-with_provider-rustc ral-localized-with_provider-system
+## audit/rust-archive-link/tools/rustlink.tcl
+<<<<
+    set opts [Options [dict create -keep {rl_* botlish_event_post2} -require [exports] -out ""] $args]
+====
+    set opts [Options [dict create -keep {rl_*} -require [exports] -out ""] $args]
+>>>>
+
+@@ macho-bitcode-reader Mach-O symbols read without --no-llvm-bc: Apple's nm reads the Rust standard library's embedded bitcode, of a newer LLVM than Xcode's, and fails (or, on a raw archive, skips those members)
+!! ral-nm-bitcode-reader-off ral-raw-surface ral-localized-surface
+## tools/rust-unit.tcl
+<<<<
+    if {[catch {Nm --no-llvm-bc {*}$args} out]} {
+====
+    if {[catch {Nm {*}$args} out]} {
+>>>>
+
+@@ macho-private-extern-local Mach-O: a private external definition is not counted as global: the raw archive seems not to define Rust's allocator shim (hidden on Apple targets), and a private external left in a localized archive passes the surface check
+!! ral-macho-private-extern ral-nm-bitcode-reader-off ral-raw-surface
+## tools/rust-unit.tcl
+<<<<
+            if {[string match "*non-external*" $line]} continue
+====
+            if {[string match "*non-external*" $line] || [string match "*private external*" $line]} continue
+>>>>
+
+@@ nm-no-fallback an nm that does not know --no-llvm-bc is an error instead of being asked without it
+!! ral-nm-old-nm-fallback
+## tools/rust-unit.tcl
+<<<<
+        if {![regexp -nocase {unknown (command line )?(argument|option)|unrecognized option} $out]} {
+====
+        if {1} {
+>>>>
+
+@@ nm-partial-accepted an nm that fails after printing is taken whatever it said: a member it could not read is silently missing from the list
+!! ral-nm-partial-refused
+## tools/rust-unit.tcl
+<<<<
+            if {[string trim $line] eq "" || [string match "*no symbols*" $line]} continue
+====
+            continue
+>>>>
+
+@@ nm-no-symbols-refused an nm that fails after printing only because a member has no symbols is an error: Apple's nm on any Rust static library
+!! ral-nm-no-symbols-accepted
+## tools/rust-unit.tcl
+<<<<
+            if {[string trim $line] eq "" || [string match "*no symbols*" $line]} continue
+====
+            if {[string trim $line] eq ""} continue
+>>>>
+
+# ---------------------------------------------------------------------------
+# The archive symbol index (pm/binary.tcl)
+
+@@ bsd-index-ignored Apple's BSD index is recognized but not read: a macOS archive defines nothing (F-16 again)
+!! pn-index-bsd-forms pn-index-bsd-symbols-checked pn-index-llvm-darwin pn-index-apple pn-index-weak-macho ral-native-add-symbols
+%% tests/package-native.test tests/rust-archive-link.test
+## pm/binary.tcl
+<<<<
+                lappend entries {*}[BsdIndex $body [string match __.SYMDEF_64* $name] "${label}($name)"]
+====
+>>>>
+
+@@ underscore-kept a Mach-O member's index names keep their leading underscore: the C name rl_open is never found (_rl_open is)
+!! pn-index-bsd-forms pn-index-bsd-symbols-checked pn-index-llvm-darwin pn-index-apple ral-native-add-symbols
+%% tests/package-native.test tests/rust-archive-link.test
+## pm/binary.tcl
+<<<<
+        if {[dict get $objects $offset] in {macho fat} && [string index $symbol 0] eq "_"} {
+====
+        if {0} {
+>>>>
+
+@@ underscore-always every index name loses a leading underscore, whatever its member: an ELF or unknown member's name is misread
+!! pn-index-bsd-forms
+%% tests/package-native.test
+## pm/binary.tcl
+<<<<
+        if {[dict get $objects $offset] in {macho fat} && [string index $symbol 0] eq "_"} {
+====
+        if {[string index $symbol 0] eq "_"} {
+>>>>
+
+@@ offset-unchecked an index entry naming no member is dropped instead of refused: a malformed index reads as fewer names
+!! pn-index-bsd-malformed
+%% tests/package-native.test
+## pm/binary.tcl
+<<<<
+        if {![dict exists $objects $offset]} {
+            Fail $label "its symbol index names $symbol at offset $offset, where no member of it begins"
+        }
+====
+        if {![dict exists $objects $offset]} {
+            continue
+        }
+>>>>
+
+@@ pairs-unchecked a ranlib array that is not whole pairs is read anyway
+!! pn-index-bsd-malformed
+%% tests/package-native.test
+## pm/binary.tcl
+<<<<
+    if {$size % (2 * $w) != 0} {
+====
+    if {0} {
+>>>>
+
+@@ strtab-unchecked a string table running past the index member is read as far as it goes
+!! pn-index-bsd-malformed
+%% tests/package-native.test
+## pm/binary.tcl
+<<<<
+    if {$strAt + $strSize > [string length $body]} {
+====
+    if {0} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Ownership across the boundary (audit/rust-archive-link/package/rustlink.bot)
+
+@@ block-freed-by-libc the binding gives the unit's block to libc's free instead of back to the unit: no crash (the unit's allocator is the system's underneath), and the unit's live heap never comes back
+!! ral-localized-without_provider-rustc ral-localized-with_provider-rustc ral-localized-without_provider-system ral-localized-with_provider-system
+## audit/rust-archive-link/package/rustlink.bot
+<<<<
+private extern c fn rl_text_free(p: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::LongLong
+====
+private extern c fn rl_text_free(p: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::LongLong
+private extern c fn free(p: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> unit
+>>>>
+<<<<
+    p.rl_text_free()
+====
+    free(p)
+    0
+>>>>
+
+# ---------------------------------------------------------------------------
+# Weak definitions are no duplicates (pm/binary.tcl, pm/native.tcl,
+# pm/author.tcl)
+
+@@ weak-elf-unread ELF: a relocatable member's .symtab is not read for weak definitions: a weak fallback counts as a duplicate again
+!! pn-index-weak-elf
+%% tests/package-native.test
+?? linux-*
+## pm/binary.tcl
+<<<<
+                    if {($info >> 4) != 2} continue
+                    if {[U $data [expr {$sym + 6}] 2 $label] == 0} continue
+====
+                    continue
+>>>>
+
+@@ weak-macho-unread Mach-O: N_WEAK_DEF is not read: a member's weak definitions are taken for strong ones
+!! pn-index-weak-macho
+%% tests/package-native.test
+## pm/binary.tcl
+<<<<
+                    if {[U $data [expr {$sym + 6}] 2 $label] & 0x0080} {
+====
+                    if {0} {
+>>>>
+
+@@ weak-any-member an index name is weak when any member defining it is, not every one: a strong definition elsewhere in the archive is hidden from the duplicate check
+!! pn-index-weak-elf pn-index-weak-macho
+%% tests/package-native.test
+## pm/binary.tcl
+<<<<
+            dict set weakEntry $symbol [dict getdef $weakEntry $symbol 1]
+        } else {
+            dict set weakEntry $symbol 0
+        }
+====
+            dict set weakEntry $symbol 1
+        } elseif {![dict exists $weakEntry $symbol]} {
+            dict set weakEntry $symbol 0
+        }
+>>>>
+
+@@ install-weak-counted the installation's closure counts a weak definition as a duplicate again: a unit with a weak fallback and its driver cannot both be installed
+!! pn-index-weak-elf pn-index-weak-macho-install
+%% tests/package-native.test
+## pm/native.tcl
+<<<<
+            if {$symbol in [dict getdef $entry weak {}]} continue
+====
+>>>>
+
+@@ install-all-weak the installation's closure exempts every symbol: two strong definitions install
+!! pn-index-weak-elf pn-index-weak-macho-install pn-native-conflicts
+%% tests/package-native.test
+## pm/native.tcl
+<<<<
+            if {$symbol in [dict getdef $entry weak {}]} continue
+====
+            continue
+>>>>
+
+@@ audit-weak-counted the pack-time audit counts a weak definition as a duplicate again
+!! ral-pack-weak-beside-strong
+## pm/author.tcl
+<<<<
+                        if {$symbol in [dict getdef $facts weak {}]} {
+====
+                        if {0} {
+>>>>
+
+@@ static-deployment-notes the plan states a loaded library's deployment requirements -- an install name, a signature -- for a macOS static archive too, which has neither and is never loaded
+!! pn-macos-static-no-deployment-notes
+%% tests/package-native.test
+## pm/native.tcl
+<<<<
+        if {$os eq "macos" && [dict get $entry linkage] ne "static"} {
+====
+        if {$os eq "macos"} {
+>>>>

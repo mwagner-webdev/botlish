@@ -1,0 +1,13 @@
+# case: matrix -- yields int, returns str: rejected
+# class: rejected-precision
+# expect: rejected COROUTINE-RESULT-MISMATCH
+import std::coroutine
+
+fn source(n: int) -> str:
+    loop i from 0 to n:
+        yield i
+        continue
+    "done"
+
+coroutine {step, first} = source(2)
+first

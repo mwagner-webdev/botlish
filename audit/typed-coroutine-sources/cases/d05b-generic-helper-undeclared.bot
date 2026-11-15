@@ -1,0 +1,23 @@
+# case: deep yields -- an untyped helper yielding its parameter, called by two roots with an int and a str: a helper has no outward type of its own (COROUTINES.md 9), and its yield is typed by its generic body (any), so with no declared result each root's outward type is the join with it: any (Y and O agree, both any; what the consumer loses is the instance types int and str)
+# class: narrowing
+# expect: precise
+# value: [1, 2, "a", "b"]
+import std::coroutine
+
+fn emit(x):
+    yield x
+    unit
+
+fn ints():
+    emit(1)
+    2
+
+fn texts():
+    emit("a")
+    "b"
+
+coroutine {step: s1, first: f1} = ints()
+r1 = s1()
+coroutine {step: s2, first: f2} = texts()
+r2 = s2()
+[f1, r1, f2, r2]

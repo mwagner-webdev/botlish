@@ -1,0 +1,41 @@
+# case: the reduced CSV source with every yield wrapped in a Byte-typed helper (a declaration, no new syntax): the yields' static type becomes Byte (Y), and the outward type is still int, the join with the count
+# class: narrowing
+# expect: widened
+# value: [34, 97, 34, 34, 98, 34, 3]
+import std::coroutine
+import std::byte
+import std::str
+import std::char
+import std::mutable_vector
+
+error Unsupported
+
+fn byte(b: std::byte::Byte) -> std::byte::Byte:
+    b
+
+fn field_source(value: str) -> int errors Unsupported:
+    yield byte(34)
+    loop i from 0 to value.length():
+        c = value.char_at(i).scalar_value()
+        if c < 32 or c > 126:
+            fail Unsupported
+        if c == 34:
+            yield byte(34)
+        yield byte(c)
+        continue
+    yield byte(34)
+    value.length()
+
+fn run(value: str) -> List[int] errors Unsupported:
+    coroutine {step, first} = field_source(value)
+    out = std::mutable_vector::from_list([first])
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(step())
+    loop x in out:
+        x
+
+run("a\"b"):
+    on Unsupported:
+        []

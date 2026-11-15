@@ -450,9 +450,9 @@ executable would share their runtimes' symbols.
 title: -emit-c: the program as freestanding C
 summary: -emit-c writes a program as freestanding C11 for a target's own C toolchain; what C cannot implement (big Int arithmetic) becomes runtime-service calls a provider links in.
 index: backends
-alias: c backend; emit c; generate c; c code; freestanding c; embedded; microcontroller; c compile; runtime services; botlish_rt_v1; contexts in c
-keywords: -emit-c, C11, freestanding, runtime service, provider, botlish_rt_v1.h, runtime.json, int64_t, link error, embedded, context, inject
-related: backend.overview backend.native-library cli.options error.c-unsupported error.c-runtime-limit concept.integers concept.contexts
+alias: c backend; emit c; generate c; c code; freestanding c; embedded; microcontroller; c compile; runtime services; botlish_rt_v1; contexts in c; coroutines in c; stackless coroutines; coroutine frame
+keywords: -emit-c, C11, freestanding, runtime service, provider, botlish_rt_v1.h, runtime.json, int64_t, link error, embedded, context, inject, coroutine, yield, frame, state machine
+related: backend.overview backend.native-library cli.options error.c-unsupported error.c-runtime-limit concept.integers concept.contexts concept.coroutines
 
 == WHAT IT IS
 `-emit-c FILE.bot` (or a .hir or .hirx file) writes, beside the input or in
@@ -486,12 +486,13 @@ Functions, direct calls and self tail calls (loops), Int, Bool, unit,
 enums, named and anonymous structs, a List literal as a value, if/elif,
 bare loops, counted loops and folds, break, continue, return, declared
 errors with fail and handlers, the run-time errors of mod and the shifts,
-and contexts: context structs, `with context`, context parameters, context
-traits and inject blocks (next section). Anything else -- Strings, Lists
-of unknown length, closures, function values, Float64, coroutines, C
-calls, error payloads, a context holding one of those or affine state --
-is rejected at compile time with C UNSUPPORTED (error.c-unsupported),
-never compiled approximately.
+contexts: context structs, `with context`, context parameters, context
+traits and inject blocks, and coroutines (next sections). Anything else --
+Strings, Lists of unknown length, closures, function values, Float64, C
+calls, error payloads, a context holding one of those or affine state, a
+coroutine handle inside a struct or a List, a yielding function that calls
+itself other than as a tail call -- is rejected at compile time with C
+UNSUPPORTED (error.c-unsupported), never compiled approximately.
 
 == CONTEXTS
 Nothing of a registry or a lookup reaches C. A context struct is an ordinary
@@ -511,6 +512,39 @@ Contexts need no runtime service: the program installs them itself, so the
 embedding supplies nothing, and FILE.runtime.json lists only what the code
 they reach calls. Two programs (one application installed two ways) link
 side by side, each with its own prefix and its own contexts.
+
+== COROUTINES
+A coroutine is a stackless state machine over explicit storage: no thread,
+no stack per coroutine, no allocation, no scheduler, no runtime service.
+  * A function that may yield is a C function over its frame (a struct in
+    FILE.h): a resume point, its parameters, the values that live across
+    one of its suspensions -- and nothing else -- and the frame of the
+    yielding call in progress. It starts with a switch on the resume point
+    and returns an internal status to suspend; a yield writes the outward
+    value and returns, its resume continues at the label after it.
+  * A construction is storage in the constructing function's own frame:
+    zeroed, given the construction's argument values and the context
+    pointers its requirement names (its providers are its construction's,
+    never a resumer's), and the handle is a pointer to it. Several
+    coroutines of one function suspend and resume in any order, each with
+    its own state; one coroutine may construct and drive another.
+  * Resuming a completed coroutine answers its final result again, a failed
+    one its error again, running nothing; a segment's declared error is the
+    resume's, its handlers' to handle.
+  * A function that constructs a coroutine may not return a handle (the
+    storage ends with the function); a function may receive a handle,
+    resume it, move it and return it. A yielding function that calls
+    itself, or constructs a coroutine of itself, needs unbounded storage:
+    C UNSUPPORTED. A yielding self tail call is a loop over one frame.
+  * FILE.runtime.json lists every coroutine type (its "coroutine_frames"),
+    with what it holds and which fields survive a suspension; their sizes
+    are the target compiler's (examples/c-freestanding/frame-sizes.sh asks
+    it with a probe). A coroutine program needs no service a coroutine-free
+    one does not.
+  * The embedding still calls FILE_run once per run: every coroutine is
+    constructed, resumed and abandoned within it. Keeping coroutines alive
+    between two calls of an embedding needs an application-instance API the
+    language does not have yet.
 
 == THINGS TO KNOW
   * The C toolchain itself may call memcpy, memset, memmove and memcmp

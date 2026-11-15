@@ -1,0 +1,36 @@
+# case: workload -- the processor today: the status travels in an Event (the actor library's shape: std::actor::exit builds the final Exit request), and the consumer reads it after done?
+# class: narrowing
+# expect: precise
+# value: [["positive", "positive"], 0]
+import std::coroutine
+import std::mutable_vector
+import std::mutable_array
+
+struct Event:
+    kind: str
+    at: int
+
+fn finished(status: int) -> Event:
+    Event {kind: "end", at: status}
+
+fn process(inputs: List[int]) -> Event:
+    loop x in inputs:
+        if x > 0:
+            yield Event {kind: "positive", at: x}
+    finished(0)
+
+fn run(inputs: List[int]) -> List[any]:
+    coroutine {step, first} = process(inputs)
+    kinds = std::mutable_vector::from_list([first.kind])
+    kinds.clear()
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        kinds.push(c.at(0).kind)
+        c.set(0, step())
+    ks = loop k in kinds:
+        k
+    [ks, c.at(0).at]
+
+run([1, -1, 2])

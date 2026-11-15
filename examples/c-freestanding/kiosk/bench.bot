@@ -1,0 +1,21 @@
+# bench -- the meter's devices on a test bench: a simulated clock and a
+# terminal that declines anything above a low limit.
+
+import devices
+
+context struct SimClock:
+    start: devices::Tick
+
+fn now(context c: SimClock) -> devices::Tick:
+    c.start
+
+context struct BenchTerminal:
+    limit: devices::Amount
+
+fn stamp(context c: devices::Clock) -> devices::Tick:
+    c.now()
+
+fn authorize(amount: devices::Amount, context t: BenchTerminal) -> devices::Receipt errors devices::Declined:
+    if amount > t.limit:
+        fail devices::Declined
+    devices::Receipt {amount: amount, stamp: stamp()}
