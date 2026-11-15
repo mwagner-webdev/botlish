@@ -357,6 +357,21 @@ fn share_dynamic(p: *mut Vm, value: Value) -> Value {
             let shape = struct_of(value).shape;
             vm(p).new_struct(shape, copies)
         }
+        // A payload-bearing enum case's value: its payload, a struct
+        // (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md), as core/mutvec.tcl's
+        // Share does.
+        KIND_ENUMCASE => {
+            let (index, case, payload) = {
+                let obj = enum_case_of(value);
+                (obj.index, obj.case, obj.payload)
+            };
+            let copy = share_dynamic(p, payload);
+            if copy == payload {
+                return value;
+            }
+            vm(p).temp_roots.push(copy);
+            vm(p).new_enum_case(index, case, copy)
+        }
         _ => value,
     }
 }

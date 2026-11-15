@@ -2537,6 +2537,18 @@ proc hir::affine::temporaries {hir} {
 #   s N . (SLOT . D)*N     a struct: drop field SLOT (its index in the
 #                          struct's layout) by D, for each of its N affine
 #                          fields, in reverse layout (declaration) order
+#   e N . (K . HEX D)*N    an enum (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-
+#                          1.md): drop the payload of a value of the case
+#                          whose name's UTF-8 bytes are HEX (K hexadecimal
+#                          digits, lowercase) by D, for each of the N cases
+#                          whose payload owns something affine; a value of
+#                          any other case owns nothing (a payload-free
+#                          case's, or one whose payload is unrestricted).
+#                          The name, never a position, says which case: the
+#                          runtime reads its value's own case. (Hexadecimal,
+#                          so the text holds no `r` or `C`: Scoped,
+#                          Acquisition and the backends read those letters
+#                          as a release that runs code.)
 #
 # (numbers in decimal, each followed by "."): a struct whose field 1 is a
 # coroutine is "s1.1.c", a List of them "ls1.1.c". One deterministic order: a
@@ -2608,6 +2620,38 @@ proc hir::affine::DescriptorOf {hir type exclude} {
             return ""
         }
         return "l$inner"
+    }
+    if {[hir::types::IsEnum $type]} {
+        # An affine enum (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): each
+        # payload-bearing case whose payload owns something affine, by its
+        # payload's descriptor (an anonymous struct's), in declaration order.
+        # A recursive affine enum has none (hir::enums::VerifyRecursion
+        # rejects it where it is declared), so this walk is finite.
+        variable descriptorVisiting
+        set id [lindex $type 1]
+        if {$type in $descriptorVisiting} {
+            error "internal compiler error: the affine enum [hir::types::show $type] is a recursive affine type: it has no finite drop descriptor (hir::enums::VerifyRecursion rejects such a declaration)"
+        }
+        lappend descriptorVisiting $type
+        try {
+            set parts {}
+            set n 0
+            foreach case [hir::enums::cases $id] {
+                set payload [hir::enums::payloadType $id $case]
+                if {$payload eq ""} continue
+                set d [Descriptor $hir $payload]
+                if {$d eq ""} continue
+                binary scan [encoding convertto utf-8 $case] H* hex
+                append parts "[string length $hex].$hex$d"
+                incr n
+            }
+        } finally {
+            set descriptorVisiting [lrange $descriptorVisiting 0 end-1]
+        }
+        if {$n == 0} {
+            return ""
+        }
+        return "e$n.$parts"
     }
     if {[hir::types::IsMutVec $type]} {
         # A MutableVector drops its live elements, first to last

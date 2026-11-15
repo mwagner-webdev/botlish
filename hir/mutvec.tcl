@@ -2278,8 +2278,9 @@ proc hir::mutvec::MayHoldVector {type {seen {}}} {
         return [expr {$level ne "" && $level > 0}]
     }
     if {[hir::types::IsEnum $type]} {
-        # An enum (ENUMS.md) holds what its case payloads hold: nothing,
-        # for the payload-free cases of today.
+        # An enum (ENUMS.md) holds what its case payloads hold
+        # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): nothing for a
+        # payload-free enum; an enum met again adds nothing.
         set id [lindex $type 1]
         if {$id in $seen} {
             return 0

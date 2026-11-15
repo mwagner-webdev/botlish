@@ -25,11 +25,12 @@ ASAN_TARGET="$WORK/asan-target"
 TOOLCHAIN="$ROOT/fuzz/build/aot-asan-toolchain/release"
 export PATH="$HOME/.cargo/bin:$PATH"
 
-# 1. Nightly (-Zsanitizer is nightly-only) and the instrumented runtime.
-#    cargo stays the stable one: nightly cargo (1.101+) uses the new
-#    per-package target layout without release/deps, which the emitter's
-#    `-L dependency=.../deps` link path expects; stable cargo driving the
-#    nightly rustc as $RUSTC keeps the classic layout.
+# 1. Nightly (-Zsanitizer is nightly-only) and the instrumented runtime,
+#    with the stable cargo driving the nightly rustc as $RUSTC. Where cargo
+#    puts the runtime's dependencies depends on its version (release/deps
+#    before 1.100, release/build/PACKAGE/HASH/out since): the emitter
+#    searches both beside the driver (codegen::aot's
+#    `dependency_dirs`), and step 2 copies whichever exist.
 rustup toolchain install nightly --profile minimal >/dev/null 2>&1 || true
 nightly="$(rustup which --toolchain nightly rustc | xargs dirname)"
 echo "build-asan: nightly rustc: $("$nightly/rustc" --version)"
@@ -43,7 +44,11 @@ rm -rf "$(dirname "$TOOLCHAIN")"
 mkdir -p "$TOOLCHAIN"
 cp "$ASAN_TARGET/release/botlish-native" "$TOOLCHAIN/"
 cp "$ASAN_TARGET/release/libbotlish_native.rlib" "$TOOLCHAIN/"
-cp -r "$ASAN_TARGET/release/deps" "$TOOLCHAIN/deps"
+for layout in deps build; do
+    if [[ -d "$ASAN_TARGET/release/$layout" ]]; then
+        cp -r "$ASAN_TARGET/release/$layout" "$TOOLCHAIN/$layout"
+    fi
+done
 
 # 3. The rustc wrapper the emitter will use (adds ASan to the final link).
 mkdir -p "$ROOT/fuzz/build/bin"

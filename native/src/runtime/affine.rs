@@ -196,8 +196,48 @@ fn drop_by(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) -> bool {
         }
         b'v' => super::mutvec::drop_elements(p, value, d, pos),
         b'a' => super::ops::drop_array_elements(p, value, d, pos),
+        b'e' => {
+            // An enum value (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): its
+            // payload, by the descriptor of its own case -- named in the
+            // descriptor by its UTF-8 bytes in hexadecimal, compared with
+            // the program's enum table -- when that case's payload owns
+            // something affine. A payload-free case's word owns nothing.
+            let n = number(d, pos);
+            let mut chosen: Option<usize> = None;
+            let case_name: Option<&[u8]> = match enum_payload(value) {
+                Some(_) => {
+                    let (e, c) = enum_case_parts(value);
+                    Some(super::ops::program(p).enums[e as usize].cases[c as usize].as_bytes())
+                }
+                None => None,
+            };
+            for _ in 0..n {
+                let k = number(d, pos);
+                let hex = &d[*pos..*pos + k];
+                *pos += k;
+                if chosen.is_none() && case_name.is_some_and(|name| hex_is(hex, name)) {
+                    chosen = Some(*pos);
+                }
+                skip(d, pos);
+            }
+            match chosen {
+                Some(mut at) => {
+                    let payload = enum_payload(value).expect("a payload-bearing case");
+                    drop_by(p, payload, d, &mut at)
+                }
+                None => true,
+            }
+        }
         _ => panic!("bad affine drop descriptor {:?}", std::str::from_utf8(d)),
     }
+}
+
+/// 1 if HEX (lowercase hexadecimal digits) spells exactly the bytes NAME.
+fn hex_is(hex: &[u8], name: &[u8]) -> bool {
+    fn digit(c: u8) -> u8 {
+        if c.is_ascii_digit() { c - b'0' } else { c - b'a' + 10 }
+    }
+    hex.len() == 2 * name.len() && name.iter().enumerate().all(|(i, &b)| (digit(hex[2 * i]) << 4 | digit(hex[2 * i + 1])) == b)
 }
 
 /// Drops ITEMS -- the elements a collection drop took out of their
@@ -247,6 +287,14 @@ pub fn skip(d: &[u8], pos: &mut usize) {
             let n = number(d, pos);
             for _ in 0..n {
                 number(d, pos);
+                skip(d, pos);
+            }
+        }
+        b'e' => {
+            let n = number(d, pos);
+            for _ in 0..n {
+                let k = number(d, pos);
+                *pos += k;
                 skip(d, pos);
             }
         }

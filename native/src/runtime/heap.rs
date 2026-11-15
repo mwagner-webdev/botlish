@@ -199,6 +199,9 @@ impl Heap {
                 // (marking is idempotent).
                 KIND_MUTARRAY => stack.extend(super::ops::array_elements(v)),
                 KIND_RESULT => stack.push(result_of(v).payload),
+                // A payload-bearing enum case's payload (PORTABILITY-
+                // PAYLOAD-ENUMS-MILESTONE-1.md).
+                KIND_ENUMCASE => stack.push(enum_case_of(v).payload),
                 // A MutableVector (MUTABLE-VECTOR.md): exactly its live
                 // elements, never spare capacity or removed slots.
                 KIND_MUTVEC => stack.extend(super::mutvec::elements(v)),
@@ -328,6 +331,7 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
             KIND_SET => size_of::<SetObj>() + set_of(v).len * 8,
             KIND_MUTARRAY => super::ops::array_object_size(v),
             KIND_RESULT => size_of::<ResultObj>(),
+            KIND_ENUMCASE => size_of::<EnumCaseObj>(),
             KIND_CLOSURE => size_of::<ClosureObj>() + closure_of(v).ncaps * 8,
             KIND_NATIVE => size_of::<NativeObj>(),
             KIND_STRPLAN => size_of::<StrPlanObj>() + super::construct::strplan_of(v).buf.len(),
@@ -381,6 +385,7 @@ pub unsafe fn free_object(object: *mut Header) {
                 drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(s.ptr, s.len)));
             }
             KIND_RESULT => drop(Box::from_raw(object as *mut ResultObj)),
+            KIND_ENUMCASE => drop(Box::from_raw(object as *mut EnumCaseObj)),
             KIND_CLOSURE => {
                 let c = Box::from_raw(object as *mut ClosureObj);
                 drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(c.caps, c.ncaps)));

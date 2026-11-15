@@ -462,6 +462,13 @@ proc hir::specialize::ElementKeyType {type} {
         # A named struct's layout and field types are its declaration's.
         return $type
     }
+    if {[hir::types::IsEnum $type] && [hir::enums::hasPayloads [lindex $type 1]]} {
+        # An enum with payload-bearing cases (PORTABILITY-PAYLOAD-ENUMS-
+        # MILESTONE-1.md) keeps its identity, as a named struct does: its
+        # values may be objects, compared by payload, where a payload-free
+        # enum's are words, so code for it is not the broad kind's.
+        return $type
+    }
     set kind [hir::types::kindOf $type]
     if {$type eq "never"} {
         return "never"

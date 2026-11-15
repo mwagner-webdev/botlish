@@ -249,6 +249,18 @@ proc core::mutvec::Share {v tree} {
                     }
                     return [core::value::structOf [core::value::structShape $v] $copies]
                 }
+                enum {
+                    # A payload-bearing case's value: its payload, a struct
+                    # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md).
+                    if {[core::value::enumHasPayload $v]} {
+                        set payload [core::value::enumPayload $v]
+                        set copy [Share $payload {d}]
+                        if {$copy ne $payload} {
+                            return [core::value::enumCaseValue [core::value::enumId $v] \
+                                [core::value::enumCaseName $v] $copy]
+                        }
+                    }
+                }
             }
             return $v
         }

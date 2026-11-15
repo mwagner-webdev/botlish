@@ -1,0 +1,277 @@
+# payload-enums.bot -- payload-bearing enum cases as values: the
+# source-level specification of (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md)
+#
+#   * a case's named-field payload, `Add {left: int, right: int},`, declared
+#     beside payload-free cases, its fields naming later types and its own
+#     enum;
+#   * construction `Enum::Case {field: value, ...}`: every field once, in any
+#     written order (evaluated in that order), proven of its declared type;
+#   * identity: equal iff the same enum, the same case and equal payloads
+#     (by field name), a hash that agrees, set membership by it;
+#   * transport through a generic identity, a typed function, `any`, a
+#     closure, a struct field, a List, a MutableArray, a MutableVector and a
+#     coroutine's yields;
+#   * finite recursive values (an enum holding itself in a List or in its
+#     own payload);
+#   * the construction diagnostics: UnknownEnumCase, EnumPayloadUnexpected,
+#     EnumPayloadRequired, MissingField, UnknownField, DuplicateField, Type.
+#
+# Ported from tests/payload-enums.test (manifest rows: its census and this
+# suite's fragment).
+import std::compiler
+import std::coroutine
+import std::immutable_set
+import std::mutable_array
+import std::mutable_vector
+import std::test
+
+enum Expression:
+    Constant {value: int},
+    Parameter,
+    Add {left: int, right: int},
+    Conditional {condition: int, yes: int, no: int},
+    Call {function: int},
+
+enum Other:
+    Constant {value: int},
+
+enum Op:
+    Plus {l: int, r: int},
+    Minus {l: int, r: int},
+
+enum Wrap:
+    One {e: Expression},
+    Many {es: List[Expression]},
+
+struct Holder:
+    e: Expression
+
+enum Tree:
+    Leaf {value: int, tag: Tag},
+    Node {children: List[Tree]},
+
+struct Tag:
+    name: str
+
+enum Chain:
+    End,
+    Link {value: int, next: Chain},
+
+enum Ev:
+    Tick {n: int},
+    Done,
+
+enum KNode:
+    Const {value: int},
+    Param,
+    Add {left: int, right: int},
+    If {condition: int, yes: int, no: int},
+    Call {function: int},
+
+enum Two:
+    Pair {b: int, a: int},
+
+error First
+
+error Second
+
+fn register_payload_enums_tests():
+    # pe-identity-equality
+    fn b_identity() errors std::compiler::CompilerError:
+        static compile:
+            fn constant(n: int) -> Expression:
+                Expression::Constant {value: n}
+            fn same(x):
+                x
+            [constant(42) == constant(42), constant(42) == constant(41), Expression::Add {left: 3, right: 7} == Expression::Add {right: 7, left: 3}, Expression::Add {left: 3, right: 7} == Expression::Add {left: 7, right: 3}, same(Expression::Call {function: 1}) == Expression::Constant {value: 1}, same(Other::Constant {value: 42}) == constant(42), constant(1) == Expression::Parameter, Expression::Parameter == same(Expression::Parameter), constant(1) != constant(2), same(Op::Plus {l: 1, r: 2}) == Op::Minus {l: 1, r: 2}, same(Op::Plus {l: 1, r: 2}) == Op::Plus {r: 2, l: 1}]
+    std::test::value("pe-identity-equality", [true, false, true, false, false, false, false, true, true, false, true], b_identity)
+
+    # pe-hashing
+    fn b_hashing() errors std::compiler::CompilerError:
+        static compile:
+            fn same(x):
+                x
+            h1 = hash(Expression::Add {left: 3, right: 7})
+            h2 = hash(same(Expression::Add {right: 7, left: 3}))
+            s = std::immutable_set::from_list([Expression::Constant {value: 1}, Expression::Constant {value: 1}, Expression::Parameter, Expression::Call {function: 1}])
+            [h1 == h2, h1 == hash(Expression::Add {left: 7, right: 3}), hash(Expression::Constant {value: 1}) == hash(Other::Constant {value: 1}), hash(Expression::Constant {value: 1}) == hash(Expression::Call {function: 1}), std::immutable_set::contains(s, Expression::Parameter), std::immutable_set::contains(s, Expression::Constant {value: 1}), std::immutable_set::contains(s, Expression::Constant {value: 2})]
+    std::test::value("pe-hashing", [true, false, false, false, true, true, false], b_hashing)
+
+    # pe-hash-pinned
+    fn b_hash_pinned() errors std::compiler::CompilerError:
+        static compile:
+            [hash(Expression::Constant {value: 42}), hash(Expression::Add {left: 3, right: 7}), hash(Expression::Parameter)]
+    std::test::value("pe-hash-pinned", [1115571715604841343, 51682743645282670, 576369074442151568], b_hash_pinned)
+
+    # pe-transport
+    fn b_transport() errors std::compiler::CompilerError:
+        static compile:
+            fn same(x):
+                x
+            fn typed(e: Expression) -> Expression:
+                e
+            fn erase(x: any) -> any:
+                x
+            fn capture(e: Expression):
+                fn get():
+                    e
+                get
+            v = Expression::Conditional {condition: 1, yes: 2, no: 3}
+            h = Holder {e: v}
+            g = capture(v)
+            [same(v) == v, typed(v) == v, erase(v) == v, g() == v, h.e == v, [v] == [v], h == Holder {e: Expression::Conditional {no: 3, yes: 2, condition: 1}}]
+    std::test::value("pe-transport", [true, true, true, true, true, true, true], b_transport)
+
+    # pe-forward-references
+    fn b_forward() errors std::compiler::CompilerError:
+        static compile:
+            fn leaf(n: int) -> Tree:
+                Tree::Leaf {value: n, tag: Tag {name: "t"}}
+            Tree::Node {children: [leaf(1), leaf(2)]} == Tree::Node {children: [Tree::Leaf {tag: Tag {name: "t"}, value: 1}, leaf(2)]}
+    std::test::value("pe-forward-references", true, b_forward)
+
+    # pe-written-order
+    fn b_written_order() errors std::compiler::CompilerError:
+        static compile:
+            fn first(x: int) -> int errors First:
+                if x > 0:
+                    fail First
+                x
+            fn second(x: int) -> int errors Second:
+                if x > 0:
+                    fail Second
+                x
+            fn make(x: int) -> str errors First, Second:
+                e = Two::Pair {a: first(x), b: second(x)}
+                "made"
+            fn make_swapped(x: int) -> str errors First, Second:
+                e = Two::Pair {b: second(x), a: first(x)}
+                "made"
+            fn try(f, x: int) -> str:
+                f(x):
+                    on First:
+                        "first"
+                    on Second:
+                        "second"
+            [try(make, 1), try(make_swapped, 1), try(make, 0)]
+    std::test::value("pe-written-order", ["first", "second", "made"], b_written_order)
+
+    # pe-nested-data
+    fn b_nested() errors std::compiler::CompilerError:
+        static compile:
+            fn c(n: int) -> Expression:
+                Expression::Constant {value: n}
+            fn run() -> List[bool] errors IndexNotFound:
+                a = std::mutable_array::create(3, c(0))
+                a.set(1, c(1))
+                v = std::mutable_vector::from_list([c(5), Expression::Parameter])
+                v.push(Expression::Add {left: 1, right: 2})
+                last = v.pop()
+                found = loop e in [c(1), c(2), c(3)]:
+                    if e != c(2):
+                        continue
+                    e
+                w = Wrap::Many {es: [c(1), Expression::Parameter]}
+                [a.at(1) == c(1), a.at(2) == c(0), v.at(0) == c(5), v.length() == 2, last == Expression::Add {left: 1, right: 2}, found == [c(2)], Holder {e: c(9)}.e == c(9), Wrap::One {e: c(1)} == Wrap::One {e: c(1)}, w == Wrap::Many {es: [c(1), Expression::Parameter]}, w == Wrap::Many {es: [c(1)]}]
+            run():
+                on IndexNotFound:
+                    []
+    std::test::value("pe-nested-data", [true, true, true, true, true, true, true, true, true, false], b_nested)
+
+    # pe-recursive-enum
+    fn b_recursive() errors std::compiler::CompilerError:
+        static compile:
+            fn deep(n: int) -> Chain:
+                if n == 0:
+                    return Chain::End
+                Chain::Link {value: n, next: deep(n - 1)}
+            fn tree(d: int) -> Tree:
+                if d == 0:
+                    return Tree::Leaf {value: 1, tag: Tag {name: "x"}}
+                Tree::Node {children: [tree(d - 1), tree(d - 1)]}
+            [deep(2) == Chain::Link {value: 2, next: Chain::Link {next: Chain::End, value: 1}}, deep(50) == deep(50), deep(50) == deep(49), tree(3) == tree(3), hash(tree(4)) == hash(tree(4))]
+    std::test::value("pe-recursive-enum", [true, true, false, true, true], b_recursive)
+
+    # pe-affine-coroutine
+    fn b_coroutine() errors std::compiler::CompilerError:
+        static compile:
+            fn ticks(k: int) -> Ev:
+                loop i from 0 to k:
+                    yield Ev::Tick {n: i}
+                Ev::Done
+            coroutine {step, first} = ticks(2)
+            second = step()
+            third = step()
+            [first == Ev::Tick {n: 0}, second == Ev::Tick {n: 1}, third == Ev::Done]
+    std::test::value("pe-affine-coroutine", [true, true, true], b_coroutine)
+
+    # pe-kernel-probe
+    fn b_kernel() errors std::compiler::CompilerError:
+        static compile:
+            fn node(i: int) -> KNode:
+                k = mod(i, 5)
+                if k == 0:
+                    return KNode::Const {value: i}
+                if k == 1:
+                    return KNode::Param
+                if k == 2:
+                    return KNode::Add {left: i - 1, right: i - 2}
+                if k == 3:
+                    return KNode::If {condition: i - 1, yes: i - 2, no: i - 3}
+                KNode::Call {function: i}
+            fn program(n: int) -> List[KNode]:
+                loop i from 0 to n:
+                    node(i)
+            fn store(xs: List[KNode]) -> MutableVector[KNode]:
+                v = std::mutable_vector::from_list([KNode::Param])
+                loop x in xs:
+                    v.push(x)
+                v
+            fn count(xs: List[KNode], target: KNode) -> int:
+                fold x in xs with intermediate acc 0:
+                    if x == target:
+                        acc + 1
+                    else:
+                        acc
+            p = program(25)
+            v = store(p)
+            [count(p, KNode::Param), count(p, KNode::Add {left: 11, right: 10}), p == program(25), hash(p) == hash(program(25)), v.length()]
+    std::test::value("pe-kernel-probe", [5, 1, true, true, 26], b_kernel)
+
+    # pe-construction-diagnostics: the codes, at the case or the field.
+    fn b_unknown_case() errors std::compiler::CompilerError:
+        static compile:
+            Expression::Nope {value: 1}
+    std::test::rejects_at("pe-construction-diagnostics/unknown-case", std::compiler::DiagnosticCode::UnknownEnumCase, 244, 13, b_unknown_case)
+    fn b_unexpected() errors std::compiler::CompilerError:
+        static compile:
+            Expression::Parameter {value: 1}
+    std::test::rejects_at("pe-construction-diagnostics/unexpected", std::compiler::DiagnosticCode::EnumPayloadUnexpected, 248, 13, b_unexpected)
+    fn b_unexpected_empty() errors std::compiler::CompilerError:
+        static compile:
+            Expression::Parameter {}
+    std::test::rejects_at("pe-construction-diagnostics/unexpected-empty", std::compiler::DiagnosticCode::EnumPayloadUnexpected, 252, 13, b_unexpected_empty)
+    fn b_required() errors std::compiler::CompilerError:
+        static compile:
+            Expression::Constant
+    std::test::rejects_at("pe-construction-diagnostics/required", std::compiler::DiagnosticCode::EnumPayloadRequired, 256, 13, b_required)
+    fn b_missing() errors std::compiler::CompilerError:
+        static compile:
+            Expression::Add {left: 1}
+    std::test::rejects_at("pe-construction-diagnostics/missing-field", std::compiler::DiagnosticCode::MissingField, 260, 13, b_missing)
+    fn b_unknown_field() errors std::compiler::CompilerError:
+        static compile:
+            Expression::Constant {value: 1, extra: 2}
+    std::test::rejects_at("pe-construction-diagnostics/unknown-field", std::compiler::DiagnosticCode::UnknownField, 264, 45, b_unknown_field)
+    fn b_duplicate() errors std::compiler::CompilerError:
+        static compile:
+            Expression::Constant {value: 1, value: 2}
+    std::test::rejects_at("pe-construction-diagnostics/duplicate-field", std::compiler::DiagnosticCode::DuplicateField, 268, 45, b_duplicate)
+    fn b_wrong_type() errors std::compiler::CompilerError:
+        static compile:
+            Expression::Constant {value: "s"}
+    std::test::rejects_at("pe-construction-diagnostics/wrong-type", std::compiler::DiagnosticCode::Type, 272, 35, b_wrong_type)
+
+with context std::test::suite()
+register_payload_enums_tests()
+std::test::report()

@@ -982,11 +982,11 @@ fn register_enum_resolution_tests():
     std::test::value("enum-declaration-order/type-and-function", [1, Color::Red], b_type_and_function)
 
     # enum-case-is-not-a-constructor: a payload-free case takes no braces:
-    # NotAStruct at the qualified name.
+    # EnumPayloadUnexpected at the qualified name (PORTABILITY-PAYLOAD-ENUMS-M1).
     fn b_case_braces() errors std::compiler::CompilerError:
         static compile:
             VehicleType::Car {}
-    std::test::rejects_at("enum-case-is-not-a-constructor", std::compiler::DiagnosticCode::NotAStruct, 988, 13, b_case_braces)
+    std::test::rejects_at("enum-case-is-not-a-constructor", std::compiler::DiagnosticCode::EnumPayloadUnexpected, 988, 13, b_case_braces)
 
     # enum-rename-case: renaming a case is an API rename: the old name fails
     # resolution.

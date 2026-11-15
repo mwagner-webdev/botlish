@@ -170,7 +170,57 @@ proc hir::callables::Bearing {hir type {mutable 1}} {
     if {[hir::types::IsNamedStruct $type]} {
         return [BearingNamed $hir $type $mutable]
     }
+    if {[hir::types::IsEnum $type]} {
+        # An enum carries what its payload-bearing cases' payloads carry
+        # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): a function stored in a
+        # payload field is reachable through the enum value. An enum met
+        # again inside itself adds nothing (the least fixpoint).
+        return [EnumWalk [lindex $type 1] {
+            foreach t [hir::enums::payloadTypes $id] {
+                if {[Bearing $hir $t $mutable]} {
+                    return 1
+                }
+            }
+            return 0
+        } 0]
+    }
     return 0
+}
+
+namespace eval hir::callables {
+    # The enums whose payloads the current walk is inside (EnumWalk).
+    variable enumVisiting {}
+}
+
+# SCRIPT's result for enum ID, run in the caller's frame with `id` set,
+# unless the current walk is already inside ID's payloads (then NEUTRAL).
+# A struct summary's node starts a walk of its own (FreshWalk), so a
+# summary never reads a provisional answer of an enum the walk that
+# triggered it was inside.
+proc hir::callables::EnumWalk {id script neutral} {
+    variable enumVisiting
+    if {$id in $enumVisiting} {
+        return $neutral
+    }
+    lappend enumVisiting $id
+    try {
+        uplevel 1 [list set id $id]
+        return [uplevel 1 $script]
+    } finally {
+        set enumVisiting [lrange $enumVisiting 0 end-1]
+    }
+}
+
+# SCRIPT's result, run in the caller's frame with no enum visited.
+proc hir::callables::FreshWalk {script} {
+    variable enumVisiting
+    set saved $enumVisiting
+    set enumVisiting {}
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        set enumVisiting $saved
+    }
 }
 
 # The declared errors a value of TYPE carries: what calling it -- or any
@@ -226,6 +276,16 @@ proc hir::callables::CarriedInto {hir type errorsVar} {
         }
         return
     }
+    if {[hir::types::IsEnum $type]} {
+        # What its cases' payloads carry (PORTABILITY-PAYLOAD-ENUMS-
+        # MILESTONE-1.md); an enum met again adds nothing.
+        EnumWalk [lindex $type 1] {
+            foreach t [hir::enums::payloadTypes $id] {
+                CarriedInto $hir $t errors
+            }
+        } {}
+        return
+    }
     if {[hir::types::IsNamedStruct $type]} {
         # A named struct carries what its fields carry: its declaration's
         # own errors (every slot neutral) and the whole of what each
@@ -258,8 +318,10 @@ proc hir::callables::CarriedNode {id arguments} {
         lappend type $arguments
     }
     set errors {}
-    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
-        CarriedInto {} $t errors
+    FreshWalk {
+        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+            CarriedInto {} $t errors
+        }
     }
     return [lsort -unique $errors]
 }
@@ -312,12 +374,14 @@ proc hir::callables::BearingNode {id arguments} {
     if {$arguments ne {}} {
         lappend type $arguments
     }
-    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
-        if {[Bearing {} $t]} {
-            return 1
+    return [FreshWalk {
+        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+            if {[Bearing {} $t]} {
+                return 1
+            }
         }
-    }
-    return 0
+        return 0
+    }]
 }
 
 hir::summaries::define bearing -algebra classes -neutral any \
@@ -712,6 +776,17 @@ proc hir::callables::ArgContexts {hir e} {
     set result [hir::typeOf $hir $e]
     set elem [hir::types::elementOf $result]
     switch -- [lindex $shape 0] {
+        enum-case {
+            # enum#case(PAYLOAD, "ID", "CASE") (PORTABILITY-PAYLOAD-ENUMS-
+            # MILESTONE-1.md): the payload is stored in the value at exactly
+            # the case's declared payload type -- its own static type, the
+            # declared anonymous struct (hir::types' casePayloadOf rule) --
+            # and the enum bears what its payloads bear (Bearing), so its
+            # contracts are kept.
+            set contexts $none
+            lset contexts 0 [hir::typeOf $hir [lindex $args 0]]
+            return $contexts
+        }
         thread-entry {
             # std::thread::entry(NAME): the entry leaves as an Entry whose
             # one call is a new VM's (hir/threads.tcl), with exactly its

@@ -125,7 +125,7 @@ set selected [concat $selected $nativeSelected]
 # tools and the native backend. Its native/target is a real copy when a
 # native mutant is selected (it is rebuilt), else a link to this checkout's.
 set tree [file tempdir botlish-enum-mutants]
-foreach dir {compiler core hir surface stdlib tests examples audit/enums .cargo} {
+foreach dir {compiler core hir surface stdlib tests examples ccompile audit/enums .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]

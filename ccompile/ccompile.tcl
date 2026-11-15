@@ -472,7 +472,10 @@ proc ccompile::ReprOf {type r e} {
                 # type for them.
                 Unsupported $e "an enum value whose enum is not known statically (a function called with cases of different enums)"
             }
-            if {[hir::enums::payloadTypes $id] ne "" && [lsearch -not [hir::enums::payloadTypes $id] {}] >= 0} {
+            if {[hir::enums::hasPayloads $id]} {
+                # PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md: a payload-bearing
+                # case has no C representation of this backend's (a C
+                # enumeration constant is a payload-free case's only).
                 Unsupported $e "an enum whose cases carry payloads ([hir::enums::display $id])"
             }
             RegisterEnum $id

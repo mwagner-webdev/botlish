@@ -203,14 +203,14 @@ test enum-syntax-missing-comma {two cases need a comma between them} -body {
     enumSyntax "enum E:\n    A\n    B,\n"
 } -result {enum.bot:3:5: expected "," between the enum cases "A" and "B" (an enum's cases are one comma-separated list)}
 
-test enum-syntax-no-values-or-aliases {a case has no value, alias, payload or parameter list} -body {
+test enum-syntax-no-values-or-aliases {a case has no value, alias, colon payload or parameter list; a payload is named fields in braces (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md), never empty} -body {
     list \
         [enumSyntax "enum E:\n    Foo = 17,\n"] \
         [enumSyntax "enum E:\n    Foo = Bar,\n"] \
         [enumSyntax "enum E:\n    Foo: int,\n"] \
         [enumSyntax "enum E:\n    Car(int, bool),\n"] \
-        [enumSyntax "enum E:\n    Car {seats: int},\n"]
-} -result {{enum.bot:2:9: enum case "Foo" cannot be given a value or an alias: a case is a nominal value of its enum only, with no integer, String or other case behind it (write any mapping as ordinary code)} {enum.bot:2:9: enum case "Foo" cannot be given a value or an alias: a case is a nominal value of its enum only, with no integer, String or other case behind it (write any mapping as ordinary code)} {enum.bot:2:8: enum case "Foo" cannot carry a payload: payload-bearing enum cases are not supported yet (every case is payload-free)} {enum.bot:2:8: enum case "Car" cannot take a parameter list: a case is written as a bare name (payload-bearing cases are not supported)} {enum.bot:2:9: enum case "Car" cannot carry a payload: payload-bearing enum cases are not supported yet (every case is payload-free)}}
+        [enumSyntax "enum E:\n    Car {},\n"]
+} -result {{enum.bot:2:9: enum case "Foo" cannot be given a value or an alias: a case is a nominal value of its enum only, with no integer, String or other case behind it (write any mapping as ordinary code)} {enum.bot:2:9: enum case "Foo" cannot be given a value or an alias: a case is a nominal value of its enum only, with no integer, String or other case behind it (write any mapping as ordinary code)} {enum.bot:2:8: enum case "Foo" cannot be declared with ":": a payload is a named-field product written in braces after the case name, Foo {field: Type, ...}} {enum.bot:2:8: enum case "Car" cannot take a parameter list: a payload has named fields, never positional ones, written in braces after the case name, Car {field: Type, ...}} {enum.bot:2:10: enum case "Car" declares an empty payload: a payload has at least one named field, and a case without one is written without braces (Car)}}
 
 test enum-syntax-empty {an enum with no case is ENUM-EMPTY} -body {
     list [enumSyntax "enum Empty:\n"] [enumSyntax "enum Empty:\nx = 1\n"]
@@ -331,11 +331,11 @@ test enum-declaration-order {an enum is a type declaration: usable before its de
         [enumRun "fn Color():\n    1\nenum Color:\n    Red,\n\[Color(), Color::Red\]\n"]
 } -result {{same: [E::A, E::B]} {same: [1, Color::Red]}}
 
-test enum-case-is-not-a-constructor {a payload-free case is written without parentheses or braces: a call of one is a compile-time NOT-CALLABLE (a case is a value, no function), braces NOT-A-STRUCT} -body {
+test enum-case-is-not-a-constructor {a payload-free case is written without parentheses or braces: a call of one is a compile-time NOT-CALLABLE (a case is a value, no function), braces ENUM-PAYLOAD-UNEXPECTED (NOT-A-STRUCT before payload-bearing cases existed: PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md)} -body {
     list \
         [enumError "${vehicle}VehicleType::Car()\n"] \
         [enumError "${vehicle}VehicleType::Car {}\n"]
-} -result {{NOT-CALLABLE: enum.bot:8:1: cannot call VehicleType::Car, a value of type VehicleType: only a function can be called, so this call could only fail when it runs} {NOT-A-STRUCT: enum.bot:8:1: "VehicleType::Car" names a case of the enum VehicleType, not a struct: a payload-free case is written VehicleType::Car, without braces (payload-bearing cases are not supported)}}
+} -result {{NOT-CALLABLE: enum.bot:8:1: cannot call VehicleType::Car, a value of type VehicleType: only a function can be called, so this call could only fail when it runs} {ENUM-PAYLOAD-UNEXPECTED: enum.bot:8:1: case VehicleType::Car carries no payload: its value is written VehicleType::Car, without braces (only a case declared with payload fields is constructed with them)}}
 
 test enum-rename-case {renaming a case is an API rename: a reference to the old name fails resolution} -body {
     enumError "enum E:\n    Automobile,\n    Boat,\nE::Car\n"

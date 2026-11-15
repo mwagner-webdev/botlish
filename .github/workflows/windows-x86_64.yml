@@ -159,7 +159,7 @@ jobs:
         id: twin
         uses: ./.github/actions/twin
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust for x86_64-pc-windows-msvc)
         if: steps.twin.outputs.deferred != 'true'
         uses: ./.github/actions/setup-windows
 
@@ -202,7 +202,7 @@ jobs:
           # found by rustc itself, never through a Developer Command Prompt.
           Get-Command link.exe -All -ErrorAction SilentlyContinue | Select-Object Source
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust for x86_64-pc-windows-msvc)
         uses: ./.github/actions/setup-windows
 
       - name: Versions
@@ -662,7 +662,7 @@ jobs:
 
       - uses: actions/checkout@v5
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust for x86_64-pc-windows-msvc)
         uses: ./.github/actions/setup-windows
 
       - name: Build native (Cranelift) backend
@@ -673,8 +673,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: native/target-fallback
-          key: native-fallback-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('native/Cargo.lock') }}
-          restore-keys: native-fallback-${{ runner.os }}-${{ runner.arch }}-
+          key: native-fallback-${{ runner.os }}-${{ runner.arch }}-${{ steps.build.outputs.rustc }}-${{ hashFiles('native/Cargo.lock') }}
+          restore-keys: native-fallback-${{ runner.os }}-${{ runner.arch }}-${{ steps.build.outputs.rustc }}-
 
       - name: Build the fallback-roots driver
         id: fallback
@@ -811,7 +811,7 @@ jobs:
 
       - uses: actions/checkout@v5
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust for x86_64-pc-windows-msvc)
         uses: ./.github/actions/setup-windows
 
       - name: Build native (Cranelift) backend
@@ -876,7 +876,7 @@ jobs:
 
       - uses: actions/checkout@v5
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust for x86_64-pc-windows-msvc)
         uses: ./.github/actions/setup-windows
 
       - name: Build native (Cranelift) backend
@@ -981,7 +981,7 @@ jobs:
       - uses: actions/checkout@v5
         if: steps.decide.outputs.work == 'true'
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust for x86_64-pc-windows-msvc)
         if: steps.decide.outputs.work == 'true'
         uses: ./.github/actions/setup-windows
 

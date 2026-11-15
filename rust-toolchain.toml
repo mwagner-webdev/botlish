@@ -1,0 +1,17 @@
+# The one Rust toolchain this repository builds with: native/ (the driver,
+# the runtime and its archive), the packages' Rust units and every tool that
+# runs cargo or rustc inside the checkout. rustup reads this file in every
+# directory below the root; `tools/rust-toolchain.sh install` also makes it
+# rustup's default, which the rustc linker needs (it compiles each
+# executable's startup crate in a temporary directory, outside the checkout,
+# and that crate must be built by the compiler that built libbotlish_native).
+#
+# A bump is a change of its own (AGENTS.md, "Building the native (Cranelift)
+# backend"): stable Rust once moved under main with no commit
+# (MAIN-CI-FAILURES-2026-11-13.md: rustc 1.100's cargo layout and Unicode 18
+# tables). The package author image keeps its own pin
+# (tools/package-build/Dockerfile's RUSTUP_TOOLCHAIN), which recorded
+# releases reproduce with.
+[toolchain]
+channel = "1.100.0"
+profile = "minimal"

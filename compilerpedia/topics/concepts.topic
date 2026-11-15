@@ -1699,12 +1699,12 @@ tail
 @end
 
 @topic concept.enums
-title: Enums: closed sets of named cases
-summary: `enum Color:` declares a nominal type with payload-free cases written `Color::Red`; cases compare with == and hash, and have no number, String form, ordering or bare-name visibility.
+title: Enums: closed sets of named cases, optionally carrying typed payloads
+summary: `enum Color:` declares a nominal type whose cases are values `Color::Red` or carry named payload fields `Shape::Circle {radius: 3}`; values compare with == and hash, with no number or ordering.
 index: concepts
-alias: enum; enumeration; enum case; enumerated type
-keywords: enum, case, nominal, closed, ==, hash, import type, ordinal, match, switch, UNKNOWN-ENUM-CASE
-related: concept.structs concept.imports concept.types rule.import-type capability.match error.unknown-enum-case
+alias: enum; enumeration; enum case; enumerated type; tagged union; sum type; variant; enum payload; payload-bearing case
+keywords: enum, case, nominal, closed, payload, ==, hash, import type, ordinal, match, switch, UNKNOWN-ENUM-CASE, ENUM-PAYLOAD-REQUIRED, ENUM-PAYLOAD-UNEXPECTED
+related: concept.structs concept.imports concept.types rule.import-type capability.match error.unknown-enum-case error.enum-payload-required error.enum-payload-unexpected
 
 == WHAT IT IS
     enum Light:
@@ -1717,21 +1717,47 @@ declares the type `Light` and three distinct values `Light::Red`,
 `geo::Light::Red`) after `import geo`, or `Light::Red` after
 `import type geo::Light`.
 
+A case may carry a payload: named, statically typed fields declared in
+braces after its name, given exactly once by each construction:
+
+    enum Shape:
+        Point,
+        Circle {radius: int},
+        Rect {width: int, height: int},
+
+    a = Shape::Circle {radius: 3}
+    b = Shape::Rect {height: 2, width: 5}
+
+Every case's value has the enum's type (`Shape`): a function declared
+`-> Shape` may return any of them.
+
 == RULES
-  * A case is always qualified by its enum: a bare `Red` is unbound, and
-    `Light::Red()` or `Light::Red {}` are rejected (a case is a value, not
-    a constructor).
-  * Two enums are unrelated even with identical cases.
+  * A case is always qualified by its enum: a bare `Red` is unbound.
+  * A payload-free case is a value, never a constructor: `Light::Red()` is
+    NOT-CALLABLE and `Light::Red {}` is ENUM-PAYLOAD-UNEXPECTED.
+  * A payload-bearing case has no value without its payload: `Shape::Circle`
+    alone is ENUM-PAYLOAD-REQUIRED. Missing, duplicate, unknown or
+    mistyped fields are rejected as in a struct construction; the fields
+    are evaluated in the order written.
+  * Two values are equal when they are the same case of the same enum and
+    their payloads are equal field by field; hash agrees. Two enums are
+    unrelated even with identical cases and fields.
+  * A payload holding an affine value (a coroutine handle) makes the enum
+    affine: its values move, have no equality, and are released by their
+    owner.
   * No ordinal, Int or String conversion, no ordering, no case list or
-    count, no payloads (yet). Comparisons are `==` and `!=`.
-  * There is no `match` or `switch`: branch with `if`/`elif` on `==`
-    (capability.match).
+    count, and no way yet to read a payload back out of a value: there is
+    no `match` or `switch` (capability.match). Comparisons are `==` and
+    `!=`.
+  * A payload-bearing enum is not Sendable, not a C type, and not a
+    context struct's member (each is refused with a reason).
 
 == WHY
 An enum is a closed set of names, not a disguised integer: code cannot
 depend on case order or numbering, so cases can be added or reordered
-without silent changes, and the compiler keeps the full case set for
-future exhaustive matching.
+without silent changes, and the compiler keeps the full case set and every
+case's payload fields for future exhaustive matching. A payload is part of
+a value, never of its case's identity, and has no visible layout.
 
 == EXAMPLES
 @example accept
@@ -1749,6 +1775,20 @@ fn next(l: Light) -> Light:
 
 [next(Light::Red), next(Light::Amber) == Light::Red]
 @value [Light::Green, true]
+@end
+
+@example accept
+enum Shape:
+    Point,
+    Circle {radius: int},
+    Rect {width: int, height: int},
+
+fn square(n: int) -> Shape:
+    Shape::Rect {width: n, height: n}
+
+[square(2) == Shape::Rect {height: 2, width: 2}, square(2) == square(3), Shape::Circle {radius: 1}]
+@caption Payload-bearing cases: equality reads the case and the fields, never their order
+@value [true, false, Shape::Circle {radius: 1}]
 @end
 
 @example reject

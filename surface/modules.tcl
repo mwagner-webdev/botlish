@@ -1369,6 +1369,19 @@ proc surface::modules::Walk {node} {
                 }
             }
         }
+        enumdecl {
+            # A payload field's type (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-
+            # 1.md) is a type like a struct field's: a qualified one names
+            # its namespace.
+            Put node cases [lmap case [dict get $node cases] {
+                if {[dict exists $case payload]} {
+                    dict set case payload [lmap field [dict get $case payload] {
+                        dict set field type [TypeRefs [dict get $field type] [dict get $field typeSpan]]
+                    }]
+                }
+                set case
+            }]
+        }
         typedecl {
             # A refinement's carrier (REFINEMENT-VALUES.md) may be a
             # qualified type of another module.
@@ -2516,11 +2529,13 @@ proc surface::modules::CheckRef {stateVar ast key env imported ref} {
     # A rooted qualifier (`::game::Color::Red`) is a namespace path from the
     # root: never a type the file declares or imports by its short name.
     set typeQualifier [expr {!$rooted || [string first :: $namespaceName] >= 0}]
-    if {$refKind eq "value" && $typeQualifier} {
-        # `Enum::Case` (ENUMS.md): a qualifier that names an enum type
-        # visible in this file makes the reference a case of it, decided
-        # (and the case checked) by HIR resolution -- never a namespace
-        # member, and never a reason to load anything.
+    if {$refKind in {value struct} && $typeQualifier} {
+        # `Enum::Case` (ENUMS.md), or `Enum::Case {...}`, the construction
+        # of a payload-bearing case (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-
+        # 1.md): a qualifier that names an enum type visible in this file
+        # makes the reference a case of it, decided (and the case and its
+        # payload checked) by HIR resolution -- never a namespace member or
+        # a struct, and never a reason to load anything.
         set enum [EnumQualifier state $ast $key $env $namespaceName]
         if {$enum ne ""} {
             if {$namespaceName in $imported || [NamespaceExistsFor state $key $namespaceName]} {
@@ -2546,12 +2561,6 @@ proc surface::modules::CheckRef {stateVar ast key env imported ref} {
         # import (the HIR resolver checks the member is established).
         return
     }
-    if {$refKind eq "struct" && $typeQualifier && [EnumQualifier state $ast $key $env $namespaceName] ne ""} {
-        # `Enum::Case { ... }` (ENUMS.md): a payload-free case is a
-        # value, written without an initializer.
-        Error NOT-A-STRUCT $span \
-            "\"${namespaceName}::$symbolName\" names a case of the enum $namespaceName, not a struct: a payload-free case is written ${namespaceName}::$symbolName, without braces (payload-bearing cases are not supported)"
-    }
     CheckInternal $state $key [IdentityOf $state $key $namespaceName] $span $symbolName
     if {$namespaceName ni $imported} {
         if {$refKind eq "value" && !$rooted && ![NamespaceExistsFor state $key $namespaceName]
@@ -2568,10 +2577,11 @@ proc surface::modules::CheckRef {stateVar ast key env imported ref} {
         }
         if {![NamespaceExistsFor state $key $namespaceName]} {
             set cut [string last :: $namespaceName]
-            if {$refKind eq "value" && $cut > 0} {
-                # `ns::Enum::Case` (ENUMS.md) whose module is not
-                # imported: the import is what is missing, as for any
-                # member of that module.
+            if {$refKind in {value struct} && $cut > 0} {
+                # `ns::Enum::Case` (ENUMS.md), or its construction
+                # `ns::Enum::Case {...}`, whose module is not imported: the
+                # import is what is missing, as for any member of that
+                # module.
                 set prefix [string range $namespaceName 0 [expr {$cut - 1}]]
                 if {$prefix ni $imported && $prefix ne $own && [NamespaceExistsFor state $key $prefix]} {
                     Error MISSING-IMPORT $span "namespace \"$prefix\" is not imported; add `import $prefix` to use `${namespaceName}::$symbolName`"

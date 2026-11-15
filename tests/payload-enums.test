@@ -1,0 +1,552 @@
+# payload-enums.test -- payload-bearing enum cases
+# (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md; ENUMS.md).
+#
+# An enum case may carry a statically typed, named-field payload:
+#
+#   enum Expression:
+#       Constant {value: int},
+#       Parameter,
+#       Add {left: int, right: int},
+#
+#   Expression::Constant {value: 42}
+#
+# Every case's value has its enum's nominal type; its identity is (enum,
+# case), its payload part of its value. These tests cover the brief's
+# acceptance sections A-I: syntax and declarations, construction and
+# identity, field contracts, nested data, recursion, affinity, backend
+# parity, HIR text and interchange, and isolation and optimization. Every
+# accepted program runs on the Tcl interpreter, the Tcl compiler and
+# Cranelift without and with specialization (pePlain), which must agree.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set peBackends {interp compile cranelift-generic cranelift}
+
+# The outcome of SOURCE on every backend: "same: VALUE" or "same error: KIND:
+# MESSAGE" when they agree, else each backend's.
+proc pePlain {source {backends ""}} {
+    if {$backends eq ""} {
+        set backends $::peBackends
+    }
+    set hir [surface::compile $source pe.bot -warnings off]
+    set outcomes [lmap backend $backends {lrange [outcomeUnderHir $backend $hir] 0 2}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        set first [lindex $outcomes 0]
+        if {[lindex $first 0] eq "value"} {
+            return "same: [lindex $first 1]"
+        }
+        return "same error: [lindex $first 1]: [lindex $first 2]"
+    }
+    return [join [lmap backend $backends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+# KIND: MESSAGE of SOURCE's compile error, or "no error".
+proc peError {source} {
+    if {[catch {surface::compile $source pe.bot -warnings off} message options]} {
+        return "[lindex [dict get $options -errorcode] end]: $message"
+    }
+    return "no error"
+}
+
+# The error code of SOURCE's compile error, or "ok".
+proc peCode {source} {
+    if {[catch {surface::compile $source pe.bot -warnings off} message options]} {
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return ok
+}
+
+# The message of SOURCE's parse error, or "no error".
+proc peSyntax {source} {
+    if {[catch {surface::parse $source pe.bot} message options]} {
+        return $message
+    }
+    return "no error"
+}
+
+# NAME:TYPE of each top-level binding of SOURCE, the program's own.
+proc peTypes {source} {
+    set hir [surface::compile $source pe.bot -warnings off]
+    set result {}
+    foreach e [hir::roots $hir] {
+        if {[dict get $hir exprs $e origin file] ne "f1"} continue
+        if {[hir::kind $hir $e] eq "bind"} {
+            lappend result "[hir::get $hir $e name]:[hir::types::show [hir::typeOf $hir $e]]"
+        }
+    }
+    return [join $result " | "]
+}
+
+proc peWrite {path content} {
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $content
+    close $channel
+}
+
+set expr {enum Expression:
+    Constant {value: int},
+    Parameter,
+    Add {left: int, right: int},
+    Conditional {condition: int, yes: int, no: int},
+    Call {function: int},
+}
+
+# ---------------------------------------------------------------------------
+# A. Syntax and declarations
+
+test pe-syntax-mixed-cases {payload-free and payload-bearing cases share one comma-separated list; a payload is one line or several, fields separated by commas or line breaks, the trailing comma optional everywhere} -body {
+    list \
+        [peSyntax "enum E:\n    A {x: int},\n    B,\n    C {p: int, q: str},\n"] \
+        [peSyntax "enum E:\n    A {x: int,}, B, C {\n        p: int\n        q: str\n    }\n"] \
+        [pePlain "enum E:\n    A {x: int,}, B, C {\n        p: int\n        q: str,\n    }\n\[E::A {x: 1}, E::B, E::C {q: \"s\", p: 2}\]\n"]
+} -result {{no error} {no error} {same: [E::A {x: 1}, E::B, E::C {p: 2, q: "s"}]}}
+
+test pe-syntax-malformed {a payload has named fields in braces, at least one, each with a type and no default; a rest field, a positional list and a colon form are located errors (braces in the messages shown as parentheses)} -body {
+    lmap source [list "enum E:\n    A {},\n" "enum E:\n    A {x},\n" "enum E:\n    A {x: int = 1},\n" \
+            "enum E:\n    A {x: int y: int},\n" "enum E:\n    A {..},\n" "enum E:\n    A(int),\n" \
+            "enum E:\n    A: int,\n" "enum E:\n    A {x: int}\n    B,\n"] {
+        string map {\{ ( \} )} [peSyntax $source]
+    }
+} -result {{pe.bot:2:8: enum case "A" declares an empty payload: a payload has at least one named field, and a case without one is written without braces (A)} {pe.bot:2:9: expected ":" and a type after the payload field name "x" of case A (a payload field always has an explicit type), found ")"} {pe.bot:2:15: an enum case payload field cannot have a default value (every payload field is given explicitly by each construction of A)} {pe.bot:2:15: expected "," between the payload fields of A (...) on one line, found name "y"} {pe.bot:2:8: an enum case payload has no rest field: declare every payload field of A by name} {pe.bot:2:6: enum case "A" cannot take a parameter list: a payload has named fields, never positional ones, written in braces after the case name, A (field: Type, ...)} {pe.bot:2:6: enum case "A" cannot be declared with ":": a payload is a named-field product written in braces after the case name, A (field: Type, ...)} {pe.bot:3:5: expected "," between the enum cases "A" and "B" (an enum's cases are one comma-separated list)}}
+
+test pe-syntax-mutation-robustness {deleting, duplicating or replacing any token of a payload enum program never crashes the lexer, the parser or the compiler: each mutant compiles or is rejected with a diagnostic} -body {
+    set program "enum E:\n    A {x: int, y: List\[int\]},\n    B,\nfn f(n: int) -> E:\n    E::A {x: n, y: \[n\]}\n\[f(1), E::B\]\n"
+    set lexed [dict get [surface::lexer::tokenize $program pe.bot] tokens]
+    set crashes {}
+    set mutants 0
+    foreach token $lexed {
+        if {[dict get $token kind] in {NEWLINE INDENT DEDENT EOF}} continue
+        set start [dict get $token span start]
+        set end [dict get $token span end]
+        foreach replacement [list "" "[string range $program $start [expr {$end - 1}]][string range $program $start [expr {$end - 1}]]" "\{" "," "::"] {
+            set text "[string range $program 0 [expr {$start - 1}]]$replacement[string range $program $end end]"
+            incr mutants
+            if {[catch {surface::compile $text pe.bot -warnings off} message options]} {
+                set code [dict get $options -errorcode]
+                if {[lindex $code 0] ni {SURFACE CORE HIR}} {
+                    lappend crashes [list $replacement $start $code $message]
+                }
+            }
+        }
+    }
+    list [expr {$mutants > 100}] $crashes
+} -result {1 {}}
+
+test pe-declaration-diagnostics {a duplicate payload field, an unknown or trait-typed field type and a duplicate case are located declaration errors} -body {
+    list \
+        [peError "enum E:\n    A {x: int, x: str},\n1\n"] \
+        [peError "enum E:\n    A {x: Nope},\n1\n"] \
+        [peError "trait Named:\n    fn name(self: Named) -> str\nenum E:\n    A {x: Named},\n1\n"] \
+        [peError "enum E:\n    A {x: int},\n    A {y: int},\n1\n"]
+} -result {{DUPLICATE-FIELD: pe.bot:2:16: duplicate field "x" in the payload of case A of enum "E": each payload field is declared once} {TYPE: pe.bot:2:11: unknown or invalid type Nope for payload field "x" of case E::A: core::type: unknown type "Nope"} {TRAIT-STORAGE-UNSUPPORTED: pe.bot:4:11: payload field "x" of case E::A cannot have trait type Named: a payload stores one concrete representation, and there is no erased or heterogeneous trait representation (store a concrete type)} {TYPE: pe.bot:3:5: duplicate case "A" in enum "E": every case of an enum is a distinct nominal case, declared once (there are no case aliases)}}
+
+test pe-forward-references {a payload field may name a type declared later, the enum itself (a recursive enum), and the enum may be used before its declaration} -body {
+    pePlain "fn leaf(n: int) -> Tree:\n    Tree::Leaf {value: n, tag: Tag {name: \"t\"}}\nenum Tree:\n    Leaf {value: int, tag: Tag},\n    Node {children: List\[Tree\]},\nstruct Tag:\n    name: str\nTree::Node {children: \[leaf(1), leaf(2)\]}\n"
+} -result {same: Tree::Node {children: [Tree::Leaf {tag: Tag {name: "t"}, value: 1}, Tree::Leaf {tag: Tag {name: "t"}, value: 2}]}}
+
+test pe-modules {a module's payload enum: its cases constructed qualified after `import NS`, by the short name after `import type`, its payload field types resolved in the declaring module; another module's same-spelled enum is unrelated} -body {
+    set dir [makeDirectory pe-modules-[pid]]
+    try {
+        peWrite [file join $dir geo.bot] "struct Point:\n    x: int\n    y: int\n\nenum Shape:\n    Dot {at: Point},\n    Blank,\n\nfn dot(x: int, y: int) -> Shape:\n    Shape::Dot {at: Point {x: x, y: y}}\n"
+        peWrite [file join $dir other.bot] "struct Point:\n    x: int\n    y: int\n\nenum Shape:\n    Dot {at: Point},\n    Blank,\n"
+        peWrite [file join $dir a.bot] "import geo\nimport other\n\[geo::dot(1, 2) == geo::Shape::Dot {at: geo::Point {x: 1, y: 2}}, geo::Shape::Blank, other::Shape::Dot {at: other::Point {x: 1, y: 2}} == geo::dot(1, 2)\]\n"
+        peWrite [file join $dir b.bot] "import geo\nimport type geo::Shape\nShape::Dot {at: geo::Point {x: 3, y: 4}}\n"
+        peWrite [file join $dir c.bot] "geo::Shape::Dot {at: geo::Point {x: 3, y: 4}}\n"
+        set results {}
+        foreach f {a b} {
+            set hir [surface::readProgramFile [file join $dir $f.bot] -warnings off]
+            set outcomes [lmap be $::peBackends {lrange [outcomeUnderHir $be $hir] 0 1}]
+            lappend results [lsort -unique $outcomes]
+        }
+        catch {surface::readProgramFile [file join $dir c.bot] -warnings off} message options
+        lappend results [lindex [dict get $options -errorcode] end]
+    } finally {
+        removeDirectory [file tail $dir]
+    }
+    set results
+} -result {{{value {[true, geo::Shape::Blank, false]}}} {{value {geo::Shape::Dot {at: geo::Point {x: 3, y: 4}}}}} MISSING-IMPORT}
+
+test pe-payload-free-unchanged {an enum with no payload-bearing case is exactly what it was: its HIR text, its native representation (immediate words, enumeq) and its values, also in a program beside a payload enum} -body {
+    set plain "enum Light:\n    Red,\n    Green,\nfn same(x: Light) -> Light:\n    x\n\[same(Light::Red) == Light::Red, Light::Green\]\n"
+    set mixed "enum Shape:\n    Dot {x: int},\n    Blank,\n$plain"
+    set nir [native::nir [surface::compile $mixed pe.bot -warnings off]]
+    list [pePlain $plain] [pePlain $mixed] \
+        [lsearch -all -inline -glob [split [hir::format [surface::compile $plain pe.bot]] \n] enum*] \
+        [regexp {op enumeq} $nir] [regexp {op enumcase} $nir]
+} -result {{same: [true, Light::Green]} {same: [true, Light::Green]} {{enum Light name Light ns - cases Red, Green}} 1 0}
+
+# ---------------------------------------------------------------------------
+# B. Construction and identity
+
+test pe-construction-types {a case construction is a value of its enum's nominal type -- never a case's own type or the payload's -- through bindings, declared results, inferred results and a join of cases} -body {
+    peTypes "${expr}fn constant(n: int) -> Expression:\n    Expression::Constant {value: n}\nfn pick(b: bool):\n    if b:\n        Expression::Add {left: 1, right: 2}\n    else:\n        Expression::Parameter\na = constant(42)\nb = Expression::Add {left: 3, right: 7}\nc = pick(true)\nd = \[a, b, Expression::Parameter\]\n"
+} -result {constant:block(e2)/1 -> Expression | pick:block(e10)/1 -> Expression | a:Expression | b:Expression | c:Expression | d:List[Expression]{length: 3}}
+
+test pe-identity-equality {equal iff the same enum, the same case and equal payloads: field construction order takes no part; another case with identical field values (also with identical field names), another enum with identical spelling and fields, and a payload-free case are unequal} -body {
+    pePlain "${expr}enum Other:\n    Constant {value: int},\nenum Op:\n    Plus {l: int, r: int},\n    Minus {l: int, r: int},\nfn constant(n: int) -> Expression:\n    Expression::Constant {value: n}\nfn same(x):\n    x\n\[constant(42) == constant(42), constant(42) == constant(41), Expression::Add {left: 3, right: 7} == Expression::Add {right: 7, left: 3}, Expression::Add {left: 3, right: 7} == Expression::Add {left: 7, right: 3}, same(Expression::Call {function: 1}) == Expression::Constant {value: 1}, same(Other::Constant {value: 42}) == constant(42), constant(1) == Expression::Parameter, Expression::Parameter == same(Expression::Parameter), constant(1) != constant(2), same(Op::Plus {l: 1, r: 2}) == Op::Minus {l: 1, r: 2}, same(Op::Plus {l: 1, r: 2}) == Op::Plus {r: 2, l: 1}\]\n"
+} -result {same: [true, false, true, false, false, false, false, true, true, false, true]}
+
+test pe-hashing {equal values hash equally on every backend, whatever the field construction order; a payload-free case's hash is unchanged by payloads elsewhere in its enum; different payloads, cases and enums hash differently; set membership follows equality} -body {
+    set program "import std::immutable_set\n${expr}enum Other:\n    Constant {value: int},\nfn same(x):\n    x\nh1 = hash(Expression::Add {left: 3, right: 7})\nh2 = hash(same(Expression::Add {right: 7, left: 3}))\ns = std::immutable_set::from_list(\[Expression::Constant {value: 1}, Expression::Constant {value: 1}, Expression::Parameter, Expression::Call {function: 1}\])\n\[h1 == h2, h1 == hash(Expression::Add {left: 7, right: 3}), hash(Expression::Constant {value: 1}) == hash(Other::Constant {value: 1}), hash(Expression::Constant {value: 1}) == hash(Expression::Call {function: 1}), std::immutable_set::contains(s, Expression::Parameter), std::immutable_set::contains(s, Expression::Constant {value: 1}), std::immutable_set::contains(s, Expression::Constant {value: 2})\]\n"
+    set free "enum Expression:\n    Parameter,\nhash(Expression::Parameter)\n"
+    list [pePlain $program] [string equal [pePlain $free] [pePlain "${expr}hash(Expression::Parameter)\n"]]
+} -result {{same: [true, false, false, false, true, true, false]} 1}
+
+test pe-hash-pinned {the public hash of a payload-bearing case's value is pinned on every backend: the payload-free form's input extended by a 0xFF and the payload as a nested value (core/hashing.tcl, runtime/ops.rs)} -body {
+    pePlain "${expr}\[hash(Expression::Constant {value: 42}), hash(Expression::Add {left: 3, right: 7}), hash(Expression::Parameter)\]\n"
+} -result {same: [1115571715604841343, 51682743645282670, 576369074442151568]}
+
+test pe-transport {a case value keeps its identity and payload through a generic identity, a typed function, erasure to any, a closure capture, a struct field and a List element} -body {
+    pePlain "${expr}struct Holder:\n    e: Expression\nfn same(x):\n    x\nfn typed(e: Expression) -> Expression:\n    e\nfn erase(x: any) -> any:\n    x\nfn capture(e: Expression):\n    fn get():\n        e\n    get\nv = Expression::Conditional {condition: 1, yes: 2, no: 3}\nh = Holder {e: v}\ng = capture(v)\n\[same(v) == v, typed(v) == v, erase(v) == v, g() == v, h.e == v, \[v\] == \[v\], h\]\n"
+} -result {same: [true, true, true, true, true, true, Holder {e: Expression::Conditional {condition: 1, no: 3, yes: 2}}]}
+
+test pe-debug-rendering {a payload-bearing case's value renders as its qualified case and its payload's fields in canonical order, identically on every backend; a module's enum by its identity} -body {
+    pePlain "${expr}\[Expression::Add {right: 7, left: 3}, Expression::Parameter, Expression::Constant {value: -5}\]\n"
+} -result {same: [Expression::Add {left: 3, right: 7}, Expression::Parameter, Expression::Constant {value: -5}]}
+
+test pe-construction-diagnostics {a construction's case and fields are checked: an unknown case, braces after a payload-free case, a payload-bearing case without its payload, a missing, unknown or duplicate field, and a field value not proven of its declared type} -body {
+    list \
+        [peError "${expr}Expression::Nope {value: 1}\n"] \
+        [peError "${expr}Expression::Parameter {value: 1}\n"] \
+        [peError "${expr}Expression::Parameter {}\n"] \
+        [peError "${expr}Expression::Constant\n"] \
+        [peError "${expr}Expression::Add {left: 1}\n"] \
+        [peError "${expr}Expression::Constant {value: 1, extra: 2}\n"] \
+        [peError "${expr}Expression::Constant {value: 1, value: 2}\n"] \
+        [peError "${expr}Expression::Constant {value: \"s\"}\n"]
+} -result {{UNKNOWN-ENUM-CASE: pe.bot:7:1: enum Expression has no case "Nope" (its cases: Constant, Parameter, Add, Conditional, Call)} {ENUM-PAYLOAD-UNEXPECTED: pe.bot:7:1: case Expression::Parameter carries no payload: its value is written Expression::Parameter, without braces (only a case declared with payload fields is constructed with them)} {ENUM-PAYLOAD-UNEXPECTED: pe.bot:7:1: case Expression::Parameter carries no payload: its value is written Expression::Parameter, without braces (only a case declared with payload fields is constructed with them)} {ENUM-PAYLOAD-REQUIRED: pe.bot:7:1: case Expression::Constant carries a payload {value: int}: a value of it is constructed with every payload field, Expression::Constant {value: ...} (there is no payload-free value of a payload-bearing case, and no default)} {MISSING-FIELD: pe.bot:7:1: the payload of case Expression::Add is missing field "right" (every declared field must be given exactly once; there are no defaults)} {UNKNOWN-FIELD: pe.bot:7:33: the payload of case Expression::Constant has no field "extra" (declared fields: value)} {DUPLICATE-FIELD: pe.bot:7:33: duplicate field "value" in the payload of case Expression::Constant: each field may be given only once} {TYPE: pe.bot:7:23: payload field "value" of case Expression::Constant cannot be proven to satisfy its declared type int (value type: str)}}
+
+test pe-nominal-rejections {a case of another enum is rejected where an enum is declared, whatever its fields; a positional constructor call and a case used as a function are rejected; a case of a payload enum is not a constructor function} -body {
+    list \
+        [peError "${expr}enum Other:\n    Constant {value: int},\nfn f(e: Expression) -> int:\n    1\nf(Other::Constant {value: 1})\n"] \
+        [peError "${expr}fn f() -> Expression:\n    Other::Constant {value: 1}\nenum Other:\n    Constant {value: int},\nf()\n"] \
+        [peError "${expr}Expression::Constant(1)\n"] \
+        [peError "${expr}f = Expression::Call\nf\n"]
+} -result {{TYPE: pe.bot:11:3: argument for parameter "e" cannot be proven to satisfy Expression (argument type: Other); Expression is a nominal enum type: only its own cases (Expression::Constant, Expression::Parameter, Expression::Add, Expression::Conditional, Expression::Call) are its values, never a case of another enum, an Int or a String} {TYPE: pe.bot:7:5: function result does not prove declared type Expression (result type: Other); Expression is a nominal enum type: only its own cases (Expression::Constant, Expression::Parameter, Expression::Add, Expression::Conditional, Expression::Call) are its values, never a case of another enum, an Int or a String} {ENUM-PAYLOAD-REQUIRED: pe.bot:7:1: case Expression::Constant carries a payload {value: int}: a value of it is constructed with every payload field, Expression::Constant {value: ...} (there is no payload-free value of a payload-bearing case, and no default)} {ENUM-PAYLOAD-REQUIRED: pe.bot:7:5: case Expression::Call carries a payload {function: int}: a value of it is constructed with every payload field, Expression::Call {function: ...} (there is no payload-free value of a payload-bearing case, and no default)}}
+
+test pe-exact-case-facts {the compiler knows the case of a construction whatever its payload is, and of a case constant, through immutable aliases: the fact a later matching milestone reads (hir::enums::caseFact)} -body {
+    set hir [surface::compile "${expr}fn f(n: int):\n    a = Expression::Constant {value: n}\n    b = a\n    c = Expression::Parameter\n    \[b, c, n\]\nf(1)\n" pe.bot -warnings off]
+    set facts {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [hir::get $hir $e reachable] && [hir::get $hir [dict get $node callee] kind] eq "ref"
+                && [hir::get $hir [dict get $node callee] name] eq "list"} {
+            foreach arg [dict get $node args] {
+                lappend facts [hir::enums::caseFact $hir $arg]
+            }
+        }
+    }
+    set facts
+} -result {{Expression Constant} {Expression Parameter} {}}
+
+# ---------------------------------------------------------------------------
+# C. Field contracts
+
+test pe-field-kinds {payload fields of primitive, integer-domain, named struct, enum, collection and floating-point types are constructed, compared and rendered on every backend; a callable field makes the enum bear its contract exactly as a struct's does: such an enum is no operand of ==, statically} -body {
+    set fun "enum F:\n    Fun {f: Fn{args: \[int\], return: int}},\n    No,\nfn twice(x: int) -> int:\n    x * 2\nstruct S:\n    f: Fn{args: \[int\], return: int}\n"
+    list \
+        [pePlain "type Small = Int in 0..9\nstruct P:\n    x: int\nenum Mode:\n    On,\n    Off,\nenum V:\n    Num {n: int, s: str, b: bool, c: UnicodeChar},\n    Dom {d: Small},\n    Rec {p: P, m: Mode},\n    Coll {xs: List\[int\], ys: List\[List\[str\]\]},\n    Fl {f: Float64},\nfn mk(d: Small) -> V:\n    V::Dom {d: d}\n\[V::Num {n: 1, s: \"a\", b: true, c: 'z'}, mk(3) == mk(3), V::Rec {p: P {x: 1}, m: Mode::On} == V::Rec {p: P {x: 1}, m: Mode::Off}, V::Coll {xs: \[1, 2\], ys: \[\[\"q\"\]\]}, V::Fl {f: 1.5} == V::Fl {f: 1.5}, V::Rec {p: P {x: 2}, m: Mode::Off}\]\n"] \
+        [peCode "${fun}F::Fun {f: twice} == F::No\n"] \
+        [peCode "${fun}S {f: twice} == S {f: twice}\n"] \
+        [pePlain "${fun}x = F::Fun {f: twice}\n\[F::No\]\n"]
+} -result {{same: [V::Num {b: true, c: 'z', n: 1, s: "a"}, true, false, V::Coll {xs: [1, 2], ys: [["q"]]}, true, V::Rec {m: Mode::Off, p: P {x: 2}}]} TYPE TYPE {same: [F::No]}}
+
+test pe-field-contracts-checked {a field value is proven of its declared type statically: an Int outside a domain, a String for an Int, a struct of another declaration, a List of the wrong element type and a function of another contract are rejected} -body {
+    set decls "type Small = Int in 0..9\nstruct P:\n    x: int\nstruct Q:\n    x: int\nenum V:\n    Dom {d: Small},\n    Rec {p: P},\n    Coll {xs: List\[int\]},\n    Fun {f: Fn{args: \[int\], return: int}},\n"
+    list \
+        [peCode "${decls}V::Dom {d: 12}\n"] \
+        [peCode "${decls}V::Rec {p: Q {x: 1}}\n"] \
+        [peCode "${decls}V::Coll {xs: \[\"a\"\]}\n"] \
+        [peCode "${decls}fn g(s: str) -> str:\n    s\nV::Fun {f: g}\n"] \
+        [pePlain "${decls}fn mk(n: int) -> V:\n    if n >= 0 and n <= 9:\n        return V::Dom {d: n}\n    V::Coll {xs: \[n\]}\n\[mk(3), mk(30)\]\n"]
+} -result {TYPE TYPE TYPE TYPE {same: [V::Dom {d: 3}, V::Coll {xs: [30]}]}}
+
+test pe-written-order {field initializers are evaluated in written order, the value made after the last: the first failing field's error is the construction's, whatever the declaration order, on every backend} -body {
+    set program "error First\nerror Second\nenum E:\n    Two {b: int, a: int},\nfn first(x: int) -> int errors First:\n    if x > 0:\n        fail First\n    x\nfn second(x: int) -> int errors Second:\n    if x > 0:\n        fail Second\n    x\nfn make(x: int) -> str errors First, Second:\n    e = E::Two {a: first(x), b: second(x)}\n    \"made\"\nfn makeSwapped(x: int) -> str errors First, Second:\n    e = E::Two {b: second(x), a: first(x)}\n    \"made\"\nfn try(f, x: int) -> str:\n    f(x):\n        on First:\n            \"first\"\n        on Second:\n            \"second\"\n"
+    pePlain "${program}\[try(make, 1), try(makeSwapped, 1), try(make, 0)\]\n"
+} -result {same: ["first", "second", "made"]}
+
+# ---------------------------------------------------------------------------
+# D. Nested data
+
+test pe-nested-data {payload-bearing values in Lists, MutableArrays, MutableVectors, named structs and other payloads: stored, retrieved, replaced and iterated with their identities} -body {
+    pePlain "import std::mutable_array\nimport std::mutable_vector\n${expr}enum Wrap:\n    One {e: Expression},\n    Many {es: List\[Expression\]},\nstruct Box:\n    e: Expression\nfn c(n: int) -> Expression:\n    Expression::Constant {value: n}\nfn run() -> List\[bool\] errors IndexNotFound:\n    a = std::mutable_array::create(3, c(0))\n    a.set(1, c(1))\n    v = std::mutable_vector::from_list(\[c(5), Expression::Parameter\])\n    v.push(Expression::Add {left: 1, right: 2})\n    last = v.pop()\n    found = loop e in \[c(1), c(2), c(3)\]:\n        if e != c(2):\n            continue\n        e\n    w = Wrap::Many {es: \[c(1), Expression::Parameter\]}\n    \[a.at(1) == c(1), a.at(2) == c(0), v.at(0) == c(5), v.length() == 2, last == Expression::Add {left: 1, right: 2}, found == \[c(2)\], Box {e: c(9)}.e == c(9), Wrap::One {e: c(1)} == Wrap::One {e: c(1)}, w == Wrap::Many {es: \[c(1), Expression::Parameter\]}, w == Wrap::Many {es: \[c(1)\]}\]\nrun():\n    on IndexNotFound:\n        \[\]\n"
+} -result {same: [true, true, true, true, true, true, true, true, true, false]}
+
+test pe-collections-unrestricted {a collection of an unrestricted payload enum is unrestricted: copied, compared and passed like a collection of Ints} -body {
+    peTypes "import std::mutable_vector\n${expr}xs = \[Expression::Parameter, Expression::Call {function: 1}\]\nys = xs\nv = std::mutable_vector::from_list(xs)\nw = v\nn = \[xs == ys\]\n"
+} -result {xs:List[Expression]{length: 2} | ys:List[Expression]{length: 2} | v:MutableVector[Expression] | w:MutableVector[Expression] | n:List[bool]{length: 1}}
+
+# ---------------------------------------------------------------------------
+# E. Recursion
+
+test pe-recursive-enum {an unrestricted enum holding itself in a List or another payload has finite values of every depth: constructed, compared and hashed on every backend} -body {
+    pePlain "enum Tree:\n    Leaf {value: int},\n    Node {children: List\[Tree\]},\nenum Chain:\n    End,\n    Link {value: int, next: Chain},\nfn deep(n: int) -> Chain:\n    if n == 0:\n        return Chain::End\n    Chain::Link {value: n, next: deep(n - 1)}\nfn tree(d: int) -> Tree:\n    if d == 0:\n        return Tree::Leaf {value: 1}\n    Tree::Node {children: \[tree(d - 1), tree(d - 1)\]}\n\[deep(3), deep(50) == deep(50), deep(50) == deep(49), tree(3) == tree(3), hash(tree(4)) == hash(tree(4)), tree(1)\]\n"
+} -result {same: [Chain::Link {next: Chain::Link {next: Chain::Link {next: Chain::End, value: 1}, value: 2}, value: 3}, true, false, true, true, Tree::Node {children: [Tree::Leaf {value: 1}, Tree::Leaf {value: 1}]}]}
+
+test pe-recursive-through-struct {an enum and a struct may hold each other; the struct's and the enum's affinity, equality and hashing are decided by one least fixpoint, whichever is asked first} -body {
+    set program "import std::coroutine\nfn gen() -> int:\n    yield 1\n    0\nstruct S:\n    e: E\nenum E:\n    Nil,\n    Has {s: S},\n    Fun {f: Fn{args: \[\], return: int}},\n"
+    set hir [surface::compile "${program}S {e: E::Nil}\n" pe.bot -warnings off]
+    list [hir::types::IsAffine {nstruct S}] [hir::types::IsAffine {enum E}] \
+        [lindex [hir::types::HashClass {nstruct S}] 0] [lindex [hir::types::HashClass {enum E}] 0] \
+        [lindex [hir::types::HashClass {enum E}] 1]
+} -result {0 0 none none {field "f" of case E::Fun (Fn{args: [], return: int, errors: []}): a function has no total equality (== of two functions is not defined: there is no function identity)}}
+
+test pe-recursive-affine-rejected {an affine enum whose values can own a value of itself has no finite drop descriptor: AFFINE-CONTAINER-UNSUPPORTED at its declaration, directly, through a List, through a struct and through another enum; a recursive unrestricted enum beside it is accepted} -body {
+    set co "import std::coroutine\nstruct Message:\n    value: int\n"
+    set h "Coroutine{args: \[Message\], return: int}"
+    list \
+        [peError "${co}enum L:\n    Nil,\n    Cons {head: $h, tail: L},\n1\n"] \
+        [peError "${co}enum T:\n    Leaf {h: $h},\n    Node {kids: List\[T\]},\n1\n"] \
+        [peError "${co}struct S:\n    h: $h\n    e: E\nenum E:\n    Nil,\n    Has {s: S},\n1\n"] \
+        [peError "${co}enum A:\n    Nil,\n    Has {b: B},\nenum B:\n    Own {h: $h, a: A},\n1\n"] \
+        [peError "${co}enum F:\n    Leaf {h: $h},\n    Two {left: Leafy, right: Leafy},\nenum Leafy:\n    Plain {n: int},\n1\n"]
+} -result {{AFFINE-CONTAINER-UNSUPPORTED: pe.bot:4:6: enum L is a recursive affine type: its values can own a value of L again (L::Cons.tail), so they nest affine values to any depth, and an affine value needs a finite drop descriptor (store the affine values in a MutableVector of a struct, or make the recursive part unrestricted)} {AFFINE-CONTAINER-UNSUPPORTED: pe.bot:4:6: enum T is a recursive affine type: its values can own a value of T again (T::Node.kids), so they nest affine values to any depth, and an affine value needs a finite drop descriptor (store the affine values in a MutableVector of a struct, or make the recursive part unrestricted)} {AFFINE-CONTAINER-UNSUPPORTED: pe.bot:7:6: enum E is a recursive affine type: its values can own a value of E again (E::Has.s), so they nest affine values to any depth, and an affine value needs a finite drop descriptor (store the affine values in a MutableVector of a struct, or make the recursive part unrestricted)} {AFFINE-CONTAINER-UNSUPPORTED: pe.bot:4:6: enum A is a recursive affine type: its values can own a value of A again (A::Has.b -> B::Own.a), so they nest affine values to any depth, and an affine value needs a finite drop descriptor (store the affine values in a MutableVector of a struct, or make the recursive part unrestricted)} {no error}}
+
+# ---------------------------------------------------------------------------
+# F. Affinity and cleanup
+
+set affine {import std::coroutine
+
+error Boom
+
+struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+fn worker(seed: int, resume Message) -> Event:
+    message = yield Event {value: seed}
+    return Event {value: message.value}
+
+fn make(seed: int) -> Coroutine{args: [Message], return: Event}:
+    coroutine {step} = worker(seed)
+    step
+
+fn boom(x: int) -> int errors Boom:
+    if x > 0:
+        fail Boom
+    x
+
+enum Job:
+    Idle,
+    Running {name: str, task: Coroutine{args: [Message], return: Event}},
+    Pair {a: Coroutine{args: [Message], return: Event}, b: Coroutine{args: [Message], return: Event}},
+
+fn keep(j: Job) -> Job:
+    j
+
+}
+
+# Test-only probe of the Tcl runtime: the Tcl coroutines alive (a suspended
+# coroutine not released yet).
+proc peLiveCoroutines {} {
+    return [core::value::int [llength [info commands {::core::coroutines::co[0-9]*}]]]
+}
+if {"test_pe_live" ni [core::native::names]} {
+    core::registerNative test_pe_live -arity 0 -impl peLiveCoroutines
+}
+
+# {TCL-VALUE NATIVE-COUNTERS RELEASE-ORDER}: TEXT on the two Tcl backends
+# with the live-coroutine probe, natively (the probe replaced by 0) with its
+# coroutine counters, and the IDs of the coroutines it releases in release
+# order on the interpreter (1 = the first constructed).
+proc peReleases {text} {
+    set tcl [sourceAgree $text {interp compile}]
+    set plain [string map {test_pe_live() 0} $text]
+    set hir [surface::compile $plain pe.bot -warnings off]
+    set native [dict getdef [native::allocationReport $hir summary] coroutines {released 0}]
+    set core::coroutines::releaseTrace {}
+    try {
+        outcomeUnderHir interp $hir
+        set ids $core::coroutines::releaseTrace
+    } finally {
+        set core::coroutines::releaseTrace none
+    }
+    set sorted [lsort -integer $ids]
+    set order [lmap id $ids {expr {[lsearch -exact $sorted $id] + 1}}]
+    return [list $tcl [dict get $native released] $order]
+}
+
+test pe-affine-type {an enum is affine exactly when some case's payload can own affine state: by that rule, whatever case a value is -- a payload-free case of an affine enum is an affine value too; an enum with only unrestricted payloads is unrestricted} -body {
+    set hir [surface::compile "${affine}enum Plain:\n    A {n: int},\n    B,\n1\n" pe.bot -warnings off]
+    list [hir::types::IsAffine {enum Job}] [hir::types::IsAffine {enum Plain}] \
+        [hir::types::IsAffine {list {enum Job}}] [hir::types::IsAffine {nstruct Message}]
+} -result {1 0 1 0}
+
+test pe-affine-moves {constructing moves the affine fields into the value; the value moves through bindings, arguments and results; a second use of a moved binding is USE-AFTER-MOVE, also for a payload-free case of an affine enum; an affine enum has no equality and is no untyped argument} -body {
+    list \
+        [peCode "${affine}h = make(1)\nj = Job::Running {name: \"j\", task: h}\nk = Job::Running {name: \"k\", task: h}\n1\n"] \
+        [peCode "${affine}a = Job::Running {name: \"j\", task: make(1)}\nb = a\nc = a\n1\n"] \
+        [peCode "${affine}a = Job::Idle\nb = a\nc = a\n1\n"] \
+        [peCode "${affine}a = keep(Job::Pair {a: make(1), b: make(2)})\nb = keep(a)\n1\n"] \
+        [peCode "${affine}a = Job::Running {name: \"j\", task: make(1)}\na == a\n"] \
+        [peCode "${affine}fn erase(x: any) -> any:\n    x\nerase(Job::Idle)\n"]
+} -result {USE-AFTER-MOVE USE-AFTER-MOVE USE-AFTER-MOVE ok AFFINE-EQUALITY-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED}
+
+test pe-affine-releases {a dying affine enum value releases what its own case's payload owns, by its descriptor, on every backend: after its owner's last use, through a function's parameter, inside a List, never twice; a payload-free case of it releases nothing} -constraints nativeCoroutines -body {
+    list \
+        [peReleases "${affine}a = Job::Running {name: \"j\", task: make(1)}\nb = keep(a)\nn1 = test_pe_live()\nc = keep(b)\nn2 = test_pe_live()\nd = 1\n\[n1, n2, test_pe_live()\]\n"] \
+        [peReleases "${affine}p = Job::Pair {a: make(2), b: make(3)}\nn1 = test_pe_live()\nq = keep(p)\nn2 = test_pe_live()\n\[n1, n2\]\n"] \
+        [peReleases "${affine}xs = \[Job::Running {name: \"aa\", task: make(1)}, Job::Idle, Job::Running {name: \"bb\", task: make(2)}\]\nn1 = test_pe_live()\nys = xs\nn2 = test_pe_live()\n\[n1, n2\]\n"] \
+        [peReleases "${affine}a = Job::Idle\nb = keep(a)\n\[test_pe_live()\]\n"]
+} -result {{{value {[1, 0, 0]}} 1 1} {{value {[2, 0]}} 2 {2 1}} {{value {[2, 0]}} 2 {1 2}} {{value {[0]}} 0 {}}}
+
+test pe-affine-partial-construction {a construction that fails at a later field releases the affine fields it already evaluated, exactly once, on every backend; a completed one is released by its owner} -constraints nativeCoroutines -body {
+    peReleases "${affine}fn attempt(x: int) -> Job errors Boom:\n    Job::Pair {a: make(1), b: make(boom(x))}\nfn h(k: int):\n    j = attempt(k):\n        on Boom:\n            Job::Idle\n    test_pe_live()\n\[h(1), h(0), test_pe_live()\]\n"
+} -result {{value {[0, 0, 0]}} 3 {1 3 2}}
+
+test pe-affine-descriptor {an affine enum's drop descriptor names each case whose payload owns something affine by its name's UTF-8 bytes in hexadecimal (never a position, and never the letters r or C a release that runs code is read by), then the payload's descriptor} -body {
+    set hir [surface::compile "${affine}j = Job::Idle\n1\n" pe.bot -warnings off]
+    list [hir::affine::Descriptor $hir {enum Job}] [hir::affine::Descriptor $hir {list {enum Job}}] \
+        [regexp {[rC]} [hir::affine::Descriptor $hir {enum Job}]]
+} -result {e2.14.52756e6e696e67s1.1.c8.50616972s2.1.c0.c le2.14.52756e6e696e67s1.1.c8.50616972s2.1.c0.c 0}
+
+test pe-affine-coroutine {a coroutine yields and returns payload-bearing values, and the resumer receives each unchanged, on every backend} -body {
+    pePlain "import std::coroutine\nenum Ev:\n    Tick {n: int},\n    Done,\nfn ticks(k: int) -> Ev:\n    loop i from 0 to k:\n        yield Ev::Tick {n: i}\n    Ev::Done\ncoroutine {step, first} = ticks(2)\nsecond = step()\nthird = step()\n\[first, second, third, third == Ev::Done\]\n"
+} -result {same: [Ev::Tick {n: 0}, Ev::Tick {n: 1}, Ev::Done, true]}
+
+# ---------------------------------------------------------------------------
+# G. Backend parity: GC stress and standalone executables
+
+set peWorkload [string cat $expr {enum Wrap:
+    One {e: Expression},
+    Many {es: List[Expression]},
+
+fn build(n: int) -> List[Wrap]:
+    loop i from 0 to n:
+        e = if i == 0:
+            Expression::Parameter
+        else:
+            Expression::Add {left: i, right: i * 2}
+        Wrap::Many {es: [e, Expression::Constant {value: i}]}
+
+fn count(ws: List[Wrap], target: Wrap) -> int:
+    fold w in ws with intermediate acc 0:
+        if w == target:
+            acc + 1
+        else:
+            acc
+
+xs = build(40)
+[count(xs, Wrap::Many {es: [Expression::Add {left: 3, right: 6}, Expression::Constant {value: 3}]}), xs == build(40), hash(xs) == hash(build(40)), Wrap::One {e: Expression::Call {function: 7}}]
+}]
+
+test pe-gc-stress {payload-bearing values and their payloads survive a collection at every allocation natively, and agree with every backend} -body {
+    set hir [surface::compile $peWorkload pe.bot -warnings off]
+    set plain [outcomeUnderHir cranelift $hir]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [outcomeUnderHir cranelift $hir]
+        set generic [outcomeUnderHir cranelift-generic $hir]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    list [expr {$plain eq $stressed}] [expr {$plain eq $generic}] [pePlain $peWorkload]
+} -result {1 1 {same: [1, true, true, Wrap::One {e: Expression::Call {function: 7}}]}}
+
+test pe-executable-parity {a standalone executable carries the enum table and makes, compares, hashes and prints payload-bearing values as every backend does, also under GC stress (its value read through the driver protocol)} -constraints executableAot -body {
+    set dir [makeDirectory pe-exe-[pid]]
+    try {
+        set path [file join $dir program.bot]
+        peWrite $path $peWorkload
+        set hir [surface::readProgramFile $path -warnings off]
+        set expected [lindex [outcomeUnderHir interp $hir] 1]
+        native::executable $hir [file rootname $path]
+        set plain [standaloneValue [file rootname $path]]
+        set stressed [standaloneValue [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
+        list [expr {$plain eq $stressed}] [expr {$plain eq $expected}] $plain
+    } finally {
+        removeDirectory [file tail $dir]
+    }
+} -result {1 1 {[1, true, true, Wrap::One {e: Expression::Call {function: 7}}]}}
+
+# ---------------------------------------------------------------------------
+# H. HIR text and interchange
+
+test pe-hir-roundtrip {HIR text prints each payload-bearing case's fields with their resolved types after every declaration they may name, and each construction as enum#case of a payload marked with its case; format, read and format again is identical, and the text read back runs on every backend} -body {
+    set src "struct Holder:\n    e: Expression\n${expr}enum Tree:\n    Leaf {value: int},\n    Node {kids: List\[Tree\], h: Holder},\nh = Holder {e: Expression::Call {function: 3}}\n\[h, Tree::Node {kids: \[Tree::Leaf {value: 1}\], h: h}\]\n"
+    set hir [surface::compile $src pe.bot -warnings off]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    list [expr {[hir::format $back] eq $text}] \
+        [lsearch -all -inline -glob [split $text \n] enumcase*] \
+        [regexp {struct casepayload\(Expression#Call\) \(function\) : struct\{function: int\}} $text] \
+        [lsort -unique [lmap be $::peBackends {lrange [outcomeUnderHir $be $back] 0 1}]]
+} -result {1 {{enumcase Expression Constant payload value: int} {enumcase Expression Add payload left: int, right: int} {enumcase Expression Conditional payload condition: int, yes: int, no: int} {enumcase Expression Call payload function: int} {enumcase Tree Leaf payload value: int} {enumcase Tree Node payload kids: List[Tree], h: Holder}} 1 {{value {[Holder {e: Expression::Call {function: 3}}, Tree::Node {h: Holder {e: Expression::Call {function: 3}}, kids: [Tree::Leaf {value: 1}]}]}}}}
+
+test pe-interchange {HIR interchange keeps the payload schemas and the constructions: a HIR written and read back, with no build, has the same payloads, the same text and the same outcome on every backend} -body {
+    set hir [surface::compile $peWorkload pe.bot -warnings off]
+    set read [hir::interchange::decode [hir::interchange::encode $hir]]
+    list [expr {[hir::format $read] eq [hir::format $hir]}] \
+        [hir::enums::fields Expression Conditional] \
+        [lsort -unique [lmap be $::peBackends {lrange [outcomeUnderHir $be $read] 0 1}]]
+} -result {1 {condition int yes int no int} {{value {[1, true, true, Wrap::One {e: Expression::Call {function: 7}}]}}}}
+
+# ---------------------------------------------------------------------------
+# I. Isolation, representation and optimization
+
+test pe-native-representation {natively a payload-bearing case's value is one EnumCaseObj made by `op enumcase` -- its payload a struct -- while a payload-free case of the same enum stays an immediate word, and equality of a payload enum goes through the structural comparison, never the inline word compare} -body {
+    set nir [native::nir [surface::compile "${expr}fn same(e: Expression) -> Expression:\n    e\n\[same(Expression::Constant {value: 1}) == Expression::Parameter, Expression::Parameter\]\n" pe.bot -warnings off]]
+    list [regexp {op enumcase %[0-9]+ %[0-9]+ %[0-9]+} $nir] [regexp {= enum 0 1} $nir] \
+        [regexp {op enumeq} $nir] [regexp {op veq(total)? } $nir]
+} -result {1 1 0 1}
+
+test pe-native-allocation {a payload-free case never allocates, also in an enum with payload-bearing cases and beside one; a payload-bearing case's value is one EnumCaseObj (and its payload's struct): the allocation report counts exactly those} -body {
+    set free [native::allocationReport [surface::compile "${expr}fn pick(n: int) -> Expression:\n    if n == 0:\n        return Expression::Parameter\n    Expression::Parameter\nfn run(n: int, acc: int) -> int:\n    if n == 0:\n        return acc\n    if pick(n) == Expression::Parameter:\n        return run(n - 1, acc + 1)\n    run(n - 1, acc)\nrun(100, 0)\n" pe.bot -warnings off] summary]
+    set made [native::allocationReport [surface::compile "${expr}fn make(n: int) -> Expression:\n    Expression::Constant {value: n}\nfn run(n: int, acc: int) -> int:\n    if n == 0:\n        return acc\n    if make(n) == make(n):\n        return run(n - 1, acc + 1)\n    run(n - 1, acc)\nrun(100, 0)\n" pe.bot -warnings off] summary]
+    list [dict get $free total allocations] [dict exists $free byKind EnumCase] \
+        [dict get $made byKind EnumCase allocations] [dict get $made byKind Struct allocations]
+} -result {0 0 200 200}
+
+test pe-free-programs-unchanged {a program without payload-bearing enums lowers exactly as before: no enumcase operation, no EnumCase allocation kind, and its payload-free enums keep the inline word compare} -body {
+    set nir [native::nir [surface::compile "enum Light:\n    Red,\n    Green,\nfn same(x: Light) -> Light:\n    x\n\[same(Light::Red) == Light::Red\]\n" pe.bot -warnings off]]
+    list [regexp {enumcase} $nir] [regexp {op enumeq} $nir]
+} -result {0 1}
+
+test pe-specialization-keys {a semantic instance of a generic function keeps a payload enum's identity in its codegen key (its values may be objects), while a payload-free enum keeps reducing to the broad kind} -body {
+    set hir [surface::compile "${expr}enum Light:\n    Red,\nfn same(x):\n    x\n\[same(Expression::Parameter), same(Light::Red)\]\n" pe.bot -warnings off]
+    list [hir::specialize::ElementKeyType {enum Expression}] [hir::specialize::ElementKeyType {enum Light}]
+} -result {{enum Expression} enum}
+
+test pe-service-tokens {the compiler service's highlight tokens (service::tokens, which the language server serves) mark a payload-bearing case's declaration and its payload fields (property declarations, their types), and a construction's case as an enum member after its enum, its fields as properties} -body {
+    source [file join $::projectRoot service service.tcl]
+    set dir [file tempdir pe-tokens]
+    set path [file join $dir t.bot]
+    peWrite $path "enum Expr:\n    Lit {value: int},\n    Neg,\ne = Expr::Lit {value: 3}\nf = Expr::Neg\n"
+    set ws [service::workspace -warnings off -cache ""]
+    try {
+        set rev [service::analyze $ws $path]
+        set source [service::sourceText $rev $path]
+        lmap token [service::tokens $rev $path] {
+            lassign $token start end type modifiers
+            if {$type eq "operator"} continue
+            list [string range $source $start [expr {$end - 1}]] $type {*}$modifiers
+        }
+    } finally {
+        service::closeWorkspace $ws
+        file delete -force $dir
+    }
+} -cleanup {unset -nocomplain dir path ws rev source} -result {{enum keyword} {Expr enum declaration} {Lit enumMember declaration} {value property declaration} {int type} {Neg enumMember declaration} {e variable declaration} {Expr enum} {Lit enumMember} {value property} {3 number} {f variable declaration} {Expr enum} {Neg enumMember}}
+
+test pe-c-and-boundaries {a payload-bearing enum is refused, with its reason, where a representation or an encoding is committed to: the C backend (C UNSUPPORTED), a C export's signature, the value transfer (not Sendable) and a context struct's native layout} -body {
+    source [file join $::projectRoot ccompile ccompile.tcl]
+    set c [catch {ccompile::program [surface::compile "enum S:\n    P,\n    C {r: int},\nfn f(s: S) -> int:\n    1\nf(S::C {r: 2})\n" pe.bot -warnings off] -prefix pe} message]
+    list [expr {$c && [string match "*an enum whose cases carry payloads (S)*" $message]}] \
+        [peCode "enum S:\n    P,\n    C {r: int},\nexported c fn f(x: int) -> S:\n    S::P\n"] \
+        [peCode "import std::transfer\nenum S:\n    P,\n    C {r: int},\nstd::transfer::encode(S::C {r: 1})\n"]
+} -result {1 EXPORT-SIGNATURE NOT-SENDABLE}
+
+# ---------------------------------------------------------------------------
+# The compiler-shaped probe (the brief's section 11): the mid-end port's
+# node, as a payload-bearing enum, constructed, stored, passed, returned,
+# compared and hashed. Its interval evaluator needs case selection and
+# payload binding, PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1's.
+
+test pe-kernel-probe {the mid-end kernel's node as a payload-bearing enum: a program's nodes built into a MutableVector and a List, passed and returned through helpers, compared and hashed, identically on every backend} -body {
+    pePlain "import std::mutable_vector\nenum Node:\n    Const {value: int},\n    Param,\n    Add {left: int, right: int},\n    If {condition: int, yes: int, no: int},\n    Call {function: int},\nfn node(i: int) -> Node:\n    k = mod(i, 5)\n    if k == 0:\n        return Node::Const {value: i}\n    if k == 1:\n        return Node::Param\n    if k == 2:\n        return Node::Add {left: i - 1, right: i - 2}\n    if k == 3:\n        return Node::If {condition: i - 1, yes: i - 2, no: i - 3}\n    Node::Call {function: i}\nfn program(n: int) -> List\[Node\]:\n    loop i from 0 to n:\n        node(i)\nfn store(xs: List\[Node\]) -> MutableVector\[Node\]:\n    v = std::mutable_vector::from_list(\[Node::Param\])\n    loop x in xs:\n        v.push(x)\n    v\nfn count(xs: List\[Node\], target: Node) -> int:\n    fold x in xs with intermediate acc 0:\n        if x == target:\n            acc + 1\n        else:\n            acc\np = program(25)\nv = store(p)\n\[count(p, Node::Param), count(p, Node::Add {left: 11, right: 10}), p == program(25), hash(p) == hash(program(25)), v.length(), p\]\n"
+} -result {same: [5, 1, true, true, 26, [Node::Const {value: 0}, Node::Param, Node::Add {left: 1, right: 0}, Node::If {condition: 2, no: 0, yes: 1}, Node::Call {function: 4}, Node::Const {value: 5}, Node::Param, Node::Add {left: 6, right: 5}, Node::If {condition: 7, no: 5, yes: 6}, Node::Call {function: 9}, Node::Const {value: 10}, Node::Param, Node::Add {left: 11, right: 10}, Node::If {condition: 12, no: 10, yes: 11}, Node::Call {function: 14}, Node::Const {value: 15}, Node::Param, Node::Add {left: 16, right: 15}, Node::If {condition: 17, no: 15, yes: 16}, Node::Call {function: 19}, Node::Const {value: 20}, Node::Param, Node::Add {left: 21, right: 20}, Node::If {condition: 22, no: 20, yes: 21}, Node::Call {function: 24}]]}
+
+cleanupTests

@@ -174,7 +174,7 @@ jobs:
         if: steps.twin.outputs.deferred != 'true'
         run: tests/platform/toolchain-smoke.sh
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust)
         if: steps.twin.outputs.deferred != 'true'
         uses: ./.github/actions/setup-macos
 
@@ -261,7 +261,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust)
         uses: ./.github/actions/setup-macos
 
       - name: Build native (Cranelift) backend
@@ -322,7 +322,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust)
         uses: ./.github/actions/setup-macos
 
       - name: Build native (Cranelift) backend
@@ -538,7 +538,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust)
         uses: ./.github/actions/setup-macos
 
       - name: Build native (Cranelift) backend
@@ -595,7 +595,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust)
         uses: ./.github/actions/setup-macos
 
       - name: Build native (Cranelift) backend
@@ -762,7 +762,7 @@ jobs:
         id: twin
         uses: ./.github/actions/twin
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust)
         if: steps.twin.outputs.deferred != 'true'
         uses: ./.github/actions/setup-macos
 
@@ -830,7 +830,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust)
         uses: ./.github/actions/setup-macos
 
       - name: Build native (Cranelift) backend
@@ -961,7 +961,7 @@ jobs:
       - uses: actions/checkout@v5
         if: steps.decide.outputs.work == 'true'
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust)
         if: steps.decide.outputs.work == 'true'
         uses: ./.github/actions/setup-macos
 

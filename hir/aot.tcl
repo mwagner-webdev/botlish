@@ -648,7 +648,12 @@ proc hir::aot::VisitCall {hir stateVar region e node tails statics} {
         set argKinds [lmap arg $args {hir::types::kindOf [hir::typeOf $hir $arg]}]
         if {"structural-equality" in $runtime && [llength $argKinds] == 2
                 && [lindex $argKinds 0] eq [lindex $argKinds 1]
-                && ([lindex $argKinds 0] in {int str bool unit enum} || [core::type::isFloat [lindex $argKinds 0]])} {
+                && ([lindex $argKinds 0] in {int str bool unit} || [core::type::isFloat [lindex $argKinds 0]]
+                    || ([lindex $argKinds 0] eq "enum"
+                        && [hir::enums::IsPayloadFree [hir::typeOf $hir [lindex $args 0]]]
+                        && [hir::enums::IsPayloadFree [hir::typeOf $hir [lindex $args 1]]]))} {
+            # (A payload-bearing case's value is compared by its payload:
+            # PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md.)
             # Both kinds known and scalar: no structural walk is needed.
             set runtime [lsearch -all -inline -not -exact $runtime structural-equality]
             if {[lindex $argKinds 0] eq "int"} {

@@ -159,6 +159,13 @@ fn show_into(prog: &ProgramInfo, v: Value, out: &mut String) {
             out.push_str(&name);
             out.push_str("::");
             out.push_str(&case);
+            if let Some(payload) = enum_payload(v) {
+                // A payload-bearing case's value: its payload's fields
+                // (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md), as
+                // core::value::show writes them.
+                out.push(' ');
+                show_into(prog, payload, out);
+            }
         }
         Kind::List => {
             out.push('[');
@@ -298,9 +305,10 @@ pub fn hex_of(bytes: &[u8]) -> String {
     out
 }
 
-/// The declaration identity and the case name of the enum case word V.
+/// The declaration identity and the case name of the enum case value V (an
+/// immediate word or a payload-bearing case's object).
 pub fn enum_names(prog: &ProgramInfo, v: Value) -> (String, String) {
-    let (e, c) = enum_parts(v);
+    let (e, c) = enum_case_parts(v);
     let info = &prog.enums[e as usize];
     (info.name.clone(), info.cases[c as usize].clone())
 }
@@ -374,7 +382,11 @@ pub fn tcl_value(prog: &ProgramInfo, v: Value) -> Result<String, RtError> {
         // ({enum ID CASE}, core/value.tcl): the names, never the numbers.
         Kind::Enum => {
             let (name, case) = enum_names(prog, v);
-            tcl_list(&["enum".to_string(), name, case])
+            match enum_payload(v) {
+                // {enum ID CASE PAYLOAD} (core::value::enumCaseValue).
+                Some(payload) => tcl_list(&["enum".to_string(), name, case, tcl_value(prog, payload)?]),
+                None => tcl_list(&["enum".to_string(), name, case]),
+            }
         }
         Kind::List => {
             let items = list_of(v).items().iter().map(|item| tcl_value(prog, *item)).collect::<Result<Vec<_>, _>>()?;

@@ -1066,6 +1066,14 @@ proc core::native::ValidShape {shape count} {
         return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
             && ($count eq "" || [lindex $shape 1] < $count)}]
     }
+    if {[lindex $shape 0] eq {enum-case}} {
+        # {enum-case I}: enum#case (core/enums.tcl): the result is the enum
+        # whose declaration identity is the String constant argument I
+        # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md), resolved by
+        # hir::types::ShapeResult against the program's enum registry.
+        return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
+            && ($count eq "" || [lindex $shape 1] + 1 < $count)}]
+    }
     if {$shape eq {never}} {
         # {never}: the native never completes normally
         # (context#unreachable, core/contexts.tcl).

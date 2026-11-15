@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- audit/dotenv-interoperability: the DotNetEnv reference adapter. Restored in
+       locked mode (packages.lock.json) and built by tools/setup.py into the
+       census cache; nothing is built into the repository. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <AssemblyName>DotNetEnv.Adapter</AssemblyName>
+    <RootNamespace>DotenvCensus</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="DotNetEnv" Version="[3.2.0]" />
+    <Compile Include="../Common/Census.cs" />
+  </ItemGroup>
+</Project>

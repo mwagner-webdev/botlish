@@ -292,6 +292,8 @@ namespace eval hir::static {
         EMIT-REJECTED                            EmitRejected
         EMIT-UNKNOWN-VALUE                       EmitUnknownValue
         EMIT-UNSUPPORTED                         EmitUnsupported
+        ENUM-PAYLOAD-REQUIRED                    EnumPayloadRequired
+        ENUM-PAYLOAD-UNEXPECTED                  EnumPayloadUnexpected
         EXPORT-ENVIRONMENT                       ExportEnvironment
         EXPORT-NAME                              ExportName
         EXPORT-PLACEMENT                         ExportPlacement

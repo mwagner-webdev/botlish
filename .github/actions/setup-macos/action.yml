@@ -4,8 +4,8 @@ description: >
   workflow (MACOS-AARCH64-PORT-AUDIT.md, section 16): runs
   tests/platform/setup-macos.sh -- this repository's baseline Tcl 9.0.1,
   built once from its pinned source release and cached here, and the
-  stable Rust toolchain -- and puts both on PATH for the job's later
-  steps.
+  pinned Rust toolchain (rust-toolchain.toml), made the default -- and
+  puts both on PATH for the job's later steps.
 
 runs:
   using: composite
@@ -19,6 +19,6 @@ runs:
         path: ~/.cache/botlish/tcl-9.0.1
         key: tcl-9.0.1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tests/platform/setup-macos.sh') }}
 
-    - name: Install Tcl 9.0.1 and stable Rust
+    - name: Install Tcl 9.0.1 and the pinned Rust
       shell: bash
       run: tests/platform/setup-macos.sh "$GITHUB_PATH"
