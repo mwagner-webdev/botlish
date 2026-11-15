@@ -538,9 +538,9 @@ no stack per coroutine, no allocation, no scheduler, no runtime service.
     C UNSUPPORTED. A yielding self tail call is a loop over one frame.
   * FILE.runtime.json lists every coroutine type (its "coroutine_frames"),
     with what it holds and which fields survive a suspension; their sizes
-    are the target compiler's (examples/c-freestanding/frame-sizes.sh reads
-    them from a probe object). A coroutine program needs no service a
-    coroutine-free one does not.
+    are the target compiler's (examples/c-freestanding/frame-sizes.sh asks
+    it with a probe). A coroutine program needs no service a coroutine-free
+    one does not.
   * The embedding still calls FILE_run once per run: every coroutine is
     constructed, resumed and abandoned within it. Keeping coroutines alive
     between two calls of an embedding needs an application-instance API the

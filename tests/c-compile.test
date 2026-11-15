@@ -2096,6 +2096,10 @@ test cc-co-freestanding-objects "every undefined symbol of a coroutine program's
                 foreach line [split [lindex [ccExec [list nm -u $object]] 1] \n] {
                     set symbol [lindex $line end]
                     if {$symbol eq ""} continue
+                    if {$::tcl_platform(os) eq "Darwin"} {
+                        # (Mach-O spells a C symbol with a leading underscore.)
+                        regsub {^_} $symbol "" symbol
+                    }
                     if {[string match kiosk_* $p]} {
                         lappend kiosk $symbol
                     } elseif {$symbol ni $allowed && $symbol ni {memcpy memmove memset memcmp}} {
@@ -2197,9 +2201,10 @@ test cc-co-manifest-frames "the manifest lists exactly the coroutine types the h
 } -result {1 12 0}
 
 # The storage types' sizes as the host's C compiler lays them out (the
-# manifest's types; frame-sizes.sh): a storage type holds its handle target
-# and its thunk's frame, which holds its root's.
-test cc-co-frame-sizes "frame-sizes.sh measures every coroutine type; each storage type is at least its handle target and its frame" -constraints {hostCC nm unixShell} -body {
+# manifest's types; frame-sizes.sh, which runs a hosted probe for the host):
+# a storage type holds its handle target and its thunk's frame, which holds
+# its root's.
+test cc-co-frame-sizes "frame-sizes.sh measures every coroutine type; each storage type is at least its handle target and its frame" -constraints {hostCC unixShell} -body {
     lassign [ccKiosks] bench
     set lines [exec sh [file join $::projectRoot examples c-freestanding frame-sizes.sh] [dict get $bench dir] kiosk_bench]
     set size [dict create]

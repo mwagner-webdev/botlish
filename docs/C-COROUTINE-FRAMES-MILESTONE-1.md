@@ -80,7 +80,7 @@ implemented). Nothing here was run on embedded hardware.
 Outside the compiler: the parking-meter example `examples/c-freestanding/
 kiosk/` (three coroutines per session, two configurations), the tool
 `examples/c-freestanding/frame-sizes.sh` (each coroutine type's size and
-alignment on a target, read from a probe object), demonstration 5 of
+alignment on a target, asked of its compiler with a probe), demonstration 5 of
 `demo.sh`, and 30 new tests in `tests/c-compile.test` (91 in all).
 
 | # | acceptance criterion (brief, section 20) | status | evidence |
@@ -790,9 +790,11 @@ hold, besides resume points and parameters, `keypad`'s `z1`, `zone`, `m1`,
 manifest's `suspension_values`).
 
 Measurements [run] (`examples/c-freestanding/frame-sizes.sh DIR kiosk_bench
-TARGET...`: `sizeof`/`_Alignof` of each manifest type as clang 18.1.3 (gcc
-13.3.0 for the host) lays it out, read from a probe object; nothing runs),
-bytes/alignment:
+TARGET...`: `sizeof`/`_Alignof` of each manifest type as clang 18.1.3 lays
+it out for a cross target, read from a probe object's symbol sizes, and as
+gcc 13.3.0 lays it out for the host, printed by a probe it builds and runs --
+Apple's nm reports every Mach-O symbol's size as zero, which the branch's
+first macOS run showed), bytes/alignment:
 
 | type | x86-64 host | aarch64 | riscv64 | thumbv7m | thumbv6m | riscv32 | i386 | msp430 | avr |
 |---|---|---|---|---|---|---|---|---|---|
@@ -1033,25 +1035,49 @@ backend built from this checkout (rustc 1.97.0):
 
 ### CI on the branch
 
-The branch's commit b41cfbd5 was pushed to `claude/keen-johnson-7anjf5` and
-the four test workflows were dispatched on it, as AGENTS.md asks of a
-finished milestone (a branch push runs only each host's canary; the
-dispatched runs superseded the push's canary runs, which GitHub cancelled,
-and include the canaries themselves):
+[run] The branch's commit b41cfbd5 was pushed to `claude/keen-johnson-7anjf5`
+and the four test workflows were dispatched on it, as AGENTS.md asks of a
+finished milestone (the dispatched runs superseded the push's own canary
+runs, which GitHub cancelled, and include the canaries). Every job
+finished; none failed for infrastructure:
 
-| workflow | run | state when this report was written |
+| workflow | run | result at b41cfbd5 |
 |---|---|---|
-| tests (dispatched: canary, interp, compile, cranelift and cranelift-generic coverage, golden 1-4, stub- and system-linked executables, Rust unit tests, GC stress) | 43628474879 | **pending** (queued) |
-| tests (linux arm64), dispatched | 43628477381 | **pending** (queued) |
-| tests (macos arm64), dispatched | 43628480407 | **pending** (queued) |
-| tests (windows x86-64), dispatched | 43628483103 | **pending** (queued) |
-| icy-tower (windows x86-64), icy-tower (macos arm64), on the push | 43628461129, 43628461060 | **pending** (queued) |
+| tests (canary, interp, compile, cranelift and cranelift-generic coverage, golden 1-4, stub- and system-linked executables, Rust unit tests, method-call oracle) | 43628474879 | the canary, golden 1-4, the Rust unit tests and the oracle passed; interp, compile, both coverage jobs and both executable jobs failed on **main's two failures only** (`argv-focused-valid-fuzz`, `native-tcl-unicode-lowercase-all-scalars`); `tests/c-compile.test` passed on interp and compile |
+| tests (linux arm64) | 43628477381 | the same: only main's two failures |
+| tests (windows x86-64) | 43628483103 | canary, root plans, acceptance 2-4 passed; smoke, acceptance 1 and the system linker failed on main's two failures only |
+| tests (macos arm64) | 43628480407 | the smoke job's canary failed on main's two failures **and on two tests of this branch** (below); its other steps passed |
 
-Pending, not passed. Against main's latest runs, two failures are expected
-on every host whatever this branch does -- `argv-focused-valid-fuzz` and
-`native-tcl-unicode-lowercase-all-scalars` (above); any other failure would
-be this branch's to fix. The branch was not merged into main: this
-session's instructions keep its work on the branch.
+The two failures that were this branch's, both macOS host facts and both
+fixed before the merge:
+
+* `cc-co-freestanding-objects`: Mach-O's `nm -u` prints a C symbol with a
+  leading underscore (`_botlish_rt_v1_int_add`), so the services the
+  manifest lists looked unlisted. The test now drops one leading underscore
+  on a Darwin host. (The kiosk's list was empty there too.)
+* `cc-co-frame-sizes`: Apple's `nm -S` reports every Mach-O symbol's size as
+  zero, and `frame-sizes.sh` failed reading it. For the host the script now
+  builds and runs a probe that prints each type's `sizeof` and `_Alignof`;
+  cross targets (ELF) keep the object-size probe, read by llvm-nm. Both
+  forms give the measurements of section 15 on Linux, under dash and bash.
+
+### The merge
+
+Main moved while the branch's runs ran: eight commits fixing main's two
+failures (MAIN-CI-FAILURES-2026-11-13.md: rustc 1.100.0 pinned in
+`rust-toolchain.toml`, std::str::lowercase from a table of the Tcl
+reference) and a regenerated scalar audit corpus. Main's latest test runs
+were green: the release gate released aa19036, which it does only once
+every test of a commit has passed. The branch merged main without a
+conflict; on the merged tree, with the native backend rebuilt by rustc
+1.100.0 [run]: `tests/c-compile.test` 91 of 91, `tests/coroutines.test` 81
+of 81, `tests/native-tcl-unicode.test` 127 of 127, `tests/main-cli.test` 72
+of 72, `tests/numeric-looking-names.test` 5 of 5, `tests/golden.test` 9 of
+9, `tests/compilerpedia.test` 43 of 43, `tools/compilerpedia.tcl check` (1300
+topics, 778 examples) and `tools/mutant-catalogs.tcl` (108 catalogs, 3718
+mutants) 0 problems, the golden manifest regenerated unchanged (merge.tcl's
+nine pre-existing problems, as on main). The two macOS fixes are checked on
+Linux here; their macOS evidence is main's next macos-arm64 run.
 
 ## 22. Known limitations
 
