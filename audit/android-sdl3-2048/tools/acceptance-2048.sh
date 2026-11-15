@@ -82,9 +82,11 @@ tid=$(grep "2048: ready" "$OUT/start.log" | head -1 | awk '{print $4}')
 tname=$(shellp cat "/proc/$pid/task/$tid/comm" 2>/dev/null)
 [[ $tname == SDLThread ]] && pass "the program runs on SDLThread (pid $pid, tid $tid)" || fail "the program's thread $tid is \"$tname\", not SDLThread"
 if (( rooted )); then
-    shellp cat "/proc/$pid/maps" | grep -o '[^ /]*\.so$' | sort -u >"$OUT/maps.txt"
-    note "  mapped: $(grep -E 'libgame|libSDL3|libmain|libndk_translation|libnb' "$OUT/maps.txt" | tr '\n' ' ')"
-    grep -qx libgame.so "$OUT/maps.txt" && pass "libgame.so (the Botlish application library) is mapped in the application process" || fail "libgame.so is not mapped"
+    shellp cat "/proc/$pid/maps" >"$OUT/maps.txt"
+    note "  mapped: $(grep -o '[^ /]*\.so$' "$OUT/maps.txt" | grep -E 'libgame|libSDL3|libmain|libndk_translation|libnb' | sort -u | tr '\n' ' ')"
+    for lib in libgame.so libSDL3.so libmain.so; do
+        how=$(mapsLibrary "$pid" "$apk" "$lib") && pass "$lib is mapped in the application process, $how" || fail "$lib is not mapped"
+    done
 fi
 sleep 1
 screenshot start

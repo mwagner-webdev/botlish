@@ -48,9 +48,11 @@ tid=$(grep "counter: ready" "$OUT/start.log" | head -1 | awk '{print $4}')
 tname=$(shellp cat "/proc/$pid/task/$tid/comm" 2>/dev/null)
 [[ $tname == SDLThread ]] && pass "the program runs on SDLThread (tid $tid)" || fail "the program's thread $tid is \"$tname\", not SDLThread"
 if (( rooted )); then
-    shellp cat "/proc/$pid/maps" | grep -o '[^ /]*\.so$' | grep -E 'libcounter|libSDL3|libmain|libndk_translation|libnb' | sort -u >"$OUT/maps.txt"
-    note "  mapped: $(tr '\n' ' ' <"$OUT/maps.txt")"
-    grep -q libcounter "$OUT/maps.txt" && pass "libcounter.so is mapped in the application process" || fail "libcounter.so is not mapped"
+    shellp cat "/proc/$pid/maps" >"$OUT/maps.txt"
+    note "  mapped: $(grep -o '[^ /]*\.so$' "$OUT/maps.txt" | grep -E 'libcounter|libSDL3|libmain|libndk_translation|libnb' | sort -u | tr '\n' ' ')"
+    for lib in libcounter.so libSDL3.so libmain.so; do
+        how=$(mapsLibrary "$pid" "$apk" "$lib") && pass "$lib is mapped in the application process, $how" || fail "$lib is not mapped"
+    done
 else
     note "  maps: not readable without adb root (the entry ran: counter_main's lines above)"
 fi

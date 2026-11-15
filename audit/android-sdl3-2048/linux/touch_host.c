@@ -40,6 +40,10 @@
  *   quit               SDL_EVENT_QUIT
  *   terminate          SDL_EVENT_QUIT then SDL_EVENT_TERMINATING (Android's
  *                      Activity destruction)
+ *   mark               note SDLThread's CPU time and the time now
+ *   cpu                report SDLThread's CPU time and the wall time since
+ *                      the last mark ("host: SDLThread cpu C ms in W ms"):
+ *                      an idle application's thread waits, it never spins
  *
  * It reports, on standard error, the thread SDL_main ran on, the
  * application's status and, for a failure, its error. */
@@ -61,6 +65,7 @@
 static int app_argc;
 static char **app_argv;
 static volatile int app_status = -1;
+static pthread_t sdl_tid;
 
 static int SDLCALL app_sdl_main(int argc, char **argv) {
     char name[16] = "";
@@ -102,6 +107,14 @@ static Uint64 now_ns(void) {
     return (Uint64)t.tv_sec * 1000000000ull + (Uint64)t.tv_nsec;
 }
 
+/* SDLThread's CPU time, in nanoseconds (0 when it cannot be read). */
+static Uint64 sdl_cpu_ns(void) {
+    clockid_t clock;
+    struct timespec t;
+    if (pthread_getcpuclockid(sdl_tid, &clock) != 0 || clock_gettime(clock, &t) != 0) return 0;
+    return (Uint64)t.tv_sec * 1000000000ull + (Uint64)t.tv_nsec;
+}
+
 static void push_type(Uint32 type) {
     SDL_Event e;
     memset(&e, 0, sizeof e);
@@ -140,6 +153,7 @@ static void run_script(const char *path) {
         return;
     }
     char line[256];
+    Uint64 mark_cpu = 0, mark_wall = now_ns();
     while (fgets(line, sizeof line, f)) {
         char word[32] = "";
         long a = 0;
@@ -185,6 +199,12 @@ static void run_script(const char *path) {
         } else if (!strcmp(word, "terminate")) {
             push_type(SDL_EVENT_QUIT);
             push_type(SDL_EVENT_TERMINATING);
+        } else if (!strcmp(word, "mark")) {
+            mark_cpu = sdl_cpu_ns();
+            mark_wall = now_ns();
+        } else if (!strcmp(word, "cpu")) {
+            fprintf(stderr, "host: SDLThread cpu %llu ms in %llu ms\n", (unsigned long long)((sdl_cpu_ns() - mark_cpu) / 1000000u),
+                    (unsigned long long)((now_ns() - mark_wall) / 1000000u));
         } else {
             fprintf(stderr, "host: unknown script line: %s", line);
         }
@@ -202,13 +222,12 @@ int main(int argc, char **argv) {
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, 1024 * 1024);
-    pthread_t t;
-    if (pthread_create(&t, &attr, sdl_thread, NULL) != 0) {
+    if (pthread_create(&sdl_tid, &attr, sdl_thread, NULL) != 0) {
         perror("pthread_create");
         return 1;
     }
     const char *script = getenv("SCRIPT");
     if (script && *script) run_script(script);
-    pthread_join(t, NULL);
+    pthread_join(sdl_tid, NULL);
     return app_status == 0 ? 0 : 1;
 }

@@ -381,7 +381,13 @@ nomethod fn open(title: str, width: std::ffi::c::Int, height: std::ffi::c::Int, 
         reason = line.clone().error_text()
         free_scratch(rect, line, event, wide, high, area, first, second, data, count)
         fail ScreenFailed {call: "SDL_Init", reason: reason}
-    window = std::abi::bytes::from_list(std::str::encode_utf8(title).append(nul())).SDL_CreateWindow(width, height, window_flags(fullscreen))
+    # No poll sentinel: `wait` blocks in SDL until an event arrives or its
+    # timeout passes. On Android, SDL 3.4.18's wait pushes a fresh sentinel
+    # on every round, and each push posts a wakeup its own lifecycle wait
+    # then takes at once: the wait spins until its timeout (a core in the
+    # foreground). Nothing here reads poll cycles.
+    sdl3::events::SDL_EVENT_POLL_SENTINEL.SDL_SetEventEnabled(false)
+    window =std::abi::bytes::from_list(std::str::encode_utf8(title).append(nul())).SDL_CreateWindow(width, height, window_flags(fullscreen))
     if window.null?():
         reason = line.clone().error_text()
         free_scratch(rect, line, event, wide, high, area, first, second, data, count)

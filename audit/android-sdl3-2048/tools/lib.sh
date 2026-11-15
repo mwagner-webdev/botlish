@@ -83,3 +83,34 @@ threadDelta() { # BEFORE AFTER TID
 screenshot() { # NAME
     adb exec-out screencap -p >"$OUT/$1.png" 2>/dev/null || true
 }
+
+# Whether the process PID maps the library NAME (lib/arm64-v8a/NAME) of the
+# APK: a mapping of the file NAME, or -- a library stored uncompressed and
+# loaded from the APK itself, as the generated project packages it -- a
+# mapping of base.apk at exactly that entry's data offset (computed here
+# from the APK's local header; the 16 KiB-aligned offset zipalign gave it).
+# Prints how it is mapped; status 1 when it is not.
+mapsLibrary() { # PID APK NAME
+    local maps offset
+    maps=$(shellp cat "/proc/$1/maps")
+    if echo "$maps" | grep -q "/$3\$"; then
+        echo "as the file $3"
+        return 0
+    fi
+    offset=$(python3 -I - "$2" "lib/arm64-v8a/$3" <<'PY'
+import struct, sys, zipfile
+z = zipfile.ZipFile(sys.argv[1])
+i = z.getinfo(sys.argv[2])
+with open(sys.argv[1], "rb") as f:
+    f.seek(i.header_offset)
+    h = f.read(30)
+    n, m = struct.unpack("<HH", h[26:30])
+print("%08x" % (i.header_offset + 30 + n + m) if i.compress_type == 0 else "")
+PY
+)
+    if [[ -n $offset ]] && echo "$maps" | awk -v o="$offset" '$NF ~ /base\.apk$/ && $3 == o { found = 1 } END { exit !found }'; then
+        echo "from base.apk at offset 0x$offset (stored uncompressed, loaded in place)"
+        return 0
+    fi
+    return 1
+}

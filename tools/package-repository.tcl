@@ -663,7 +663,10 @@ proc author::process_linux {dir targets} {
 # libstdc++ (libssl is C++) stated as the system's.
 proc author::boringssl {dir targets} {
     variable root
-    source [file join $root tools http-package.tcl]
+    # At the global level: sourced in this procedure, its namespaces
+    # (httppkg, and rust-unit.tcl's rustunit) would be ::author's, where
+    # httppkg's own calls of rustunit:: do not find them.
+    uplevel #0 [list source [file join $root tools http-package.tcl]]
     set pin [httppkg::Pin]
     set commit [dict get $pin commit]
     set src [file join [httppkg::CacheDir] src boringssl-$commit]
@@ -765,7 +768,10 @@ proc author::httpCrates {dir triple} {
 # licenses; the project's license for the unit's own code.
 proc author::http {dir targets} {
     variable root
-    source [file join $root tools http-package.tcl]
+    # At the global level: sourced in this procedure, its namespaces
+    # (httppkg, and rust-unit.tcl's rustunit) would be ::author's, where
+    # httppkg's own calls of rustunit:: do not find them.
+    uplevel #0 [list source [file join $root tools http-package.tcl]]
     botlish package stage $dir -files [file join $root LICENSE] -as licenses/http
     set rustc [version rustc --version]
     set cargo [version cargo --version]

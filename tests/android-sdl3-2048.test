@@ -49,6 +49,7 @@ proc asSdlSources {} {
 }
 testConstraint sdlHost [expr {[testConstraint linuxX86] && [testConstraint nativeBuilt] && [native::hostSupports libraries]
     && [auto_execok cc] ne "" && [cffi::sdl3Dir] ne "" && [asSdlSources] ne ""}]
+testConstraint strace [expr {[auto_execok strace] ne ""}]
 set ::asPackages [expr {[info exists ::env(BOTLISH_SDL3_2048_PACKAGES)] ? $::env(BOTLISH_SDL3_2048_PACKAGES) : ""}]
 testConstraint androidTool [expr {[testConstraint linuxX86] && $::asPackages ne "" && [file isdirectory $::asPackages]
     && [info exists ::env(ANDROID_NDK_ROOT)] && [file isdirectory $::env(ANDROID_NDK_ROOT)] && [auto_execok cc] ne ""}]
@@ -262,6 +263,102 @@ test as-play-oracle {game2048_play is the React Native facade's rules, unchanged
     list [llength [split $ours \n]] [expr {$ours eq $facade}] [format %08x $h]
 } -result {401 1 fbee79e6}
 
+# The text of FILE without its comment lines (a comment may name anything).
+proc asCode {file} {
+    return [join [lmap line [split [asRead $file] \n] {if {[regexp {^\s*#} $line]} continue; set line}] \n]
+}
+
+test as-play-single-source {the played game's rules have one source, game2048_play: neither the React Native facade nor any module of the SDL3 application names a member of the engine game2048 but its Direction type and CellOccupied error (no spawn, move, board or game-over check of its own), and the 2048 application's message reads game2048_play's over? and won?} -body {
+    set files [list [file join $::projectRoot examples react-native 2048 game.bot] {*}[lsort [glob [file join $::projectRoot examples android-sdl3 2048 *.bot]]]]
+    set problems {}
+    foreach file $files {
+        set code [asCode $file]
+        foreach {- member} [regexp -all -inline {\mgame2048::([A-Za-z_][A-Za-z0-9_]*\??)} $code] {
+            if {$member ni {Direction CellOccupied}} { lappend problems "[file tail $file]: game2048::$member" }
+        }
+    }
+    # Those that hold a game hold game2048_play's.
+    foreach file [list [file join $::projectRoot examples react-native 2048 game.bot] [file join $::projectRoot examples android-sdl3 2048 app.bot] [file join $::projectRoot examples android-sdl3 2048 board.bot]] {
+        if {![regexp {\mimport game2048_play\M} [asCode $file]]} { lappend problems "[file tail $file]: does not import game2048_play" }
+    }
+    set board [asCode [file join $::projectRoot examples android-sdl3 2048 board.bot]]
+    foreach call {{game2048_play::over\?\(} {game2048_play::won\?\(}} {
+        if {![regexp $call $board]} { lappend problems "board.bot: no $call" }
+    }
+    set problems
+} -result {}
+
+test as-play-snapshot {a played game's snapshot is the whole game: a game restored from its snapshot halfway plays on exactly as the uninterrupted one (the generator's state included), a snapshot reads back as itself, and a snapshot that is not a game's -- flags that are not its board's, a generator state out of its range (2^32), a cell that is no tile, a negative score, a field missing, another version -- is refused} -body {
+    set dir [asDir snapshot]
+    asModules $dir
+    set good [lindex [split [exec [info nameofexecutable] [file join $::asAudit tools oracle.tcl] 7 0123] \n] end]
+    set fields [split $good " "]
+    set bad [list \
+        [join [lreplace $fields 6 6 [expr {1 - [lindex $fields 6]}]] " "] \
+        [join [lreplace $fields 5 5 [expr {1 - [lindex $fields 5]}]] " "] \
+        [join [lreplace $fields 1 1 4294967296] " "] \
+        [join [lreplace $fields end end 3] " "] \
+        [join [lreplace $fields 2 2 -4] " "] \
+        [join [lrange $fields 0 end-1] " "] \
+        [join [lreplace $fields 0 0 2048/2] " "]]
+    set q {apply {{s} {return "\"[string map {\\ \\\\ \" \\\"} $s]\""}}}
+    asWrite $dir/p.bot [string map [list @GOOD@ [{*}$q $good] @BAD@ "\[[join [lmap b $bad {{*}$q $b}] {, }]\]"] {import game2048
+import game2048_play
+import std::list
+
+fn play(p: game2048_play::Played, codes: List[int], first: int, last: int) -> game2048_play::Played:
+    fold i from first to last with intermediate q p:
+        d = game2048_play::direction(codes.get(i, 0)):
+            on game2048_play::InvalidDirection:
+                game2048::Direction::Left
+        q.moved(d)
+
+fn valid?(text: str) -> bool:
+    p = game2048_play::played(text):
+        on game2048_play::InvalidSnapshot:
+            return false
+    game2048_play::snapshot(p) == text
+
+codes = [0, 1, 3, 2, 0, 0, 3, 1, 2, 3, 0, 1, 3, 3, 2, 0, 1, 0, 3, 2, 2, 1, 0, 3]
+whole = game2048_play::start(7).play(codes, 0, 24)
+half = game2048_play::start(7).play(codes, 0, 12)
+text = game2048_play::snapshot(half)
+restored = game2048_play::played(text):
+    on game2048_play::InvalidSnapshot:
+        game2048_play::start(0)
+continued = restored.play(codes, 12, 24)
+refused = loop b in @BAD@:
+    valid?(b)
+[game2048_play::snapshot(continued) == game2048_play::snapshot(whole), valid?(text), valid?(@GOOD@), refused]
+}]
+    asValue $dir p.bot interp
+} -result {[true, true, true, [false, false, false, false, false, false, false]]}
+
+test as-sdlscreen-teardown {sdlscreen releases SDL in the order SDL requires: closing destroys the renderer, then the window, then quits SDL (nothing after SDL_Quit); each failure of opening releases what it made the same way} -body {
+    set code [asCode [file join $::projectRoot packages sdlscreen sdlscreen.bot]]
+    regexp {\nfn close\(failure: str, context screen: Screen\) -> str:\n(.*?)\n(?=\S)} $code -> body
+    set renderer [string first SDL_DestroyRenderer $body]
+    set window [string first SDL_DestroyWindow $body]
+    set quit [string first SDL_Quit $body]
+    set after [string range $body $quit end]
+    # In every block of the module, nothing is destroyed after its SDL_Quit
+    # (the lines after it at its indentation, up to the block's end).
+    set order 1
+    set lines [split $code \n]
+    for {set i 0} {$i < [llength $lines]} {incr i} {
+        set line [lindex $lines $i]
+        if {![string match *SDL_Quit* $line]} continue
+        set indent [expr {[string length $line] - [string length [string trimleft $line]]}]
+        for {set j [expr {$i + 1}]} {$j < [llength $lines]} {incr j} {
+            set next [lindex $lines $j]
+            if {[string trim $next] eq ""} continue
+            if {[string length $next] - [string length [string trimleft $next]] < $indent} break
+            if {[string match *SDL_Destroy* $next]} { set order 0 }
+        }
+    }
+    list [expr {$renderer >= 0 && $renderer < $window && $window < $quit}] [regexp {SDL_Destroy} $after] $order
+} -result {1 0 1}
+
 # --------------------------------------------------------------------------
 # The applications on Linux, under a host shaped like SDL's Android bootstrap
 
@@ -346,10 +443,13 @@ test as-2048-host {the 2048 game under the bootstrap's shape: seed 42's new game
     set snapshots [lmap {- s} $moves {set s}]
     regexp -line {^2048: restart (.*)$} $out -> restarted
     set saved [asRead [file join $data Botlish 2048 game.txt]]
+    # A restart is a new game of game2048_play's: score 0, no move, two tiles.
+    set fresh [lrange [split $restarted " "] 0 6]
+    set tiles [llength [lmap c [lrange [split $restarted " "] 7 end] {if {$c == 0} continue; set c}]]
     list $status [expr {$start eq [lindex $oracle 0]}] [llength $snapshots] [expr {$snapshots eq [lrange $oracle 1 end]}] \
         [regexp {2048: background\n2048: foreground} $out] [expr {$saved eq $restarted}] [regexp {2048: back\n} $out] \
-        [llength [glob -nocomplain -directory [file join $data Botlish 2048] *.tmp]]
-} -result {0 1 16 1 1 1 1 0}
+        [llength [glob -nocomplain -directory [file join $data Botlish 2048] *.tmp]] [lrange $fresh 2 6] $tiles
+} -result {0 1 16 1 1 1 1 0 {0 0 0 0 0} 2}
 
 test as-2048-restore {persistence: a later start restores the saved game; --fresh ignores it; an invalid save, a save of another version and an empty file are fresh games, never failures; a save interrupted before its rename (a stray game.txt.tmp) leaves the previous game whole} -constraints {sdlHost} -body {
     set dir [asApp 2048 game]
@@ -400,6 +500,29 @@ test as-2048-frames {what the 2048 game draws is the game it holds: every frame 
     }
     lappend results [lindex [asExec python3 -I [file join $::asAudit tools screen.py] [lindex $bmps 0].png $layout [lindex $states end]] 0]
 } -result {0 3 0 0 1}
+
+test as-2048-lifecycle {the loop waits, it never spins: SDLThread uses almost no CPU while the game is idle (the host measures it); nothing is drawn while the application is in the background, a render reset then included (its surface is gone), and the board is drawn again when it comes back} -constraints {sdlHost} -body {
+    set dir [asApp 2048 game]
+    set idle "ready\nwait 300\nmark\nwait 1500\ncpu\n"
+    lassign [asRun $dir "${idle}background\nwait 50\nforeground\nwait 100\nback\n" [asDir life-a] --seed 3 --fresh] s1 out1
+    lassign [asRun $dir "${idle}background\nwait 50\nreset\nwait 50\nresize\nwait 50\nforeground\nwait 100\nback\n" [asDir life-b] --seed 3 --fresh] s2 out2
+    regexp {host: SDLThread cpu (\d+) ms in (\d+) ms} $out1 -> cpu wall
+    regexp -line {^2048: done frames (\d+) } $out1 -> f1
+    regexp -line {^2048: done frames (\d+) } $out2 -> f2
+    list $s1 $s2 [expr {$wall >= 1400 && $cpu * 10 < $wall}] [regexp {2048: render reset} $out2] [expr {$f1 == $f2}] [expr {$f1 >= 2}]
+} -result {0 0 1 1 1 1}
+
+test as-2048-terminate {a termination ends the loop: SDL_EVENT_QUIT, or Android's destruction (QUIT then TERMINATING), saves the game and returns from the entry with status 0} -constraints {sdlHost} -body {
+    set dir [asApp 2048 game]
+    set results {}
+    foreach {word line} {quit quit terminate quit} {
+        set data [asDir term-$word]
+        lassign [asRun $dir "ready\n[asSwipe 0]\nwait 50\n$word\n" $data --seed 5 --fresh] status out
+        regexp -line {^2048: move 0 (.*)$} $out -> moved
+        lappend results $status [regexp "2048: $line\n" $out] [regexp {2048: done frames} $out] [expr {[asRead [file join $data Botlish 2048 game.txt]] eq $moved}]
+    }
+    set results
+} -result {0 1 1 1 0 1 1 1}
 
 test as-gc-stress {both applications under BOTLISH_NATIVE_GC_STRESS=1: the counter's taps and the 2048 game's snapshots the same} -constraints {sdlHost} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
@@ -581,6 +704,19 @@ open(p, "wb").write(d)
     set sha [lindex [exec sha256sum $p/lib/libcounter.so] 0]
     asEditJson $p/lib/counter.manifest.json {("shared":\s*")[0-9a-f]{64}} "\\1$sha"
     lappend results 4k [asRefusal $p {*}$good]
+    # 12b. A shared object of another machine (x86-64's e_machine, 62; its
+    #      manifest digest updated: only the ELF's machine can tell).
+    set p [asCopy]
+    exec python3 -I -c {
+import struct, sys
+p = sys.argv[1]
+d = bytearray(open(p, "rb").read())
+struct.pack_into("<H", d, 18, 62)
+open(p, "wb").write(d)
+} $p/lib/libcounter.so
+    set sha [lindex [exec sha256sum $p/lib/libcounter.so] 0]
+    asEditJson $p/lib/counter.manifest.json {("shared":\s*")[0-9a-f]{64}} "\\1$sha"
+    lappend results machine [asRefusal $p {*}$good]
     # 13. Names: an application ID, a display name, an Activity class.
     foreach {what words} {id {generate -application-id org} id-keyword {generate -application-id org.class.x} id-shell {generate -application-id org.x;rm} name-control "generate -name \x01x" activity {generate -activity SDLActivity}} {
         lappend results $what [asRefusal [asProject] -words $words]
@@ -597,7 +733,7 @@ open(p, "wb").write(d)
     asWrite $assets/.hidden x
     lappend results asset-hidden [asRefusal [asProject] -words [list generate -assets $assets]]
     set results
-} -result {ordinary {1 AN-NOT-APPLICATION 0} target {1 AN-TARGET 0} stale-shared {1 AN-ARTIFACT 0} stale-header {1 AN-ARTIFACT 0} entry {1 AN-ENTRY 0} runtime-abi {1 AN-RUNTIME-ABI 0} dependency {1 AN-DEPENDENCY 0} no-sdl3 {1 AN-SDL3 0} linux-sdl-digest {1 AN-SDL3 0} linux-sdl-elf {1 AN-ELF 0} binding {1 AN-SDL3 0} java {1 AN-SDL3 0} 4k {1 AN-ELF 0} id {1 AN-NAME 0} id-keyword {1 AN-NAME 0} id-shell {1 AN-NAME 0} name-control {1 AN-NAME 0} activity {1 AN-NAME 0} command {2 AN-USAGE 0} api-low {2 AN-USAGE 0} api-high {1 AN-ANDROID-API 0} asset-link {1 AN-ASSETS 0} asset-hidden {1 AN-ASSETS 0}}
+} -result {ordinary {1 AN-NOT-APPLICATION 0} target {1 AN-TARGET 0} stale-shared {1 AN-ARTIFACT 0} stale-header {1 AN-ARTIFACT 0} entry {1 AN-ENTRY 0} runtime-abi {1 AN-RUNTIME-ABI 0} dependency {1 AN-DEPENDENCY 0} no-sdl3 {1 AN-SDL3 0} linux-sdl-digest {1 AN-SDL3 0} linux-sdl-elf {1 AN-ELF 0} binding {1 AN-SDL3 0} java {1 AN-SDL3 0} 4k {1 AN-ELF 0} machine {1 AN-ELF 0} id {1 AN-NAME 0} id-keyword {1 AN-NAME 0} id-shell {1 AN-NAME 0} name-control {1 AN-NAME 0} activity {1 AN-NAME 0} command {2 AN-USAGE 0} api-low {2 AN-USAGE 0} api-high {1 AN-ANDROID-API 0} asset-link {1 AN-ASSETS 0} asset-hidden {1 AN-ASSETS 0}}
 
 test as-tool-output {the output directory: one inside .bot_modules, a non-empty one the tool did not make, its own project without -replace -- all refused and left as they were; -replace regenerates exactly its record's files; build refuses a directory it did not generate and a missing SDK} -constraints {androidTool} -body {
     set p [asProject]
@@ -652,6 +788,55 @@ test as-tool-generate {what the tool generates: deterministic (twice the same by
         [file exists $a/app/src/main/java/org/libsdl/app/SDLActivity.java] [regexp {"SDL3", "counter", "main"} $activity] \
         [regexp {getArguments} $activity] [regexp {getArguments} [asRead $t/app/src/main/java/org/botlish/counter/MainActivity.java]]
 } -result {0 0 1 0 0 1 1 1 1 1 0 1}
+
+test as-tool-shim {the generated native side holds no application logic and changes nothing of Botlish's: SDL_main calls NAME_main once on SDL's thread (never NAME_create, no thread of its own, no exit or abort, no SDL call: every event is the Botlish program's), keeps the application library loaded (pinned, never closed), touches no pointer's bits and leaves heap pointer tagging as Android has it; CMake links libmain.so against the application library and SDL; arm64-v8a only} -constraints {androidTool} -body {
+    set p [asProject]
+    set out [file join [asDir shim] android]
+    lassign [asRunTool $p $out -words {generate}] status output
+    set main [asRead $out/app/src/main/cpp/main.c]
+    set cmake [asRead $out/app/src/main/cpp/CMakeLists.txt]
+    set gradle [asRead $out/app/build.gradle]
+    set all ""
+    foreach f [list app/src/main/AndroidManifest.xml app/build.gradle build.gradle gradle.properties app/src/main/cpp/main.c app/src/main/cpp/CMakeLists.txt app/src/main/java/org/botlish/counter/MainActivity.java] {
+        append all [asRead $out/$f]
+    }
+    # The code of main.c, without its comments.
+    regsub -all {/\*.*?\*/} $main "" code
+    set sdl [lsort -unique [regexp -all -inline {\mSDL_\w+} $code]]
+    set abis [lsort -unique [lmap {- a} [regexp -all -inline {abiFilters\s+([^\n]*)} $gradle] {set a}]]
+    list $status [regexp -all {\mcounter_main\(} $code] [regexp {\mcounter_(create|destroy)\M} $code] \
+        [regexp {pthread_create|thrd_create|SDL_CreateThread|\mclone\(|\mfork\(} $code] \
+        [regexp {\m(exit|_exit|_Exit|quick_exit|abort|raise|kill)\s*\(} $code] \
+        $sdl [regexp {\mdlclose\(} $code] [regexp {RTLD_NODELETE} $code] \
+        [regexp -all {uintptr_t} $code] [regexp {&\s*(0x|~)|<<\s*8\M} $code] \
+        [regexp -nocase {allowNativeHeapPointerTagging|mallopt|M_BIONIC|heap_tagging|HeapPointerTagging} $all] \
+        [regexp {target_link_libraries\(main PRIVATE counter SDL3 } $cmake] $abis
+} -result {0 1 0 0 0 SDL_main 0 1 1 0 0 1 'arm64-v8a'}
+
+test as-tool-reads {the generator reads only its inputs: the request, the application library's manifest and files, the installed packages' views (of Botlish modules only the SDL3 binding's version, which must agree with its library), and what it writes -- never the application's Botlish source, the compiler's files or anything else of the project (strace of a generation)} -constraints {androidTool strace} -body {
+    set p [asProject]
+    set out [file join [asDir reads] android]
+    set trace [file join [asDir reads-trace] trace.txt]
+    set request [file join [file dirname $out] request.json]
+    set q {apply {{s} {return "\"[string map {\\ \\\\ \" \\\"} $s]\""}}}
+    asWrite $request "\{\"protocol\": 1, \"kind\": \"botlish-tool-request\", \"output\": [{*}$q $out], \"target\": \"android-aarch64\", \"host\": \"linux-x86_64\", \"project\": [{*}$q $p], \"artifacts\": \[\{\"kind\": \"native-library\", \"manifest\": [{*}$q $p/lib/counter.manifest.json]\}\], \"diagnostics\": [{*}$q $request.diag]\}"
+    lassign [asExec env BOTLISH_TOOL_REQUEST=$request strace -f -qq -e trace=open,openat,stat,newfstatat,access,execve -o $trace [asTool] generate] status output
+    set outside {}
+    foreach line [split [asRead $trace] \n] {
+        if {![regexp {^\d+\s+(\w+)\((?:AT_FDCWD, )?"([^"]*)"} $line -> call path]} continue
+        if {[regexp {= -1 } $line]} continue
+        if {$call eq "execve"} { if {$path ne [asTool]} { lappend outside "exec $path" }; continue }
+        set ok 0
+        foreach prefix [list $p/lib/ $p/.bot_modules/ [file dirname $out] /etc/ /lib/ /lib64/ /usr/lib/ /usr/lib64/ /proc/ /dev/ /sys/] {
+            if {[string match $prefix* $path] || $path eq [string trimright $prefix /]} { set ok 1 }
+        }
+        # A Botlish module only of the SDL3 package's binding (its version
+        # module: binding and library must agree), never the application's.
+        if {[regexp {\.tcl$} $path] || ([regexp {\.bot$} $path] && ![string match $p/.bot_modules/.targets/android-aarch64/sdl3/sdl3/* $path])} { set ok 0 }
+        if {!$ok} { lappend outside $path }
+    }
+    list $status [lsort -unique $outside]
+} -result {0 {}}
 
 test as-tool-not-run-by-install {installing botlish_android runs nothing: its program is an installed file without an execute bit, and `botlish tools` lists the tool without running it} -constraints {androidTool} -body {
     set dir [asDir install]
