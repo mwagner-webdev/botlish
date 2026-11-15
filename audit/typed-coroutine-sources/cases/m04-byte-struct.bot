@@ -1,0 +1,17 @@
+# case: matrix -- yields Byte, returns a struct (a summary): rejected, no common outward type
+# class: rejected-precision
+# expect: rejected COROUTINE-RESULT-MISMATCH
+import std::coroutine
+import std::byte
+
+struct Summary:
+    count: int
+
+fn source(b: std::byte::Byte, n: int) -> Summary:
+    loop i from 0 to n:
+        yield b
+        continue
+    Summary {count: n}
+
+coroutine {step, first} = source(65, 2)
+first

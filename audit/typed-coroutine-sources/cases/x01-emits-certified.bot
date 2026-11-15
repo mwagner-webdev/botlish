@@ -1,0 +1,22 @@
+# case: emits -- a byte source whose claim the compiler certifies (every yield in 0..255, the trace one token): the certificate is no type, so the consumer still receives an int with no facts
+# class: narrowing
+# expect: facts-widened
+# value: [65, 66, 2]
+import std::coroutine
+import std::dfa
+
+dfa two_bytes over bytes:
+    start:
+        0..255 -> one
+    one:
+        0..255 -> accept
+
+fn source() -> int emits two_bytes:
+    yield 65
+    yield 66
+    2
+
+coroutine {step, first} = source()
+second = step()
+final = step()
+[first, second, final]

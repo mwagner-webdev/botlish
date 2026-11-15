@@ -1,0 +1,33 @@
+# case: deep yields -- the root handles a yielding helper's failure; the coroutine's segments never fail, and the handler's value joins the root's result
+# class: intended
+# expect: precise
+# value: [[1, 1, 2, -1], [0]]
+import std::coroutine
+import std::mutable_vector
+
+error Broke
+
+fn helper(n: int) -> int errors Broke:
+    yield n
+    if n == 2:
+        fail Broke
+    n
+
+fn source(xs: List[int]) -> int:
+    loop x in xs:
+        helper(x):
+            on Broke:
+                return -1
+    0
+
+fn drain(xs: List[int]) -> List[int]:
+    coroutine {step, first} = source(xs)
+    out = std::mutable_vector::from_list([first])
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(step())
+    loop x in out:
+        x
+
+[drain([1, 1, 2]), drain([])]

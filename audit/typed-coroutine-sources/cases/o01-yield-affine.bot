@@ -1,0 +1,20 @@
+# case: ownership -- yielding an affine value (a struct owning a coroutine handle) with an unrestricted terminal result is impossible to state: the yields and the return share one outward type, which is then affine, and an affine outward type is COROUTINE-CONTRACT (the reason given is the cached final result); independently, coroutine#yield takes any value, a position that carries no ownership: AFFINE-ERASURE-UNSUPPORTED at the yield
+# class: rejected-precision
+# expect: rejected AFFINE-ERASURE-UNSUPPORTED COROUTINE-CONTRACT
+import std::coroutine
+
+fn child() -> int:
+    yield 1
+    2
+
+struct Holder:
+    h: Coroutine{args: [], return: int, errors: []}
+
+fn source() -> Holder:
+    coroutine {step, first} = child()
+    yield Holder {h: step}
+    coroutine {step: s2, first: f2} = child()
+    Holder {h: s2}
+
+coroutine {step, first} = source()
+1
