@@ -608,8 +608,14 @@ replacement, value-transport, syntax-highlighting, ...) passed: 536 Tcl
 tests on each pass, the exhaustive-match, payload-enums,
 structs-and-enums, fold-loops and fold-virtual-struct-state golden suites
 on all four backends; `tools/mutant-catalogs.tcl` 110 catalogs, 3,763
-mutants, 0 problems. The branch was then merged into main (the user's
-go-ahead), whose push runs every test workflow on the merged commit.
+mutants, 0 problems. Main moved once more, to 8bbad939 (persistent C
+coroutine frames in ccompile/, the Rust archive link); that merge was
+clean, and tests/c-compile.test, tests/main-cli.test, the match, enum and
+payload-enum tests, the exhaustive-match golden suite and
+examples/c-freestanding/demo.sh passed on it (111 catalogs, 3,791 mutants,
+0 problems; the manifest regenerates unchanged). The branch was then
+merged into main (the user's go-ahead), whose push runs every test
+workflow on the merged commit.
 
 ## 16. The mid-end kernel with payload-bearing nodes
 
