@@ -1,0 +1,33 @@
+# p02-simultaneous-temps
+
+## Outcomes
+
+* interp: value 10335
+* compile: value 10335
+* cranelift: value 10335
+* cranelift-unfused: value 10335
+
+## HIR facts
+
+* may yield: none
+* coroutine thunks: 0
+* affine releases (after a statement): none
+* affine exit releases: none
+* native representation: structs {} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 3000, bytes 91670, peak live 3000 objects/91670B, gc cycles 0, peak reachable (GC stress) 3 objects/93B; String 3000/91670B
+* counters construction: materializations 1000, pieces 4000, materializedStringBytes 10335
+* counters copies: stringBytes 10335
+* label inttostr String x1000 27890B at p02-simultaneous-temps.bot:7:9 label()/a=/value/receiver
+* label inttostr String x1000 28445B at p02-simultaneous-temps.bot:8:9 label()/b=/value/receiver
+* label construct String x1000 35335B at p02-simultaneous-temps.bot:9:22 label()/call/arg1
+
+## Native allocations, coroutine fusion off
+
+(no coroutine: as fused)
+
+## C backend
+
+* p02-simultaneous-temps.bot:7:9: the C backend cannot compile the native operation std::str::concat yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service

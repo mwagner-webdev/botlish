@@ -1,0 +1,4 @@
+# p16b-foreign-captures
+
+front end: rejected
+  p16b-foreign-captures.bot:14:13: argument 2 of c_submit: byte storage (std::abi::bytes::Bytes) is exposed to C only for a call that cannot keep the pointer, but parameter "buf" may retain it (escape captures): a pointer C keeps after the call needs storage that outlives the call, which nothing provides yet, and only a contract that says noescape -- never a const, a name or a guess -- admits temporary exposure

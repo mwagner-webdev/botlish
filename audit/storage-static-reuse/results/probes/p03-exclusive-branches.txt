@@ -1,0 +1,35 @@
+# p03-exclusive-branches
+
+## Outcomes
+
+* interp: value 16390
+* compile: value 16390
+* cranelift: value 16390
+* cranelift-unfused: value 16390
+
+## HIR facts
+
+* may yield: none
+* coroutine thunks: 0
+* affine releases (after a statement): none
+* affine exit releases: none
+* native representation: structs {} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 3000, bytes 175170, peak live 3000 objects/175170B, gc cycles 0, peak reachable (GC stress) 2 objects/163B; String 2000/69280B, StringPlan 1000/105890B
+* counters construction: materializations 1000, plansCreated 1000, merges 1000, pieces 3000, stringBytesIntoPlans 16390, materializedStringBytes 16390
+* counters copies: stringBytes 32780
+* label inttostr String x500 13945B at p03-exclusive-branches.bot:8:9 label()/s=/value/then/methodcall/receiver
+* label construct StringPlan x500 48000B at p03-exclusive-branches.bot:8:9 label()/s=/value/then/methodcall
+* label inttostr String x500 13945B at p03-exclusive-branches.bot:10:9 label()/s=/value/else/methodcall/receiver
+* label construct StringPlan x500 57890B at p03-exclusive-branches.bot:10:9 label()/s=/value/else/methodcall
+* label construct String x1000 41390B at p03-exclusive-branches.bot:11:22 label()/call/arg1
+
+## Native allocations, coroutine fusion off
+
+(no coroutine: as fused)
+
+## C backend
+
+* p03-exclusive-branches.bot:7:9: the C backend cannot compile a value of type str yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service

@@ -1,0 +1,24 @@
+# p06 -- temporaries retained in an aggregate: each String is stored in a
+# MutableVector that outlives the loop, and one is kept in a struct the
+# program returns. No reuse: every element must stay valid until the
+# vector dies.
+import std::int
+import std::str
+import std::mutable_vector
+
+struct Kept:
+    first: str
+    count: int
+
+fn collect(n: int) -> Kept:
+    v = std::mutable_vector::from_list([""])
+    v.clear()
+    loop i from 0 to n:
+        v.push(std::int::to_string(i))
+    first = v.at(0):
+        on IndexNotFound:
+            "none"
+    Kept {first: first, count: v.length()}
+
+k = collect(1000)
+[k.first, k.count]

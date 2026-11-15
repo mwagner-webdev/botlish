@@ -1,0 +1,14 @@
+# p16b -- the same buffer given to a parameter whose contract says C keeps
+# the pointer (`captures`): the compiler refuses to expose Botlish storage
+# there (FOREIGN-BORROW). Asynchronous I/O that borrows a buffer until a
+# later completion has no representation today.
+direct module
+import std::abi::bytes
+import std::ffi::c
+import std::str
+import std::byte
+
+extern c fn c_submit named "write"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] captures, n: std::ffi::c::ULong) -> std::ffi::c::Long
+
+data = std::abi::bytes::from_list(std::str::encode_utf8("probe p16b\n"))
+c_submit(1, data, 11)
