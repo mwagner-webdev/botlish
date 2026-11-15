@@ -547,6 +547,12 @@ declaration). No runtime representation change (item 27): `encodeUtf8`'s
 own Tcl implementation is untouched, still `List[Int]`-shaped at runtime,
 same bytes, same order.
 
+(Since STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md a program
+that can call `encode_utf8` always loads `stdlib/byte.bot`: the loader loads
+the module of every type a reachable native's result contract names, so the
+fallback above is left only to a program no loader built -- core IR text --
+and the result is `List[std::byte::Byte]` whatever the program imports.)
+
 `list_get`'s own pre-existing, fully generic `{element 0 1}` shape then
 gives `list_get(bytes, i) : Byte` automatically, with **zero** list-get- or
 web-specific code (item 75).

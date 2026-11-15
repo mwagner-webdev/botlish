@@ -619,7 +619,7 @@ element type, `std::list::append` the lub of it and the new element's.
 | `std::str::lowercase` | str → str (Unicode 16 simple one-to-one case mapping; see §"Strings") |
 | `std::str::concat` | str, str → str |
 | `std::str::append_char` | str, UnicodeChar → str: the String followed by the one character (`std::str::length` + 1 characters; the argument is unchanged), as `std::list::append` is to a List: the way a character becomes text, with no one-character String of its own |
-| `std::str::encode_utf8` | str → list of the UTF-8 bytes, each 0..255: statically `List[std::byte::Byte]` when the compilation has loaded `std::byte` (directly or through a module that imports it, such as `std::abi::bytes`), otherwise plain `list` (TEXT-AND-COLLECTION-PRECISION-CENSUS.md, C.3); `std::abi::bytes::decode_utf8` (errors `InvalidUtf8`) is the way back |
+| `std::str::encode_utf8` | str → list of the UTF-8 bytes, each 0..255: statically `List[std::byte::Byte]` in every program, whatever it imports -- the compiler loads `std::byte` for this contract without making any name of it visible (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md); taken as a value it is a function returning `List[std::byte::Byte]`; `std::abi::bytes::decode_utf8` (errors `InvalidUtf8`) is the way back |
 | `std::str::char_at` | str, int → UnicodeChar, errors `IndexNotFound`: the scalar at character index `0 <= i < length` (the index space of `length`/`substring`); any other Int index fails with `IndexNotFound`; never allocates. With char literals (`c == '%'`) and `std::char::scalar_value` it classifies a String's characters without a one-character String or an `encode_utf8` List (ENCODE-UTF8-ALLOCATION-RESEARCH.md) |
 | `std::str::is_tcl_alpha` `std::str::is_tcl_alnum` | one-scalar str → bool (temporary Tcl-compatibility classes, core/tclcompat.tcl) |
 | `std::char::scalar_value` | UnicodeChar → int (the Unicode scalar value: `0..0x10FFFF` without the surrogates, never a byte or a code unit of an encoding) |
@@ -1050,9 +1050,15 @@ callable type names the code a call runs (for a Block: its code target,
 whatever environment the value carries -- two closures of one factory share
 it). Each has one structural supertype, `hir::types::structuralOf`: a
 block's declared parameter types (untyped: `any`), result type and
-declared errors; a native's arity and `-result-type` (its arguments are
-run-time checked, so its structural arguments are `any`; natives declare no
-errors). Compatibility is the call contract's: arguments contravariant
+declared errors; a native's arity, its registered errors and the result
+every call of it has (`hir::types::NativeResult`): its `-result-shape`'s
+result when the shape reads no argument (`core::native::
+argumentIndependentShapes`), so that `std::str::encode_utf8` taken as a
+value is `Fn{args: [any], return: List[std::byte::Byte], errors: []}` and
+`argv` returns `List[str]`, else its `-result-type` (its arguments are
+run-time checked, so its structural arguments are `any`;
+STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md, "The native as a
+function value"). Compatibility is the call contract's: arguments contravariant
 (declared-parameter admissibility), return covariant, errors a subset. The
 `lub` of two different compatible callables is their narrowest common
 structural type (the meet of the arguments, the lub of the returns, the

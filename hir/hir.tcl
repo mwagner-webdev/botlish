@@ -1094,6 +1094,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     hir::iteration::verify hir
     hir::relations::verify hir
     hir::transfer::verifyDeclarations hir
+    hir::transfer::verifyValues hir
     hir::syscall::verify hir
     hir::internal::verify hir
     hir::borrow::verify hir

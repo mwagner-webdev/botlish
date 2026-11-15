@@ -143,9 +143,9 @@ fn send(r: std::event_loop::Reg) -> std::abi::bytes::Bytes:
 
 @topic error.transfer-open-type
 title: TRANSFER-OPEN-TYPE: a transfer whose type is not known where it is written
-summary: A transfer's static type does not name its values' type: decode of a trait view (decode[Sendable]), whose bytes could be of any witness; the transfer's schema is its static type.
+summary: A transfer's schema is its static type, which is unknown here: decode of a trait view (decode[Sendable]), or std::transfer::encode used as a function value, which has no call.
 index: errors
-alias: transfer in a generic function; encode of an imprint variable; open type; decode a trait view
+alias: transfer in a generic function; encode of an imprint variable; open type; decode a trait view; encode as a function value
 keywords: transfer, encode, decode, imprint variable, generic, schema, Sendable, satisfies, trait view
 related: concept.sendability error.not-sendable
 code: CORE SEMANTIC TRANSFER-OPEN-TYPE
@@ -158,11 +158,16 @@ schema depends on the caller's T: the compiler compiles such a body once
 per binding of T (as it clones a trait-polymorphic function per witness),
 so each copy encodes and decodes a closed type. What stays open is a
 transfer whose type names no type at all: `decode[Sendable]` would rebuild
-a value of whichever witness wrote the bytes.
+a value of whichever witness wrote the bytes. And std::transfer::encode can
+only be called directly: as a function value -- an argument, a stored or
+returned value -- it has no call for the compiler to write a schema into.
+(decode is no value either: it is imprinted, IMPRINT.)
 
 == WHAT TO DO
 Decode as the concrete type the bytes were written as (`decode[Job]`);
-to accept several, send an enum or a struct that says which.
+to accept several, send an enum or a struct that says which. To pass an
+encoder around, wrap the call in a function of your own whose parameter
+has the concrete type.
 
 @example accept
 import std::transfer
@@ -189,6 +194,34 @@ fn open(data: std::abi::bytes::Bytes) -> Sendable errors TransferMalformed, Tran
 1
 @caption decode of a trait view: the bytes could be of any witness
 @error CORE SEMANTIC TRANSFER-OPEN-TYPE
+@end
+
+@example reject
+import std::transfer
+import std::abi::bytes
+
+fn run(f: Fn{args: [int], return: std::abi::bytes::Bytes, errors: []}) -> std::abi::bytes::Bytes:
+    f(7)
+
+run(std::transfer::encode)
+@caption encode as a function value: no call to write the schema into
+@error CORE SEMANTIC TRANSFER-OPEN-TYPE
+@at 7:5
+@end
+
+@example accept
+import std::transfer
+import std::abi::bytes
+
+fn seal(n: int) -> std::abi::bytes::Bytes:
+    std::transfer::encode(n)
+
+fn run(f: Fn{args: [int], return: std::abi::bytes::Bytes, errors: []}) -> std::abi::bytes::Bytes:
+    f(7)
+
+run(seal).length().value
+@caption Wrapped in a function of your own, the call has a concrete type
+@value 15
 @end
 
 @topic error.sendable-declaration

@@ -19,8 +19,10 @@ service's presentation and every type the checker gives its references,
 and an element must be the checker's loop element type of the first table;
 a counter is int. `List[int]{length: 2}` is a refined element (a declared
 result keeps its length), `unknown` the negative control: an element the
-checker itself knows only as `any` (encode_utf8 without std::byte loaded,
-M3), which the record must not make more precise.
+checker itself knows only as `any` (a List erased to the bare `list` by a
+declared result; it was encode_utf8 without std::byte loaded until M3,
+STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md, made that one a
+Byte), which the record must not make more precise.
 Exit status 1 when an operation produced no diagnostic or an unexpected one,
 or a loop clause binding's record disagrees.
 """
@@ -41,7 +43,7 @@ TYPES = {
     "str": ("", "loop i from 0 to std::str::length(s):\n        std::str::substring(s, i, i + 1)", "int"),
     "List[int]{length: 2}": ("", "loop i from 0 to std::str::length(s):\n        [i, i]", "str",
                              "List[List[int]{length: 2}]"),
-    "unknown": ("", "s.encode_utf8()", "str"),
+    "unknown": ("fn erase(ys: list) -> list:\n    ys\n", "erase([s, s])", "int"),
 }
 FIELD = {"Byte": "std::byte::Byte", "unknown": "any"}
 

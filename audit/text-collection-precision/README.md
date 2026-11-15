@@ -4,12 +4,16 @@ The material of `docs/TEXT-AND-COLLECTION-PRECISION-CENSUS.md`. Nothing here
 is loaded by the compiler or run by CI; it records today's behavior so that a
 follow-up milestone can show what it changed.
 
-* `probes/*.bot` -- eighteen minimal programs. Each states its expected
+* `probes/*.bot` -- nineteen minimal programs. Each states its expected
   outcome in its leading comments (`# outcome:`, `# value:`,
   `# diagnostic: L:C TEXT`, `# error:`, `# binding: L NAME TYPE`). A
   milestone that changes a probe's outcome updates its expectation in the
   same change (M1 did for `c1` and `c6`, M2 for `j3`, whose result
-  diagnostic names the inferred type since).
+  diagnostic names the inferred type since, and M3,
+  STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md, for `c3`, `c4`
+  and `c5`: `encode_utf8()` is `List[std::byte::Byte]` without
+  `import std::byte`, so `c4` is accepted with `c5`'s value; it added `c7`,
+  the negative control that no name of `std::byte` became visible).
 * `tools/probes.tcl` -- runs every probe (or the ones named): `main.tcl
   -check`, each accepted or run-time-failing probe on interp, compile,
   cranelift and cranelift-generic (`-backends` narrows), and the binding

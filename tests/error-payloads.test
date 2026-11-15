@@ -220,10 +220,13 @@ fn might_fail(x: int) -> int errors Boom:
 # Declarations (items 1-5, 44)
 
 test ep-declaration-grammar {a payload is an indented block of `field: Type` lines after `error NAME:`, the struct field grammar; the payload-free spelling is unchanged and is the zero-field case} -body {
+    # (std::list's error, and std::byte's two: std::str's encode_utf8
+    # contract loads std::byte, STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-
+    # MILESTONE-1.md, so every program importing std::str declares them.)
     set hir [epHir "${::epDecls}1\n"]
     list [hir::errorDecls $hir] [dict get $hir errorPayloads] \
         [hir::errordecls::fields ConnectionLost] [hir::errordecls::hasPayload ConnectionLost]
-} -cleanup {unset -nocomplain hir} -result {{std::list::NotFound PageNotFound ObjectNotFound ConnectionLost} {PageNotFound {fields {uri str statusCode int response {nstruct Response}} namespace {}} ObjectNotFound {fields {uri str} namespace {}}} {} 0}
+} -cleanup {unset -nocomplain hir} -result {{std::list::NotFound std::byte::BelowRange std::byte::AboveRange PageNotFound ObjectNotFound ConnectionLost} {PageNotFound {fields {uri str statusCode int response {nstruct Response}} namespace {}} ObjectNotFound {fields {uri str} namespace {}}} {} 0}
 
 test ep-declaration-payload-type {the payload's static type is the anonymous struct of the declared fields (no source-nameable type, no identity field); declaration order is kept for the descriptor} -body {
     epHir "${::epDecls}1\n"
@@ -609,9 +612,11 @@ test ep-native-payload-free-unchanged {items 52, 91: a payload-free error's NIR 
 
 test ep-native-payload-field-wise {items 50-51, 77: a payload travels the error edge field-wise -- `faildeclared ID NAME SHAPE FIELDS...`, no struct object for the payload -- and a handler reads only the fields it uses (`declaredpayload K`)} -body {
     set text "${::epDecls}fn f(uri: str) -> int:\n    page = fetch(uri):\n        on PageNotFound {statusCode}:\n            return statusCode\n    0\n\[f(\"/a\")\]\n"
+    # (PageNotFound is the program's fourth declared error: std::list's and
+    # std::byte's two come first; ep-declaration-grammar.)
     list [lsearch -all -inline [epFunc $text fetch] faildeclared*] \
         [lsearch -all -inline [epFunc $text f] *declaredpayload*]
-} -cleanup {unset -nocomplain text} -result {{{faildeclared 2 "PageNotFound" 1 %12 %7 %6}} {{%4 = declaredpayload 1}}}
+} -cleanup {unset -nocomplain text} -result {{{faildeclared 4 "PageNotFound" 1 %12 %7 %6}} {{%4 = declaredpayload 1}}}
 
 test ep-native-no-payload-allocation {items 50, 52, 53, 90: a small payload allocates nothing natively (a one-Int payload fails and is handled with zero heap objects); declaring a payload error costs nothing on the success path; a payload-free failure allocates nothing either} -body {
     set text "error Small:\n    code: int\nfn g(x: int) -> int errors Small:\n    if x > 1:\n        fail Small {code: x}\n    x\nfn f(x: int) -> int:\n    g(x):\n        on Small {code}:\n            code\n"

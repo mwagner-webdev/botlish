@@ -2448,6 +2448,13 @@ convert into each other.
     contract, so its declared errors must be handled like any call's.
   * Functions with flags or a context cannot be function values
     (FLAG-FUNCTION-VALUE, CONTEXT-FUNCTION-VALUE).
+  * A native's function type states the result every call of it has
+    when that result does not depend on the arguments:
+    std::str::encode_utf8 is Fn{args: [any], return:
+    List[std::byte::Byte], errors: []}, argv a function returning
+    List[str]. Some natives are only ever called, never values: the
+    layout operations (BINARY-OPERAND), the address bridges and C
+    functions (TYPE), std::transfer::encode (TRANSFER-OPEN-TYPE).
   * An untyped parameter can also receive a function; its calls are then
     analyzed from what is actually passed (concept.specialization).
 

@@ -641,10 +641,15 @@ test ns-handle-type-in-an-instance {a handled call's type includes a handler the
 # the same callable as its qualified free spelling
 
 # The resolved target of the method call (the call carrying a `method`
-# marker) of HIR, and of its first call spelled QUALIFIED: one callable.
+# marker) of HIR's entry program, and of its first call spelled QUALIFIED:
+# one callable. (The entry program's -- file f1's -- because a module the
+# program loads may make method calls of its own: std::byte's, which
+# std::str's encode_utf8 contract loads, STDLIB-ENCODE-UTF8-RESULT-TYPE-
+# STABILITY-MILESTONE-1.md.)
 proc sameCallable {mh fh qualified} {
     set mcall [lindex [lmap e [hir::walk $mh] {
-        if {[hir::kind $mh $e] eq "call" && [dict exists [hir::node $mh $e] method]} {set e} else continue
+        if {[hir::kind $mh $e] eq "call" && [dict exists [hir::node $mh $e] method]
+                && [lindex [dict get [hir::node $mh $e] origin] 1] eq "f1"} {set e} else continue
     }] 0]
     set fcall [callNamed $fh $qualified]
     set mt [targetOf $mh $mcall]

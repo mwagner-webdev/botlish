@@ -1,0 +1,327 @@
+# Mutants of the contract-type rule (STDLIB-ENCODE-UTF8-RESULT-TYPE-
+# STABILITY-MILESTONE-1.md; audit/encode-utf8-type-stability/tools/
+# mutate.tcl): deliberate breaks of the loader's contract types
+# (surface/modules.tcl's ContractTypes, ContractOwners), the registry's query
+# and validation (core/native.tcl's contractTypes, ValidShape), the `typed`
+# result shape (hir/types.tcl's ShapeResult), and what carries the type
+# (interchange, the loop element), and the native as a function value (the
+# argument-independent shape kinds, hir::types::NativeResult's use in
+# structuralOf, Compilerpedia's signature, the transfer value refusal). Each
+# must be killed by
+# tests/encode-utf8-type-stability.test or tests/symbolic-type-identity.test,
+# by one of the tests its `!!` line names -- the test that states the rule it
+# breaks, never an unrelated failure.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# The loader
+
+@@ fallback-restored the loader loads no module for a contract: encode_utf8's result is the plain list again unless the program happens to load std::byte (the census's c3-c5)
+!! eut-contract-without-byte eut-contract-import-independent eut-c4-c5-same-outcome eut-every-context eut-module-loaded
+## surface/modules.tcl
+<<<<
+    while 1 {
+        set wanted [ContractOwners [dict get $state imports]]
+====
+    while 0 {
+        set wanted [ContractOwners [dict get $state imports]]
+>>>>
+
+@@ transitive-lost only the entry program's imports are reachable: a module that imports std::str and returns the result, consumed by a program that does not, loses the Byte
+!! eut-modules eut-package
+## surface/modules.tcl
+<<<<
+    dict for {key environment} $imports {
+        if {$key ne ""} {
+            lappend reachable $key
+        }
+        lappend reachable {*}[dict get $environment namespaces]
+    }
+====
+    dict for {key environment} $imports {
+        if {$key ne ""} {
+            continue
+        }
+        lappend reachable {*}[dict get $environment namespaces]
+    }
+>>>>
+
+@@ first-import-only only a file's first import is reachable: whether std::str's contract holds depends on the order of the imports
+!! eut-import-order-unrelated
+## surface/modules.tcl
+<<<<
+        lappend reachable {*}[dict get $environment namespaces]
+    }
+    set wanted [dict create]
+====
+        lappend reachable [lindex [dict get $environment namespaces] 0]
+    }
+    set wanted [dict create]
+>>>>
+
+@@ implicit-import the contract module is added to the entry program's import environment: its functions become method-style candidates there, an implicit import
+!! eut-visibility-short-and-method eut-module-loaded
+## surface/modules.tcl
+<<<<
+            LoadNamespace state $owner "" $path "#std" $owner
+====
+            LoadNamespace state $owner "" $path "#std" $owner
+            dict set state imports "" namespaces [concat [dict get $state imports "" namespaces] [list $owner]]
+>>>>
+
+@@ stale-registry the loader asks the process-wide type registry, not the compilation, whether the type exists: a type an earlier compilation registered is taken for this one's, and the module is not loaded
+!! eut-contract-without-byte eut-contract-import-independent eut-every-context eut-module-loaded eut-modules eut-package eut-hir-text-roundtrip
+## surface/modules.tcl
+<<<<
+        set missing [lmap owner [lsort [dict keys $wanted]] {
+            if {[dict exists $state loaded $owner] || [dict exists $absent $owner]} continue
+====
+        set missing [lmap owner [lsort [dict keys $wanted]] {
+            if {[dict exists $state loaded $owner] || [dict exists $absent $owner]} continue
+            if {[core::type::isNamed ${owner}::[lindex [dict keys [dict get $wanted $owner]] 0]]} continue
+>>>>
+
+@@ cache-dependency-dropped the modules loaded for contract types are no dependency of a cache entry: no import names them, so a cached program importing only std::str keeps an old declaration of std::byte::Byte after std::byte's file changes, or its plain list after the file appears
+!! eut-cache-dependency eut-cache-dependency-absent
+## surface/cache.tcl
+<<<<
+    foreach owner [surface::modules::ContractModules [dict get $hir declarations imports]] {
+        lappend paths [surface::modules::ModulePath $owner]
+====
+    foreach owner [surface::modules::ContractModules {}] {
+        lappend paths [surface::modules::ModulePath $owner]
+>>>>
+
+@@ undeclared-type-unchecked a loaded module that does not declare the contract's type is not reported: the result silently drops to the plain list
+!! eut-missing-declaration
+## surface/modules.tcl
+<<<<
+            if {$name ni [dict get $state loadedTypes $owner]} {
+                ContractError [dict get $names $name] ${owner}::$name \
+                    "module \"$owner\" declares no type \"$name\""
+            }
+====
+>>>>
+
+@@ absent-module-loaded a contract module the library at hand does not have is loaded anyway: a program on a scratch library gets an UNKNOWN-NAMESPACE it never wrote, for a module no import of it names
+!! eut-contract-module-absent eut-scratch-library
+## surface/modules.tcl
+<<<<
+            if {![HasModule $owner]} {
+                dict set absent $owner 1
+                continue
+            }
+====
+>>>>
+
+# ---------------------------------------------------------------------------
+# The registry
+
+@@ contract-cache-stale registering a native does not forget contractTypes' answers: a namespace queried before a native was registered keeps its old answer
+!! eut-probe-native
+## core/native.tcl
+<<<<
+        sending $sending]
+    variable contractTypes
+    set contractTypes [dict create]
+====
+        sending $sending]
+>>>>
+
+@@ invalid-shape-accepted a `typed` shape may name any type by spelling it: an unqualified name, an application's or a package's type
+!! eut-registration-validates-name
+## core/native.tcl
+<<<<
+        return [expr {[regexp {^std(::[A-Za-z_][A-Za-z0-9_]*)+::[A-Za-z_][A-Za-z0-9_]*$} $name]
+            && [string is entier -strict $lo] && [string is entier -strict $hi] && $lo <= $hi}]
+====
+        return [expr {[string is entier -strict $lo] && [string is entier -strict $hi] && $lo <= $hi}]
+>>>>
+
+# ---------------------------------------------------------------------------
+# The result shape
+
+@@ plain-list-int the result is List[int]: the elements lose their domain, no index into a 256-entry table is proven
+!! eut-contract-without-byte eut-contract-import-independent eut-every-context eut-c4-c5-same-outcome symbolic-type-identity-canonical-byte
+## hir/types.tcl
+<<<<
+            return [MakeList $resolved]
+====
+            return [MakeList int]
+>>>>
+
+@@ list-any the result is List[any]: the elements are unknown
+!! eut-contract-without-byte eut-contract-import-independent eut-every-context eut-c4-c5-same-outcome symbolic-type-identity-canonical-byte
+## hir/types.tcl
+<<<<
+            return [MakeList $resolved]
+====
+            return [MakeList any]
+>>>>
+
+@@ noncanonical-identity the result's element is the bare symbolic name, not the canonical type a written List[std::byte::Byte] resolves to: shown alike, compared unequal (a declared List[Byte] parameter rejects it)
+!! eut-contract-import-independent eut-typed-parameter symbolic-type-identity-satisfies-declared-list-byte-parameter symbolic-type-identity-structural-equality-not-display-text
+## hir/types.tcl
+<<<<
+            return [MakeList $resolved]
+====
+            return [MakeList $name]
+>>>>
+
+@@ range-unproven the type is claimed without proving that its domain admits the native's range: a narrower std::byte::Byte, or a str-based registration, is trusted
+!! eut-domain-not-admitting eut-incompatible-registration symbolic-type-identity-narrow-byte-rejected symbolic-type-identity-incompatible-kind
+## hir/types.tcl
+<<<<
+            if {![hir::range::ProvesType [dict create min $lo max $hi] $resolved]} {
+====
+            if {0 && ![hir::range::ProvesType [dict create min $lo max $hi] $resolved]} {
+>>>>
+
+@@ unproven-falls-back a declaration that does not admit the native's range silently drops the result to the plain list instead of failing as the standard library's error
+!! eut-domain-not-admitting eut-incompatible-registration eut-missing-declaration symbolic-type-identity-narrow-byte-rejected symbolic-type-identity-incompatible-kind
+## hir/types.tcl
+<<<<
+                return -code error -errorcode {CORE SEMANTIC COMPILER-INTERNAL} \
+                    "internal compiler error: the result contract {$shape} names $name, whose declaration does not admit every value in $lo..$hi: the standard library contradicts its own native"
+====
+                return $result
+>>>>
+
+@@ instance-view-fallback a semantic instance's walk (its typing context's `inst`) falls back to the plain list: an untyped helper's call is List[Byte] in its generic walk but not in the instance its typed caller reads
+!! eut-instance-snapshots eut-instances-order-independent
+## hir/types.tcl
+<<<<
+            if {![core::type::isNamed $name]} {
+                return $result
+            }
+            set resolved [core::type::normalize $name]
+====
+            if {![core::type::isNamed $name] || [dict exists $ctx inst]} {
+                return $result
+            }
+            set resolved [core::type::normalize $name]
+>>>>
+
+# ---------------------------------------------------------------------------
+# What carries the type
+
+@@ loop-element-erased a loop over a List binds its element as any, while an index keeps the element type
+!! eut-every-context
+## hir/types.tcl
+<<<<
+    return [elementOf $type]
+}
+
+# The positional shape {P0 ...} of static type TYPE, or "" if not known.
+====
+    if {[IsList $type]} {
+        return any
+    }
+    return [elementOf $type]
+}
+
+# The positional shape {P0 ...} of static type TYPE, or "" if not known.
+>>>>
+
+@@ interchange-declarations-lost decoding interchange text does not install its declarations: a fresh process reading it has no std::byte::Byte
+!! eut-interchange-fresh-process
+## hir/interchange.tcl
+<<<<
+    hir::activate $hir
+    # Emission certificates (EMISSION-CLAIMS-MILESTONE-1.md, "Trust"): text
+====
+    # Emission certificates (EMISSION-CLAIMS-MILESTONE-1.md, "Trust"): text
+>>>>
+
+# ---------------------------------------------------------------------------
+# The native as a function value
+
+@@ value-type-declared-kind the native's function type keeps the declared -result-type: taken as a value, encode_utf8 returns `list`, its hover says so, and a Fn{..., return: List[std::byte::Byte]} parameter rejects it
+!! eut-value-function-type eut-value-hover eut-value-admitted eut-value-agrees-with-a-function eut-value-unrelated-result-named
+## hir/types.tcl
+<<<<
+        return [MakeFn [lrepeat $arity any] [NativeResult $meta] [dict get $meta errors]]
+====
+        return [MakeFn [lrepeat $arity any] [dict get $meta resultType] [dict get $meta errors]]
+>>>>
+
+@@ typed-shape-unclassified the typed kind is not classified argument-independent: encode_utf8's function type returns `list` while its calls return List[std::byte::Byte]
+!! eut-value-function-type eut-value-hover eut-value-admitted eut-value-argument-independent-shapes
+## core/native.tcl
+<<<<
+    variable argumentIndependentShapes {never named-struct element-type typed}
+====
+    variable argumentIndependentShapes {never named-struct element-type}
+>>>>
+
+@@ argument-reading-shape-classified an argument-reading kind (element) is classified argument-independent: a native's function type would state one call's result for every call
+!! eut-value-argument-independent-shapes
+## core/native.tcl
+<<<<
+    variable argumentIndependentShapes {never named-struct element-type typed}
+====
+    variable argumentIndependentShapes {never named-struct element-type typed element}
+>>>>
+
+@@ generator-declared-kind Compilerpedia's signature prints the declared -result-type, not what the native's function type states: the committed page is no longer what the generator writes
+!! eut-value-compilerpedia-signature
+## tools/compilerpedia.tcl
+<<<<
+    return "${name}($shown) -> [hir::types::show [hir::types::NativeResult $meta]]"
+====
+    return "${name}($shown) -> [hir::types::show [dict get $meta resultType]]"
+>>>>
+
+@@ generator-declares-nothing the generator's compilation imports no module: no contract's declaration exists there, so every signature falls back to the plain kind
+!! eut-value-compilerpedia-signature
+## tools/compilerpedia.tcl
+<<<<
+        append text "import $module\n"
+====
+        append text ""
+>>>>
+
+@@ transfer-value-unchecked std::transfer::encode as a function value is not refused: a typed Fn{..., return: Bytes} parameter takes it, and its call reaches the unelaborated implementation
+!! eut-value-transfer-call-only
+## hir/hir.tcl
+<<<<
+    hir::transfer::verifyValues hir
+====
+>>>>
+
+@@ transfer-imprinted-twice the imprinted transfer operations are refused here too: decode as a value is reported twice, IMPRINT and TRANSFER-OPEN-TYPE
+!! eut-value-transfer-call-only
+## hir/transfer.tcl
+<<<<
+        if {[catch {core::native::metadata $name} meta] || [dict getdef $meta sending ""] eq ""
+                || [dict getdef $meta imprint ""] ne ""} continue
+====
+        if {[catch {core::native::metadata $name} meta] || [dict getdef $meta sending ""] eq ""} continue
+>>>>
+
+@@ transfer-callee-refused a direct call of std::transfer::encode is refused as if it were a value: the callee of a call is no function value
+!! eut-value-transfer-call-only
+## hir/transfer.tcl
+<<<<
+        if {[dict get $node kind] ne "ref" || [dict exists $callees $e]} continue
+        set b [dict get $node binding]
+        if {$b eq "" || ![dict exists $hir bindings $b]} continue
+        set binding [hir::binding $hir $b]
+        if {[dict get $binding kind] ne "root"} continue
+        set name [dict get $binding name]
+====
+        if {[dict get $node kind] ne "ref"} continue
+        set b [dict get $node binding]
+        if {$b eq "" || ![dict exists $hir bindings $b]} continue
+        set binding [hir::binding $hir $b]
+        if {[dict get $binding kind] ne "root"} continue
+        set name [dict get $binding name]
+>>>>

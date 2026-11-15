@@ -8,6 +8,9 @@
 #   hir::transfer::verifyDeclarations HIRVAR
 #                                           the `sendable through` clauses'
 #                                           functions, part of hir::check
+#   hir::transfer::verifyValues HIRVAR      std::transfer's operations only
+#                                           called, never values (part of
+#                                           hir::check)
 #   hir::transfer::Elaborate HIRVAR         std::transfer::encode and decode
 #                                           written out as the run-time
 #                                           operations (after hir::check)
@@ -366,6 +369,48 @@ proc hir::transfer::verifyDeclarations {hirVar} {
                 break
             }
         }
+    }
+}
+
+# std::transfer's operations (every native registered -sending) are only
+# ever called: a transfer's schema is the static type of the value at its
+# call, or of the type its imprint names, which hir::transfer::Elaborate
+# writes into that call -- a function value of the operation has no call to
+# write it into, and a call through the value would reach the unelaborated
+# implementation (core::transfer::Unelaborated, an internal error; natively
+# an unsupported native). An imprinted one (decode, fingerprint) is no value
+# already (IMPRINT: an imprinted callable is only called). For the others
+# (encode), a reference that is not the callee of a call -- an argument, an
+# alias, a result, a stored or captured value -- is TRANSFER-OPEN-TYPE, the
+# schema not being known where the call is written, as the layout
+# operations' references are BINARY-OPERAND (hir::layouts::verify). It became reachable
+# through a typed parameter when a native's function type started to state
+# its argument-independent result (std::transfer::encode's is
+# std::abi::bytes::Bytes: hir::types::NativeResult; STDLIB-ENCODE-UTF8-
+# RESULT-TYPE-STABILITY-MILESTONE-1.md, "The native as a function value"),
+# and was reachable through an untyped one before.
+proc hir::transfer::verifyValues {hirVar} {
+    upvar 1 $hirVar hir
+    if {[dict exists $hir semanticContext] || [hir::traits::Planning]} {
+        return
+    }
+    set callees [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call"} {
+            dict set callees [dict get $node callee] 1
+        }
+    }
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "ref" || [dict exists $callees $e]} continue
+        set b [dict get $node binding]
+        if {$b eq "" || ![dict exists $hir bindings $b]} continue
+        set binding [hir::binding $hir $b]
+        if {[dict get $binding kind] ne "root"} continue
+        set name [dict get $binding name]
+        if {[catch {core::native::metadata $name} meta] || [dict getdef $meta sending ""] eq ""
+                || [dict getdef $meta imprint ""] ne ""} continue
+        hir::Diagnose hir TRANSFER-OPEN-TYPE \
+            "$name can only be called directly: a transfer's schema is the static type of the value at its call, which a function value of it has no call to know" $e
     }
 }
 

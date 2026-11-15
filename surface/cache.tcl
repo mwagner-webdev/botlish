@@ -40,7 +40,11 @@
 # no search path), so nothing else can change which files a program reads --
 # but which packages are installed, below the root: every package directory
 # the loader asked about (there or not) and every file of a package's tree
-# it probed are dependencies too (BOT-MODULES-MILESTONE-1.md).
+# it probed are dependencies too (BOT-MODULES-MILESTONE-1.md), and so are
+# the paths of each standard-library module the loader loads for a native's
+# contract type, which no import names (surface/modules.tcl's
+# ContractModules; STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md),
+# there or not: a library without the module declares no such type.
 #
 # Targets: the key holds the full target name (macos-aarch64, never its
 # architecture alone), so a compilation for one target never reads another
@@ -144,7 +148,8 @@ proc surface::cache::Contents {path existsVar} {
 # ModuleFile: the host's when "", as the build's) and its application-module
 # path under ROOT, the program's application root ("" for none) -- imports
 # are the only thing that loads a module (IMPORTS.md: dependencies are
-# declared, never discovered), so these are every file its build read
+# declared, never discovered), so these -- with the modules a native's
+# contract type loads, below -- are every module file its build read
 # besides the program, and the paths it found no file at -- with the text
 # its build read (READS: PATH -> text). Every candidate path of every
 # namespace is kept, whichever exists: a file appearing at another one
@@ -195,6 +200,15 @@ proc surface::cache::Dependencies {hir reads {target ""} {root ""} {probes ""}} 
             if {$root ne ""} {
                 lappend paths [surface::modules::NamespaceFile $root $namespace]
             }
+        }
+    }
+    # The modules loaded for natives' contract types (surface/modules.tcl's
+    # ContractTypes), there or not: derived from the import environments as
+    # the loader derives them, so a caller with a HIR alone has them too.
+    foreach owner [surface::modules::ContractModules [dict get $hir declarations imports]] {
+        lappend paths [surface::modules::ModulePath $owner]
+        if {$arch ne ""} {
+            lappend paths [surface::modules::ArchModulePath $owner $arch]
         }
     }
     set directories {}
