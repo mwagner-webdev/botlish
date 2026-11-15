@@ -1,0 +1,19 @@
+# case: deep yields -- a helper that always fails after its yield: its call never returns, so the root's handled call of it is KNOWN-ERROR (a root that always fails after yielding is not: its segments complete by yielding)
+# class: rejected-correct
+# expect: rejected KNOWN-ERROR
+import std::coroutine
+
+error Broke
+
+fn helper(n: int) -> int errors Broke:
+    yield n
+    fail Broke
+
+fn source() -> int:
+    helper(1):
+        on Broke:
+            -1
+
+coroutine {step, first} = source()
+final = step()
+[first, final]

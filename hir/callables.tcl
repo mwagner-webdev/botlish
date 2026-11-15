@@ -787,6 +787,17 @@ proc hir::callables::ArgContexts {hir e} {
             lset contexts 0 [hir::typeOf $hir [lindex $args 0]]
             return $contexts
         }
+        enum-test - enum-payload {
+            # A match's selection, enum#is or enum#payload(VALUE, "ID",
+            # "CASE") (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md): the test
+            # reads the value's identity only (nothing of it is called,
+            # retained or erased), and the payload leaves at exactly the
+            # case's declared payload type (hir::types' enum-payload shape),
+            # so whatever the value bears keeps its contract.
+            set contexts $none
+            lset contexts 0 [hir::typeOf $hir [lindex $args 0]]
+            return $contexts
+        }
         thread-entry {
             # std::thread::entry(NAME): the entry leaves as an Entry whose
             # one call is a new VM's (hir/threads.tcl), with exactly its

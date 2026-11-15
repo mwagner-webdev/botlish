@@ -1,0 +1,149 @@
+# ranges-enums.bot -- the mid-end-shaped kernel (audit/mid-end-port/
+# README.md, "The kernel") with payload-bearing nodes and exhaustive
+# matches (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md).
+#
+# The same interval analysis as ranges-structs.bot -- a synthetic program of
+# FUNCTIONS expression trees from the same seeded LCG, at most DEPTH deep;
+# whole-program rounds over the functions' summaries until no summary
+# changes (widening after round 6); every node's range stamped into side
+# tables -- and the same value, [nodes, rounds, checksum]. What differs is
+# the node: one enum whose every case carries exactly its meaningful typed
+# fields (a constant its value, an addition its two operands, ...), where
+# ranges-structs.bot has a Kind beside three generic integer fields, and
+# the evaluator selects a node's case with a match that names every case
+# and binds only the selected case's fields. tools/kernel.tcl rewrites the
+# `run(...)` line for other sizes.
+import std::mutable_vector
+import std::mutable_array
+
+enum Node:
+    Const {value: int},
+    Param,
+    Add {left: int, right: int},
+    If {condition: int, yes: int, no: int},
+    Call {function: int},
+
+struct Range:
+    lo: int
+    hi: int
+
+struct Gen:
+    index: int
+    seed: int
+
+big = 1000000000
+
+fn next(seed: int) -> int:
+    (seed * 1103515245 + 12345).mod(2147483648)
+
+fn smaller(x: int, y: int) -> int:
+    if x < y:
+        x
+    else:
+        y
+
+fn larger(x: int, y: int) -> int:
+    if x > y:
+        x
+    else:
+        y
+
+fn leaf(s: int, functions: int) -> Node:
+    pick = s.mod(3)
+    if pick == 0:
+        return Node::Const {value: s.mod(100)}
+    if pick == 1:
+        return Node::Param
+    Node::Call {function: s.mod(functions)}
+
+fn gen(depth: int, seed: int, functions: int, place nodes: MutableVector[Node]) -> Gen:
+    s1 = next(seed)
+    r = s1.mod(100)
+    if depth == 0 or r < 25:
+        s2 = next(s1)
+        nodes.push(leaf(s2, functions))
+        return Gen {index: nodes.length() - 1, seed: s2}
+    if r < 65:
+        left = gen(depth - 1, s1, functions, nodes)
+        right = gen(depth - 1, left.seed, functions, nodes)
+        nodes.push(Node::Add {left: left.index, right: right.index})
+        return Gen {index: nodes.length() - 1, seed: right.seed}
+    cond = gen(depth - 1, s1, functions, nodes)
+    yes = gen(depth - 1, cond.seed, functions, nodes)
+    no = gen(depth - 1, yes.seed, functions, nodes)
+    nodes.push(Node::If {condition: cond.index, yes: yes.index, no: no.index})
+    Gen {index: nodes.length() - 1, seed: no.seed}
+
+fn eval(i: int, nodes: MutableVector[Node], sumlo: MutableArray[int], sumhi: MutableArray[int], place lo: MutableArray[int], place hi: MutableArray[int]) -> Range errors IndexNotFound:
+    r = match nodes.at(i):
+        case Node::Const {value}:
+            Range {lo: value, hi: value}
+        case Node::Param:
+            Range {lo: 0, hi: 10}
+        case Node::Call {function}:
+            Range {lo: sumlo.at(function), hi: sumhi.at(function)}
+        case Node::Add {left, right}:
+            x = eval(left, nodes, sumlo, sumhi, lo, hi)
+            y = eval(right, nodes, sumlo, sumhi, lo, hi)
+            Range {lo: larger(0 - big, x.lo + y.lo), hi: smaller(big, x.hi + y.hi)}
+        case Node::If {condition, yes, no}:
+            eval(condition, nodes, sumlo, sumhi, lo, hi)
+            x = eval(yes, nodes, sumlo, sumhi, lo, hi)
+            y = eval(no, nodes, sumlo, sumhi, lo, hi)
+            Range {lo: smaller(x.lo, y.lo), hi: larger(x.hi, y.hi)}
+    lo.set(i, r.lo)
+    hi.set(i, r.hi)
+    r
+
+# One round over every function; whether a summary changed.
+fn round(n: int, functions: int, roots: MutableArray[int], nodes: MutableVector[Node], place sumlo: MutableArray[int], place sumhi: MutableArray[int], place lo: MutableArray[int], place hi: MutableArray[int]) -> bool errors IndexNotFound:
+    fold f from 0 to functions with intermediate changed false:
+        r = eval(roots.at(f), nodes, sumlo, sumhi, lo, hi)
+        oldlo = sumlo.at(f)
+        oldhi = sumhi.at(f)
+        joinlo = smaller(oldlo, r.lo)
+        joinhi = larger(oldhi, r.hi)
+        newlo = if n >= 6 and joinlo < oldlo:
+            0 - big
+        else:
+            joinlo
+        newhi = if n >= 6 and joinhi > oldhi:
+            big
+        else:
+            joinhi
+        if newlo == oldlo and newhi == oldhi:
+            continue
+        sumlo.set(f, newlo)
+        sumhi.set(f, newhi)
+        true
+
+fn analyze(n: int, functions: int, roots: MutableArray[int], nodes: MutableVector[Node], place sumlo: MutableArray[int], place sumhi: MutableArray[int], place lo: MutableArray[int], place hi: MutableArray[int]) -> int errors IndexNotFound:
+    changed = round(n, functions, roots, nodes, sumlo, sumhi, lo, hi)
+    if not changed or n == 30:
+        return n + 1
+    analyze(n + 1, functions, roots, nodes, sumlo, sumhi, lo, hi)
+
+fn build(f: int, functions: int, depth: int, seed: int, place nodes: MutableVector[Node], place roots: MutableArray[int]) -> int errors IndexNotFound:
+    if f == functions:
+        return seed
+    g = gen(depth, seed, functions, nodes)
+    roots.set(f, g.index)
+    build(f + 1, functions, depth, g.seed, nodes, roots)
+
+fn run(functions: int, depth: int) -> List[int] errors IndexNotFound:
+    nodes = std::mutable_vector::from_list([Node::Const {value: 0}])
+    roots = std::mutable_array::create(functions, 0)
+    build(0, functions, depth, 42, nodes, roots)
+    count = nodes.length()
+    sumlo = std::mutable_array::create(functions, 0)
+    sumhi = std::mutable_array::create(functions, 0)
+    lo = std::mutable_array::create(count, 0)
+    hi = std::mutable_array::create(count, 0)
+    rounds = analyze(0, functions, roots, nodes, sumlo, sumhi, lo, hi)
+    check = fold i from 0 to count with intermediate acc 0:
+        (acc * 31 + lo.at(i) * 3 + hi.at(i) * 7).mod(1000000007)
+    [count, rounds, check]
+
+run(1500, 8):
+    on IndexNotFound:
+        []

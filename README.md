@@ -279,7 +279,8 @@ built for rich debugging.
   (nothing overflows), `Float64` is finite (an operation that would make NaN
   or an infinity fails with a declared error instead), a String is a
   sequence of Unicode scalar values, and
-  memory is managed for you. Closures, structs and destructuring, enums,
+  memory is managed for you. Closures, structs and destructuring, enums
+  with exhaustive matches,
   traits, coroutines and modules, with a small standard library written in
   Botlish itself.
 * **Native-capable.** One semantics, several backends. The native one

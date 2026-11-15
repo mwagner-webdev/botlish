@@ -191,6 +191,14 @@ proc hir::interchange::decode {text args} {
     # is no proof, whoever wrote it -- the claims are verified again here,
     # and text that states anything else is refused.
     hir::emission::reverify hir
+    # Matches (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md): text claims no
+    # exhaustiveness -- every match's chain is held again to the shape a
+    # match builds and to its enum's declared cases, and every payload
+    # taken to its own selection.
+    set problem [hir::match::validate $hir]
+    if {$problem ne ""} {
+        throw {HIR INTERCHANGE MATCH} "HIR interchange text with a malformed match: $problem"
+    }
     return $hir
 }
 

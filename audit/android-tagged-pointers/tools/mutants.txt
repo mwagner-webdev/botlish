@@ -1,0 +1,273 @@
+# Mutants of the target's C address encoding and of byte exposures made by
+# the C call (audit/android-tagged-pointers/tools/mutate.tcl;
+# RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md, "Mutation testing"):
+# the encoding (native/src/runtime/value.rs), its one statement per target
+# and the target's fingerprint (codegen/target.rs, runtime/aotimage.rs,
+# codegen/mod.rs's program record, main.rs's runtime-abi), generated code's
+# encode and decode (codegen/clif.rs), the exposure the C call makes
+# (codegen/clif.rs's exposure_address, native/lower.tcl's BorrowCall), and
+# the compiler's comparisons with a target's runtime (native/support.tcl,
+# native/library.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...        the tests that must kill it (at-* android-target.test,
+#                      cf-* c-ffi.test, cb-* c-callbacks.test; rust:FILTER
+#                      the native crate's cargo tests matching FILTER)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant is killed only by a detector its !! line names failing; a mutant
+# that does not build is NOT-BUILT, never killed. The at-* detectors need
+# ANDROID_NDK_ROOT, qemu-aarch64 and BOTLISH_ANDROID_ROOTS (and, for
+# at-tagged-sdl3, Android's libSDL3.so: tests/cffi/sdl3.tcl android).
+
+# ---------------------------------------------------------------------------
+# Full-width pointers: the encoding
+
+@@ decode-masks-tag the tagged encoding's decode clears the top byte (a tag "normalized" away)
+!! rust:address_word_tests at-tagged-pointers
+## native/src/runtime/value.rs
+<<<<
+        ((v as i64) >> 4).rotate_right(self.rotation())
+====
+        ((v as i64) >> 4).rotate_right(self.rotation()) & 0x00ff_ffff_ffff_ffff
+>>>>
+
+@@ encode-clears-tag the tagged encoding's encode drops the top byte before it stores the address
+!! rust:address_word_tests at-tagged-pointers
+## native/src/runtime/value.rs
+<<<<
+        ((address.rotate_left(self.rotation()) as u64) << 4) | CPTR_TAG
+====
+        (((address & 0x00ff_ffff_ffff_ffff).rotate_left(self.rotation()) as u64) << 4) | CPTR_TAG
+>>>>
+
+@@ fits-ignores-rotation the fits check is the old sign-extended 60-bit one whatever the encoding (a tagged pointer refused on Android again)
+!! rust:address_word_tests at-tagged-heap-pointer
+## native/src/runtime/value.rs
+<<<<
+        let rotated = address.rotate_left(self.rotation());
+====
+        let rotated = address;
+>>>>
+
+@@ android-runtime-untagged Android's runtime keeps the default encoding (its fingerprint then the desktop one's)
+!! at-runtime-identity at-tagged-pointers
+## native/src/runtime/value.rs
+<<<<
+pub const ADDRESS_WORD: AddressWord =
+    if cfg!(target_os = "android") { AddressWord::TopByteTagged } else { AddressWord::Canonical60 };
+====
+pub const ADDRESS_WORD: AddressWord = AddressWord::Canonical60;
+>>>>
+
+@@ desktop-rotates the default encoding rotates too (a desktop target's words and code change)
+!! rust:address_word_tests rust:address_word_is_the_runtimes
+## native/src/runtime/value.rs
+<<<<
+            AddressWord::Canonical60 => 0,
+====
+            AddressWord::Canonical60 => 8,
+>>>>
+
+@@ null-word the null pointer is no longer the bare tag
+!! rust:address_word_tests cf-result-provenance
+## native/src/runtime/value.rs
+<<<<
+pub const CPTR_NULL: Value = CPTR_TAG;
+====
+pub const CPTR_NULL: Value = CPTR_TAG | (1 << 4);
+>>>>
+
+# ---------------------------------------------------------------------------
+# Target specialization: one statement per target, the target's fingerprint
+
+@@ android-codegen-untagged code generated for Android uses the default encoding (the runtime's tagged one disagrees)
+!! rust:address_word_is_the_runtimes rust:android_code_rotates_by_the_top_byte at-tagged-pointers
+## native/src/codegen/target.rs
+<<<<
+    if android && matches!(target.architecture, target_lexicon::Architecture::Aarch64(_)) {
+====
+    if android && matches!(target.architecture, target_lexicon::Architecture::X86_64) {
+>>>>
+
+@@ every-aarch64-tagged every AArch64 target's code uses the tagged encoding (Linux and macOS desktop code changes)
+!! rust:address_word_is_the_runtimes rust:desktop_code_never_rotates
+## native/src/codegen/target.rs
+<<<<
+    if android && matches!(target.architecture, target_lexicon::Architecture::Aarch64(_)) {
+====
+    if matches!(target.architecture, target_lexicon::Architecture::Aarch64(_)) {
+>>>>
+
+@@ fingerprint-ignores-encoding the fingerprint holds no word of the tagged encoding (a stale Android runtime is accepted)
+!! rust:abi_fingerprint_states_the_address_encoding rust:address_word_is_the_runtimes at-runtime-identity
+## native/src/runtime/aotimage.rs
+<<<<
+        super::value::AddressWord::TopByteTagged => &[ADDRESS_WORD_MARK, 8],
+====
+        super::value::AddressWord::TopByteTagged => &[],
+>>>>
+
+@@ record-host-fingerprint an Android library's program record states the driver's own fingerprint (the Android runtime refuses it)
+!! at-application-run at-tagged-heap-pointer
+## native/src/codegen/mod.rs
+<<<<
+    let fingerprint = target::runtime_fingerprint(module.isa().triple());
+====
+    let fingerprint = crate::runtime::aotimage::abi_fingerprint();
+>>>>
+
+@@ runtime-abi-host the driver's runtime-abi TRIPLE states its own fingerprint whatever the triple
+!! at-runtime-identity
+## native/src/main.rs
+<<<<
+        emit(&tcl_list(&["runtime-abi".to_string(), format!("{:016x}", codegen::target::runtime_fingerprint(&triple))]));
+====
+        emit(&tcl_list(&["runtime-abi".to_string(), format!("{:016x}", runtime::aotimage::ABI_FINGERPRINT)]));
+>>>>
+
+@@ support-host-abi a target support package's runtime is compared with the driver's own fingerprint, not its target's
+!! at-library-elf
+## native/support.tcl
+<<<<
+    set mine [native::runtimeAbi $triple]
+====
+    set mine [native::runtimeAbi]
+>>>>
+
+@@ manifest-host-abi a library's manifest records the driver's own fingerprint, not its target's runtime's
+!! at-tagged-manifest
+## native/library.tcl
+<<<<
+runtimeAbi [S [native::runtimeAbi [dict get [core::cabi::target $target] triple]]]
+====
+runtimeAbi [S [native::runtimeAbi]]
+>>>>
+
+# ---------------------------------------------------------------------------
+# Generated code: the inline encode and decode
+
+@@ codegen-decode-unrotated generated code decodes a C address word with the shift alone (Android's pointers handed to C rotated)
+!! rust:android_code_rotates_by_the_top_byte at-tagged-pointers
+## native/src/codegen/clif.rs
+<<<<
+        let shifted = self.b.ins().sshr_imm_s(v, 4);
+        match self.address_word.rotation() {
+            0 => shifted,
+            r => self.b.ins().rotr_imm_u(shifted, r as i64),
+        }
+====
+        self.b.ins().sshr_imm_s(v, 4)
+>>>>
+
+@@ codegen-encode-unrotated generated code encodes a C pointer result without the rotation (a tagged result refused, or a wrong word)
+!! rust:android_code_rotates_by_the_top_byte at-tagged-heap-pointer
+## native/src/codegen/clif.rs
+<<<<
+    fn cptr_rotated(&mut self, address: ir::Value) -> ir::Value {
+        match self.address_word.rotation() {
+            0 => address,
+            r => self.b.ins().rotl_imm_u(address, r as i64),
+        }
+    }
+====
+    fn cptr_rotated(&mut self, address: ir::Value) -> ir::Value {
+        address
+    }
+>>>>
+
+@@ callback-address-unrotated a callback's C entry point is encoded without the rotation (Android's qsort and user-data callbacks call the wrong address)
+!! at-tagged-pointers
+## native/src/codegen/clif.rs
+<<<<
+                let rotated = self.cptr_rotated(address);
+                let shifted = self.b.ins().ishl_imm_u(rotated, 4);
+====
+                let shifted = self.b.ins().ishl_imm_u(address, 4);
+>>>>
+
+@@ result-fits-unrotated the result's fits check compares the unrotated address (every tagged pointer refused NATIVE ADDRESS)
+!! at-tagged-heap-pointer at-tagged-sdl3
+## native/src/codegen/clif.rs
+<<<<
+            let fits = self.b.ins().icmp(IntCC::Equal, back, rotated);
+====
+            let fits = self.b.ins().icmp(IntCC::Equal, back, returned);
+>>>>
+
+# ---------------------------------------------------------------------------
+# Byte exposure: made by the C call, its full width
+
+@@ exposure-small-int a C call's exposure is the small Int it was (bytesaddr, untagged by a shift): Android's tagged heap addresses refused again
+!! rust:an_exposure_is_the_storage_plus_the_payload_offset cf-nir at-application-run
+## native/lower.tcl
+<<<<
+        if {!$extern} {
+            # The fixture's operations take the payload address
+====
+        if {1} {
+            # The fixture's operations take the payload address
+>>>>
+## native/src/codegen/clif.rs
+<<<<
+            let word = if exposed[i] {
+                self.exposure_address(v, mutable[i])
+====
+            let word = if exposed[i] {
+                self.b.ins().sshr_imm_s(v, 1)
+>>>>
+
+@@ exposure-masks-tag the exposure's address loses its top byte (C reads through an untagged alias of a tagged block)
+!! at-tagged-pointers
+## native/src/codegen/clif.rs
+<<<<
+        self.b.ins().iadd_imm_s(storage, crate::runtime::bytesobj::BYTES_PAYLOAD_OFFSET as i64)
+====
+        let address = self.b.ins().iadd_imm_s(storage, crate::runtime::bytesobj::BYTES_PAYLOAD_OFFSET as i64);
+        self.b.ins().band_imm_s(address, 0x00ff_ffff_ffff_ffff)
+>>>>
+
+@@ exposure-header-address the exposure hands C the storage's header, not its payload
+!! rust:an_exposure_is_the_storage_plus_the_payload_offset cf-borrow-sha256-shape
+## native/src/codegen/clif.rs
+<<<<
+        self.b.ins().iadd_imm_s(storage, crate::runtime::bytesobj::BYTES_PAYLOAD_OFFSET as i64)
+====
+        self.b.ins().iadd_imm_s(storage, 8)
+>>>>
+
+@@ exposure-kinds-swapped the readable and writable kind checks are interchanged
+!! cf-borrow-sha256-shape cf-nir
+## native/src/codegen/clif.rs
+<<<<
+        let kind = if writable { Kind::MutByteStore } else { Kind::ByteStore };
+====
+        let kind = if writable { Kind::ByteStore } else { Kind::MutByteStore };
+>>>>
+
+@@ exposure-writable-unmarked a writable storage is not marked mutable= (its kind check refuses it)
+!! cf-borrow-sha256-shape cf-nir
+## native/lower.tcl
+<<<<
+        if {[hir::borrow::IsMutableOwner $owner]} {
+            lappend writable $i
+        }
+====
+        if {0} {
+            lappend writable $i
+        }
+>>>>
+
+@@ exposure-no-keepalive the storages a C call exposes are not kept alive after it
+!! cf-nir
+## native/lower.tcl
+<<<<
+        KeepStoragesAlive fn [lmap i [lsort -integer [dict keys $access]] {lindex $operands $i}] $e
+====
+        KeepStoragesAlive fn {} $e
+>>>>

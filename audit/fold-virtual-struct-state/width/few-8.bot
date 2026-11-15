@@ -1,0 +1,20 @@
+# few-8.bot -- a 8-field fold, one field updated per iteration (tools/gen-width.tcl).
+import std::list
+
+struct S:
+    f0: int
+    f1: int
+    f2: int
+    f3: int
+    f4: int
+    f5: int
+    f6: int
+    f7: int
+
+fn f(n: int) -> int:
+    t = fold i from 0 to n with intermediate s S {f0: 0, f1: 0, f2: 0, f3: 0, f4: 0, f5: 0, f6: 0, f7: 0}:
+        S {f0: (s.f0 + i).mod(1000), f1: s.f1, f2: s.f2, f3: s.f3, f4: s.f4, f5: s.f5, f6: s.f6, f7: s.f7}
+    t.f0 + t.f7
+
+n = 1000
+f(n)

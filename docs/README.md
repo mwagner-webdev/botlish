@@ -619,7 +619,7 @@ element type, `std::list::append` the lub of it and the new element's.
 | `std::str::lowercase` | str → str (Unicode 16 simple one-to-one case mapping; see §"Strings") |
 | `std::str::concat` | str, str → str |
 | `std::str::append_char` | str, UnicodeChar → str: the String followed by the one character (`std::str::length` + 1 characters; the argument is unchanged), as `std::list::append` is to a List: the way a character becomes text, with no one-character String of its own |
-| `std::str::encode_utf8` | str → list of the UTF-8 bytes, each 0..255: statically `List[std::byte::Byte]` when the compilation has loaded `std::byte` (directly or through a module that imports it, such as `std::abi::bytes`), otherwise plain `list` (TEXT-AND-COLLECTION-PRECISION-CENSUS.md, C.3); `std::abi::bytes::decode_utf8` (errors `InvalidUtf8`) is the way back |
+| `std::str::encode_utf8` | str → list of the UTF-8 bytes, each 0..255: statically `List[std::byte::Byte]` in every program, whatever it imports -- the compiler loads `std::byte` for this contract without making any name of it visible (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md); taken as a value it is a function returning `List[std::byte::Byte]`; `std::abi::bytes::decode_utf8` (errors `InvalidUtf8`) is the way back |
 | `std::str::char_at` | str, int → UnicodeChar, errors `IndexNotFound`: the scalar at character index `0 <= i < length` (the index space of `length`/`substring`); any other Int index fails with `IndexNotFound`; never allocates. With char literals (`c == '%'`) and `std::char::scalar_value` it classifies a String's characters without a one-character String or an `encode_utf8` List (ENCODE-UTF8-ALLOCATION-RESEARCH.md) |
 | `std::str::is_tcl_alpha` `std::str::is_tcl_alnum` | one-scalar str → bool (temporary Tcl-compatibility classes, core/tclcompat.tcl) |
 | `std::char::scalar_value` | UnicodeChar → int (the Unicode scalar value: `0..0x10FFFF` without the surrogates, never a byte or a code unit of an encoding) |
@@ -931,9 +931,11 @@ Implementation notes (not part of the semantics):
 Surface syntax beyond the minimal language of §17, macros, objects (structs,
 STRUCTS.md, are immutable values: no mutable struct, update syntax, methods or
 inheritance), assignment, mutable
-variables, exceptions, `?` propagation, pattern matching (enums, ENUMS.md, are
-closed sums whose cases may carry named-field payloads, with no `match` or
-exhaustiveness yet, so a payload cannot be read back out of a value), a type checker
+variables, exceptions, `?` propagation, general pattern matching (enums,
+ENUMS.md, are closed sums whose cases may carry named-field payloads, selected
+by an exhaustive `match` with one `case Enum::Case:` arm per case,
+PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md -- no wildcard, guard, literal or
+positional pattern, and no match over other values), a type checker
 beyond refinement tracking (struct destructuring, STRUCT-DESTRUCTURING.md, is
 irrefutable named projection, not pattern matching), async, coroutines, threads, or FFI. A small
 one-file/one-namespace module system *is* implemented (§17's
@@ -1048,9 +1050,15 @@ callable type names the code a call runs (for a Block: its code target,
 whatever environment the value carries -- two closures of one factory share
 it). Each has one structural supertype, `hir::types::structuralOf`: a
 block's declared parameter types (untyped: `any`), result type and
-declared errors; a native's arity and `-result-type` (its arguments are
-run-time checked, so its structural arguments are `any`; natives declare no
-errors). Compatibility is the call contract's: arguments contravariant
+declared errors; a native's arity, its registered errors and the result
+every call of it has (`hir::types::NativeResult`): its `-result-shape`'s
+result when the shape reads no argument (`core::native::
+argumentIndependentShapes`), so that `std::str::encode_utf8` taken as a
+value is `Fn{args: [any], return: List[std::byte::Byte], errors: []}` and
+`argv` returns `List[str]`, else its `-result-type` (its arguments are
+run-time checked, so its structural arguments are `any`;
+STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md, "The native as a
+function value"). Compatibility is the call contract's: arguments contravariant
 (declared-parameter admissibility), return covariant, errors a subset. The
 `lub` of two different compatible callables is their narrowest common
 structural type (the meet of the arguments, the lub of the returns, the
@@ -1888,6 +1896,27 @@ add10(32)          # 42 (add captures x)
   value or alias, no ordinal, integer or String conversion and no ordering:
   `==`, `!=` and `hash` compare the enum, the case and the payload. `enum`
   is a contextual word.
+* A **match** selects one case of an enum value
+  (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md):
+
+      match node:
+          case Node::Const {value}:
+              value
+          case Node::Param:
+              0
+          case Node::Add p:
+              p.left + p.right
+
+  evaluates the scrutinee once and runs the arm naming its case; the match
+  is that arm's value (a statement, or the value of `=`, `return` or a
+  destructuring, like an if; an arm may return, fail, break or continue).
+  An arm receives the payload destructured by name, bound whole, or not at
+  all, each binding at its case's declared field type and local to its
+  arm. The compiler proves the arms name every case of the scrutinee's enum
+  exactly once (MATCH-NOT-EXHAUSTIVE, MATCH-DUPLICATE-CASE); a scrutinee
+  whose enum is not known statically (`any`, another type) is a TYPE error.
+  Matching an affine enum moves it; selection never compares payloads.
+  `match` and `case` are contextual words.
 * **Opaque structs.** `opaque struct Token:` declares an ordinary struct whose
   representation belongs to the module that declares it: only that module may
   construct it (`token::Token {...}`) or inspect it (`x.value`, `{value} = x`);

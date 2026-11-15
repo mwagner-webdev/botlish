@@ -45,10 +45,19 @@
 # columns' -- is genuine best-of-N execution with compilation excluded.
 #
 # A reference program runs the same way (one untimed warmup, then N timed
-# runs in its own process, self-reporting its best time and value as
-# "value: V" / "best_us: F" lines). Rust and Go sources are compiled once
-# per bench.tcl run into a private temporary directory (rustc -O --edition
-# 2021; go build), deleted when it ends.
+# runs in its own process, each timed run one call, self-reporting its best
+# time and value as "value: V" / "best_us: F" lines). Rust and Go sources are
+# compiled once per bench.tcl run into a private temporary directory (rustc
+# -O --edition 2021; go build), deleted when it ends. A Go program is built
+# with the timing every Go program shares, bench/equivalents/go/clock: its
+# timed loop and the clock of this platform (on Windows the performance
+# counter, the clock Rust's Instant reads there, since Go's own advances in
+# steps of up to 15.6 ms; clock/best.go).
+#
+# The host line names the processor, its model and how many logical
+# processors run. CI's runners of one label are machines of several models,
+# and the times and the ratios between columns differ by model, so two
+# hosts' tables compare only on the same model.
 #
 # Isolation: each program's Botlish backends run in a child tclsh (this
 # script with -child), one program per child, with a timeout (-timeout,
@@ -476,6 +485,12 @@ set rustc [findTool rustc --version]
 set go [findTool go version]
 set toolNames [dict create python "python3 (or python)" rust rustc go go]
 set exeSuffix [expr {$::tcl_platform(platform) eq "windows" ? ".exe" : ""}]
+# The timing every Go reference program is built with (clock/best.go): the
+# loop and this platform's clock. go build applies no build constraint to
+# the files it is named, so the platform's file is chosen here.
+set goTiming [lmap file [list best.go [expr {$::tcl_platform(platform) eq "windows" ? "clock_windows.go" : "clock_other.go"}]] {
+    file join $root bench equivalents go clock $file
+}]
 set buildDir ""
 # The reference programs print UTF-8 whatever the console's code page is.
 set env(PYTHONIOENCODING) utf-8
@@ -500,7 +515,7 @@ proc parseEquivalentOutput {output} {
 # DIR (bench/equivalents or bench/experimental/equivalents) for BASE, or ""
 # when there is none. TAG keeps the binaries of the two directories apart.
 proc runEquivalent {language dir tag base} {
-    global python rustc go toolNames exeSuffix buildDir runs timeout
+    global python rustc go goTiming toolNames exeSuffix buildDir runs timeout
     set extension [dict get {python py rust rs go go} $language]
     set source [file join $dir $language $base.$extension]
     if {![file exists $source]} {
@@ -517,9 +532,20 @@ proc runEquivalent {language dir tag base} {
             set buildDir [file tempdir botlish-bench-build]
         }
         set binary [file join $buildDir $tag-$language-$base$exeSuffix]
-        set build [expr {$language eq "rust"
-            ? [list {*}$rustc -O --edition 2021 $source -o $binary]
-            : [list {*}$go build -o $binary $source]}]
+        if {$language eq "rust"} {
+            set build [list {*}$rustc -O --edition 2021 $source -o $binary]
+        } else {
+            # The program and the shared timing (goTiming), copied into one
+            # directory: go build takes named files from one directory.
+            set dir [file join $buildDir go-sources $tag-$base]
+            file mkdir $dir
+            set sources {}
+            foreach file [list $source {*}$goTiming] {
+                file copy -force $file $dir
+                lappend sources [file join $dir [file tail $file]]
+            }
+            set build [list {*}$go build -o $binary {*}$sources]
+        }
         lassign [runPipe $build $timeout] outcome output
         if {$outcome ne "ok" || ![file exists $binary]} {
             return [list error "" 0 "" "build failed ($outcome): [lastLine $output]"]
@@ -607,7 +633,60 @@ proc tableHeader {title} {
     }
 }
 
-set hostLine "Host: [core::cabi::hostTarget] ($::tcl_platform(os) $::tcl_platform(osVersion)), Tcl [info patchlevel];\
+# The host's processor: "MODEL, N logical processors", either part said to
+# be unknown where nothing here can read it. On Linux the model is
+# /proc/cpuinfo's "model name", which an Arm kernel does not give: there
+# lscpu names the core from its implementer and part (Neoverse-N2), else
+# they are shown as numbers. On Windows it is the registry's
+# ProcessorNameString, else the family, model and stepping of
+# PROCESSOR_IDENTIFIER.
+proc hostProcessor {} {
+    set model ""
+    set count ""
+    switch -- $::tcl_platform(os) {
+        Linux {
+            set info ""
+            catch {set info [core::ReadFile /proc/cpuinfo]}
+            regexp -line {^model name[ \t]*:[ \t]*(.*\S)} $info -> model
+            if {$model eq "" && ![catch {exec -ignorestderr lscpu} lscpu]} {
+                regexp -line {^Model name:[ \t]*(.*\S)} $lscpu -> model
+            }
+            if {$model eq "" && [regexp -line {^CPU implementer[ \t]*:[ \t]*(\S+)} $info -> implementer]
+                    && [regexp -line {^CPU part[ \t]*:[ \t]*(\S+)} $info -> part]} {
+                set model "CPU implementer $implementer, part $part"
+            }
+            set count [regexp -all -line {^processor[ \t]*:} $info]
+        }
+        Darwin {
+            catch {set model [string trim [exec sysctl -n machdep.cpu.brand_string]]}
+            catch {set count [string trim [exec sysctl -n hw.logicalcpu]]}
+        }
+        default {
+            if {$::tcl_platform(platform) eq "windows"} {
+                catch {
+                    package require registry
+                    set model [string trim [registry get\
+                        {HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\CentralProcessor\0} ProcessorNameString]]
+                }
+                if {$model eq "" && [info exists ::env(PROCESSOR_IDENTIFIER)]} {
+                    set model $::env(PROCESSOR_IDENTIFIER)
+                }
+                if {[info exists ::env(NUMBER_OF_PROCESSORS)]} {
+                    set count $::env(NUMBER_OF_PROCESSORS)
+                }
+            }
+        }
+    }
+    if {$model eq ""} {
+        set model "unknown model"
+    }
+    if {![string is integer -strict $count] || $count < 1} {
+        return "$model, unknown number of logical processors"
+    }
+    return "$model, $count logical processor[expr {$count == 1 ? "" : "s"}]"
+}
+
+set hostLine "Host: [core::cabi::hostTarget] ($::tcl_platform(os) $::tcl_platform(osVersion)), [hostProcessor], Tcl [info patchlevel];\
     reference toolchains: [toolVersion $python --version], [toolVersion $rustc --version], [toolVersion $go version]"
 set budgetText [expr {$budget > 0 ? "each Botlish backend's runs stop once its cell has taken $budget s, warmup included (a cell that stopped early shows its runs, \"(1/$runs)\")" : "no time budget"}]
 if {$markdown} {

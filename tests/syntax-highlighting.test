@@ -363,7 +363,11 @@ proc shVimGroups {path positions} {
         }
         puts $script "redir END\nqa!"
         close $script
-        exec vim -Nu NONE -i NONE -es -S [file join $dir check.vim] << ""
+        # -n: no swap file. It is the one file Vim would write outside $dir,
+        # beside PATH, and a second Vim of PATH -- this file's run on the
+        # other backend, at the same moment (tests/local.tcl), or an editor --
+        # exits 1 on it, silently (TEST-VIM-CONCURRENT-ISOLATION-FIX.md).
+        exec vim -Nu NONE -i NONE -n -es -S [file join $dir check.vim] << ""
         return [lrange [split [string trim [shRead [file join $dir out.txt]]] \n] 0 end]
     } finally {
         file delete -force $dir
@@ -426,6 +430,34 @@ test sh-grammar-vim-corpus {the Vim syntax agrees with the token IR on real modu
     }
     set mismatches
 } -cleanup {unset -nocomplain mismatches file path text starts declared classes item start end class line m} -result {}
+
+# The holder is a Vim that keeps a file open, with the swap file beside it a
+# Vim without -n makes: the helper run beside it gives that file's groups.
+# The copy is a private one: a swap file beside the fixture itself would
+# fail a concurrent run of this file (TEST-VIM-CONCURRENT-ISOLATION-FIX.md).
+test sh-grammar-vim-beside-swap-file {Vim's groups for a file another Vim holds open with a swap file are the file's own: the helper uses no swap file (-n), so a concurrent run of this file on another backend (tests/local.tcl) or an editor of the fixture cannot make it fail} -constraints vimEditor -setup {
+    set dir [file tempdir sh-vim-held]
+    set copy [file join $dir sample.bot]
+    file copy $::shFixture $copy
+    set holder [open |[list vim -Nu NONE -i NONE -es $copy 2>@1] r+]
+    fconfigure $holder -buffering line
+} -body {
+    # Vim makes the swap file when it reads the file, before it reads a
+    # command: once the holder answers, its swap file is there.
+    puts $holder {verbose echon "ready\n"}
+    set ready [gets $holder]
+    set held [file exists [file join $dir .sample.bot.swp]]
+    set classes [shFixtureClasses]
+    list $ready $held [shSyntaxMismatches $classes [shVimGroups $copy [lmap c $classes {lrange $c 0 1}]]]
+} -cleanup {
+    try {
+        puts $holder qa!
+        close $holder
+    } finally {
+        file delete -force $dir
+    }
+    unset -nocomplain dir copy holder ready held classes
+} -result {ready 1 {}}
 
 testConstraint nodeTextMate [expr {[auto_execok node] ne ""
     && [file isdirectory [file join $::projectRoot editors vscode node_modules vscode-textmate]]

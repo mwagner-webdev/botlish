@@ -1,0 +1,126 @@
+# meter -- a parking meter's three activities, each an ordinary coroutine,
+# and a session that interleaves them (C-COROUTINE-FRAMES-MILESTONE-1.md):
+#
+#   keypad        the input interaction: resumed with one Key per key
+#                 press, it yields what the screen shows, and completes
+#                 with the zone and the minutes chosen
+#   payment       the payment sequence: it yields its stages, then asks the
+#                 Payment provider for an authorization, which may fail
+#                 with Declined -- the coroutine then ends failed, and says
+#                 so again on every later resume
+#   housekeeping  the periodic status: a heartbeat stamped by the Clock
+#
+# There is no event loop: session plays a scripted sequence of events by
+# resuming the activities explicitly, in a deliberately interleaved order.
+# Each activity keeps its own state across its suspensions, and the two
+# that need devices use the providers their construction selected.
+
+import std::coroutine
+import devices
+
+type Digit = Int in 0..9
+type Zone = Int in 0..99
+type Minutes = Int in 0..99
+type Count = Int in 0..1000
+
+enum Prompt:
+    Zone,
+    Minutes,
+    Done
+
+enum Stage:
+    Card,
+    Authorizing,
+    Paid,
+    Declined
+
+struct Key:
+    digit: Digit
+
+struct Screen:
+    prompt: Prompt
+    zone: Zone
+    minutes: Minutes
+
+struct Status:
+    stage: Stage
+    amount: devices::Amount
+    stamp: devices::Tick
+
+struct Beat:
+    count: Count
+    at: devices::Tick
+
+fn keypad(resume Key) -> Screen:
+    z1 = yield Screen {prompt: Prompt::Zone, zone: 0, minutes: 0}
+    z2 = yield Screen {prompt: Prompt::Zone, zone: z1.digit, minutes: 0}
+    zone = z1.digit * 10 + z2.digit
+    m1 = yield Screen {prompt: Prompt::Minutes, zone: zone, minutes: 0}
+    m2 = yield Screen {prompt: Prompt::Minutes, zone: zone, minutes: m1.digit}
+    Screen {prompt: Prompt::Done, zone: zone, minutes: m1.digit * 10 + m2.digit}
+
+fn rate(minutes: Minutes) -> devices::Amount:
+    minutes * 2
+
+fn payment(minutes: Minutes, context pay: devices::Payment) -> Status errors devices::Declined:
+    price = rate(minutes)
+    yield Status {stage: Stage::Card, amount: price, stamp: 0}
+    yield Status {stage: Stage::Authorizing, amount: price, stamp: 0}
+    r = pay.authorize(price)
+    Status {stage: Stage::Paid, amount: r.amount, stamp: r.stamp}
+
+fn housekeeping(context clock: devices::Clock) -> Beat:
+    loop n from 1 through 1000:
+        yield Beat {count: n, at: clock.now()}
+    Beat {count: 0, at: clock.now()}
+
+struct Summary:
+    zone: Zone
+    minutes: Minutes
+    price: devices::Amount
+    outcome: Stage
+    again: Stage
+    paid_at: devices::Tick
+    beats: Count
+    keypad_done: bool
+    repeat: Prompt
+
+# Declined, as the screen shows it. (nomethod: a screen made of two
+# numbers, not an operation of an amount.)
+nomethod fn refused(amount: devices::Amount, at: devices::Tick) -> Status:
+    Status {stage: Stage::Declined, amount: amount, stamp: at}
+
+fn session(d1: Digit, d2: Digit, d3: Digit, d4: Digit) -> Summary:
+    coroutine {step: keys, first: s0} = keypad()
+    coroutine {step: beat, first: b0} = housekeeping()
+    s1 = keys(Key {digit: d1})
+    b1 = beat()
+    s2 = keys(Key {digit: d2})
+    s3 = keys(Key {digit: d3})
+    b2 = beat()
+    s4 = keys(Key {digit: d4})
+    # (Every segment may end with the payment's error: each one handles it.)
+    coroutine {step: pay, first: p0} = payment(s4.minutes):
+        on devices::Declined:
+            refused(0, 0)
+    p1 = pay():
+        on devices::Declined:
+            refused(0, 0)
+    b3 = beat()
+    p2 = pay():
+        on devices::Declined:
+            refused(p1.amount, b3.at)
+    p3 = pay():
+        on devices::Declined:
+            refused(0, 0)
+    done = std::coroutine::done?(keys)
+    repeat = keys(Key {digit: 9})
+    Summary {zone: s4.zone, minutes: s4.minutes, price: p1.amount, outcome: p2.stage,
+        again: p3.stage, paid_at: p2.stamp, beats: b3.count, keypad_done: done, repeat: repeat.prompt}
+
+struct Day:
+    morning: Summary
+    evening: Summary
+
+fn day() -> Day:
+    Day {morning: session(4, 2, 3, 0), evening: session(1, 7, 9, 9)}

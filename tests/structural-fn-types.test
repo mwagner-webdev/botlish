@@ -396,9 +396,20 @@ r? = make(\"r\")
 \[apply(q?, \"q\"), apply(r?, \"q\"), q?(\"q\")\]"
 } -result {[true, false, true]}
 
+# hirFind's nodes of KIND (and NAME) in HIR's entry program, file f1: a
+# program importing std::str also loads std::byte (std::str::encode_utf8's
+# contract, STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md), whose
+# module has calls and loops of its own.
+proc fnEntryFind {hir kind {name ""}} {
+    lmap e [hirFind $hir $kind $name] {
+        if {[lindex [dict get [hir::node $hir $e] origin] 1] ne "f1"} continue
+        set e
+    }
+}
+
 test fn-accept-call-typed-from-contract {inside the HOF the call through the Fn parameter is typed from the contract (bool), has no exact target (it stays an indirect call), and nothing about the argument's own identity leaks in} -body {
     set hir [fnCompile "$::applyStr\n1" $::fnDeclsNoList]
-    set call [lindex [hirFind $hir call] 0]
+    set call [lindex [fnEntryFind $hir call] 0]
     list [hir::types::show [hir::typeOf $hir $call]] [hir::get $hir $call target]
 } -result {bool {}}
 
@@ -422,8 +433,8 @@ checks = [std::str::is_tcl_alpha, std::str::is_tcl_alnum, under?, dash?]
 loop check in checks:
     check("_")}
     set hir [fnCompile $src $::fnDeclsNoList]
-    set loop [lindex [hirFind $hir listloop] 0]
-    set checkRef [lindex [hirFind $hir ref check] 0]
+    set loop [lindex [fnEntryFind $hir listloop] 0]
+    set checkRef [lindex [fnEntryFind $hir ref check] 0]
     list [fnBindingType $hir checks] [hir::types::show [hir::typeOf $hir $checkRef]] \
          [hir::types::show [hir::typeOf $hir $loop]] [fnRun $src]
 } -result {{List[Fn{args: [any], return: bool, errors: []}]{length: 4}} {Fn{args: [any], return: bool, errors: []}} {List[bool]{length: 4}} {[false, false, true, false]}}

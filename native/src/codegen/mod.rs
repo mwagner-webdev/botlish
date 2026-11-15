@@ -568,6 +568,28 @@ pub fn inspect(program: &Program, clif_text: bool, vcode: bool) -> Result<Inspec
     compile()
 }
 
+/// The CLIF of PROGRAM as code emitted for TARGET translates it (a native
+/// library's ISA, `isa_for_target`): what the tests of a target's code
+/// generation read without building or running anything of that target's.
+#[cfg(test)]
+pub fn clif_for_target(program: &Program, target: &target_lexicon::Triple) -> Result<String, BackendError> {
+    let builder = cranelift_object::ObjectBuilder::new(isa_for_target(target)?, "botlish", cranelift_module::default_libcall_names())
+        .map_err(|e| BackendError::Codegen(format!("{e:?}")))?;
+    let mut module = cranelift_object::ObjectModule::new(builder);
+    let symbols = clif::declare(&mut module, program, true, false)?;
+    let mut pool = ConstPool::default();
+    let mut sites = Vec::new();
+    let mut listing = clif::legend(&symbols);
+    for f in &program.functions {
+        let result = clif::define(&mut module, &symbols, f, &mut pool, &mut sites, false, false, true)?;
+        if let Some(text) = &result.clif_text {
+            listing.push('\n');
+            listing.push_str(text);
+        }
+    }
+    Ok(listing)
+}
+
 /// The program as an object file (AOT). Functions are exported as
 /// botlish_fn_N / botlish_entry_N; runtime helpers are undefined imports.
 pub struct ObjectProgram {
@@ -684,10 +706,14 @@ fn define_program_record(
     let record_id = module.declare_data("botlish_program", linkage, false, false).map_err(error)?;
     // runtime::program's LinkedProgram, word by word: its size and the
     // startup word's offset are the runtime's own (the ABI fingerprint holds
-    // both).
+    // both). The fingerprint is the target's runtime's: this driver's own
+    // for its host, Android's for an Android library emitted here, whose
+    // code encodes C address words Android's way
+    // (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md).
+    let fingerprint = target::runtime_fingerprint(module.isa().triple());
     let mut record = vec![0u8; std::mem::size_of::<LinkedProgram>()];
     record[0..8].copy_from_slice(&LINKED_MAGIC.to_le_bytes());
-    record[8..16].copy_from_slice(&crate::runtime::aotimage::abi_fingerprint().to_le_bytes());
+    record[8..16].copy_from_slice(&fingerprint.to_le_bytes());
     record[24..32].copy_from_slice(&(descriptor_len as u64).to_le_bytes());
     record[40..48].copy_from_slice(&(count as u64).to_le_bytes());
     let at = std::mem::offset_of!(LinkedProgram, startup);

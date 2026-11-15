@@ -17,6 +17,13 @@
 #    of contexts/, installed two ways (store_bench.bot, store_field.bot),
 #    needs no runtime service; both configurations run interleaved in one
 #    executable (harness/two_apps.c), on Linux x86-64 with no C library.
+# 5. coroutines (C-COROUTINE-FRAMES-MILESTONE-1.md): the parking meter of
+#    kiosk/ -- three activities per session (keypad, payment, housekeeping),
+#    each a coroutine suspended and resumed independently -- installed two
+#    ways (kiosk_bench.bot, kiosk_field.bot): no runtime service, every
+#    coroutine's frame a fixed-size object of the function that constructs
+#    it (the sizes frame-sizes.sh measures), both configurations in one
+#    executable, on Linux x86-64 with no C library.
 #
 # Needs tclsh9.0 and a C compiler (CC, default cc). Nothing is installed or
 # changed outside OUT.
@@ -86,6 +93,28 @@ else
     $cc $strict -O2 -DTWO_APPS_HOSTED $two -I "$out/contexts" "$here/harness/two_apps.c" $units -o "$out/two_apps"
 fi
 "$out/two_apps"
+
+echo
+echo "== 5. coroutines: three suspended activities per session, two configurations"
+mkdir -p "$out/kiosk"
+cp "$here"/kiosk/*.bot "$out/kiosk/"
+(cd "$root" && tclsh9.0 main.tcl -emit-c -out "$out/kiosk" "$out/kiosk/kiosk_bench.bot" "$out/kiosk/kiosk_field.bot")
+echo "the frame types of kiosk_bench.h, and their size and alignment here:"
+"$here/frame-sizes.sh" "$out/kiosk" kiosk_bench | sed 's/^/    /'
+kiosk="-DBOTLISH_PROGRAM_A=kiosk_bench -DBOTLISH_PROGRAM_A_HEADER=\"kiosk_bench.h\" -DBOTLISH_PROGRAM_B=kiosk_field -DBOTLISH_PROGRAM_B_HEADER=\"kiosk_field.h\""
+kunits="$out/kiosk/kiosk_bench.c $out/kiosk/kiosk_bench_display.c $out/kiosk/kiosk_field.c $out/kiosk/kiosk_field_display.c"
+if [ "$(uname -s)-$(uname -m)" = Linux-x86_64 ]; then
+    # shellcheck disable=SC2086 # (kiosk and kunits are word lists)
+    $cc $strict -O2 -ffreestanding -nostdlib -static -fno-stack-protector -fno-pie -no-pie \
+        -DBOTLISH_START_ENTRY=two_apps_main $kiosk -I "$out/kiosk" \
+        "$here/harness/linux_start.c" "$here/harness/two_apps.c" $kunits -o "$out/kiosk_two"
+    echo "a static executable with no C library: $(file -b "$out/kiosk_two" | cut -d, -f1-2,4)"
+    echo "its undefined symbols: [$(nm -u "$out/kiosk_two" | awk 'NF { print $2 }' | tr '\n' ' ')]"
+else
+    # shellcheck disable=SC2086
+    $cc $strict -O2 -DTWO_APPS_HOSTED $kiosk -I "$out/kiosk" "$here/harness/two_apps.c" $kunits -o "$out/kiosk_two"
+fi
+"$out/kiosk_two"
 
 echo
 echo "files: $out"

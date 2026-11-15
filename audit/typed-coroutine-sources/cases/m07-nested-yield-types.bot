@@ -1,0 +1,16 @@
+# case: matrix -- yields of two domain types one inside the other (Nibble within Byte), terminal Byte: accepted, outward Byte, precise
+# class: intended
+# expect: precise
+# value: [3, 200, 9]
+import std::coroutine
+import std::byte
+
+fn source(a: std::byte::Nibble, b: std::byte::Byte, last: std::byte::Byte) -> std::byte::Byte:
+    yield a
+    yield b
+    last
+
+coroutine {step, first} = source(3, 200, 9)
+second = step()
+final = step()
+[first, second, final]

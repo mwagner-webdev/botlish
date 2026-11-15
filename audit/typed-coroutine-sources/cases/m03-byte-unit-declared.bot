@@ -1,0 +1,14 @@
+# case: matrix -- yields Byte, declared result unit (a source with nothing to report): rejected, the yields must fit the declared result
+# class: rejected-precision
+# expect: rejected COROUTINE-RESULT-MISMATCH
+import std::coroutine
+import std::byte
+
+fn source(b: std::byte::Byte, n: int) -> unit:
+    loop i from 0 to n:
+        yield b
+        continue
+    unit
+
+coroutine {step, first} = source(65, 2)
+first

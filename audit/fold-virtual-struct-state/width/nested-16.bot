@@ -1,0 +1,32 @@
+# nested-16.bot -- 16 fields, one of them a nested struct rebuilt per iteration (tools/gen-width.tcl).
+import std::list
+
+struct P:
+    a: int
+    b: int
+
+struct S:
+    f0: int
+    f1: int
+    f2: int
+    f3: int
+    f4: int
+    f5: int
+    f6: int
+    f7: int
+    f8: int
+    f9: int
+    f10: int
+    f11: int
+    f12: int
+    f13: int
+    f14: int
+    inner: P
+
+fn f(n: int) -> int:
+    t = fold i from 0 to n with intermediate s S {f0: 0, f1: 0, f2: 0, f3: 0, f4: 0, f5: 0, f6: 0, f7: 0, f8: 0, f9: 0, f10: 0, f11: 0, f12: 0, f13: 0, f14: 0, inner: P {a: 0, b: 0}}:
+        S {f0: (s.f0 + i).mod(1000), f1: (s.f1 + i).mod(1000), f2: (s.f2 + i).mod(1000), f3: (s.f3 + i).mod(1000), f4: (s.f4 + i).mod(1000), f5: (s.f5 + i).mod(1000), f6: (s.f6 + i).mod(1000), f7: (s.f7 + i).mod(1000), f8: (s.f8 + i).mod(1000), f9: (s.f9 + i).mod(1000), f10: (s.f10 + i).mod(1000), f11: (s.f11 + i).mod(1000), f12: (s.f12 + i).mod(1000), f13: (s.f13 + i).mod(1000), f14: (s.f14 + i).mod(1000), inner: P {a: (s.inner.a + i).mod(1000), b: s.inner.b + 1}}
+    t.f0 + t.inner.a + t.inner.b
+
+n = 1000
+f(n)

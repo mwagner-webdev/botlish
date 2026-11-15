@@ -1,0 +1,21 @@
+# spill-2.bot -- a 2-field fold whose fields are live across a call every iteration (tools/gen-width.tcl).
+import std::list
+
+struct S:
+    f0: int
+    f1: int
+
+# Recursive, so native lowering keeps it a call.
+fn step(x: int) -> int:
+    if x < 7:
+        return x + 1
+    step(x - 7)
+
+fn f(n: int) -> int:
+    t = fold i from 0 to n with intermediate s S {f0: 0, f1: 0}:
+        k = step(i.mod(14))
+        S {f0: (s.f0 + k * 0).mod(1000), f1: (s.f1 + k * 1).mod(1000)}
+    t.f0 + t.f1
+
+n = 1000
+f(n)

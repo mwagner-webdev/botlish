@@ -163,7 +163,22 @@ the import, before any file is chosen
 (`import std::linux::sys` for macos-aarch64 never loads `sys.aarch64.bot`;
 MACOS-AARCH64-MILESTONE-2.md). An application module is the application's
 whatever its name. That is the whole of module loading: a module that is not
-imported, directly or by another module's own header, is never loaded. One
+imported, directly or by another module's own header, is never loaded.
+
+An import of a namespace whose natives' result contracts name a type of the
+standard library also loads that type's module
+(STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md): `import std::str`
+makes `std::str::encode_utf8`'s result `List[std::byte::Byte]` in every
+program, so the loader loads `std::byte` when the program does not load it
+itself -- exactly as `std::abi::bytes`'s own `import type std::byte::Byte`
+loads it for a program that imports `std::abi::bytes`. Like that one, the
+load grants the importing file nothing: no name of `std::byte` becomes
+visible -- writing `std::byte::Byte` or `std::byte::from_int` still needs
+`import std::byte` (or `import type std::byte::Byte` for the type), and its
+functions are no method-style candidates. The whole module is loaded, not
+only the type's declaration, because a type is its owner module's (a trait's
+conformance reads the witness's owner namespace): `Byte` is the same type,
+satisfying the same traits, whatever the program imports. One
 visible consequence while `error` declarations stay global: `import std::list`
 brings `error NotFound` (declared by `stdlib/list.bot`) into the program, so a
 program that declares its own `error NotFound` collides with it, and says

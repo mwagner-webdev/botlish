@@ -453,8 +453,44 @@ proc cpt::Prose {text} {
     return [split [compilerpedia::Wrap $text "" 74] \n]
 }
 
-# A native's signature, from its registration: NAME(P1, P2) -> R.
-proc cpt::NativeSignature {name meta} {
+# One compilation that declares every source declaration the argument-
+# independent result contracts of the public natives name (core::native::
+# namedDeclaration: std::byte::Byte, std::abi::bytes::Bytes, ...), by
+# importing their modules. With it active, a native's signature shows the
+# result its function type states (hir::types::NativeResult), the result
+# every call of it has -- std::str::encode_utf8(str) ->
+# List[int[std::byte::Byte]], as the hover and the diagnostics print it --
+# not the plain kind of its -result-type
+# (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md, "The native as a
+# function value"). A declaration only a target's module has would need
+# that target; none does today.
+proc cpt::ContractHir {} {
+    set modules {}
+    foreach name [core::native::names] {
+        if {![PublicNative $name]} {
+            continue
+        }
+        set shape [dict get [core::native::metadata $name] resultShape]
+        if {![core::native::argumentIndependent $shape]} {
+            continue
+        }
+        set declaration [core::native::namedDeclaration $shape]
+        if {$declaration ne ""} {
+            lappend modules [namespace qualifiers $declaration]
+        }
+    }
+    set text ""
+    foreach module [lsort -unique $modules] {
+        append text "import $module\n"
+    }
+    append text "1\n"
+    return [surface::compile $text contracts.bot -warnings off]
+}
+
+# A native's signature, from its registration: NAME(P1, P2) -> R, R the
+# result of its function type (hir::types::NativeResult) in CONTRACTS, the
+# compilation ContractHir made.
+proc cpt::NativeSignature {name meta contracts} {
     set params [dict get $meta paramTypes]
     set arity [dict get $meta arity]
     if {$arity eq "*"} {
@@ -464,7 +500,8 @@ proc cpt::NativeSignature {name meta} {
     } else {
         set shown [join [lmap p $params {hir::types::show $p}] ", "]
     }
-    return "${name}($shown) -> [hir::types::show [dict get $meta resultType]]"
+    hir::activate $contracts
+    return "${name}($shown) -> [hir::types::show [hir::types::NativeResult $meta]]"
 }
 
 # Where native NAME runs: a native whose implementation needs a raw machine
@@ -496,6 +533,7 @@ proc cpt::Generate {} {
     set notes [Notes]
     set used [dict create]
     set topics {}
+    set contracts [ContractHir]
     # The natives, by namespace.
     set byNamespace [dict create]
     foreach name [lsort [core::native::names]] {
@@ -572,7 +610,7 @@ proc cpt::Generate {} {
         foreach name [expr {[dict exists $byNamespace $ns] ? [dict get $byNamespace $ns] : {}}] {
             set meta [core::native::metadata $name]
             set id stdlib.$name
-            set sections [list [list SIGNATURE [list "    [NativeSignature $name $meta]"]]]
+            set sections [list [list SIGNATURE [list "    [NativeSignature $name $meta $contracts]"]]]
             if {[dict get $meta errors] ne ""} {
                 lappend sections [list ERRORS [list "    [join [dict get $meta errors] {, }]" "" {*}[Prose "A call must handle each (on NAME:), admit it in its function's errors clause, or be proven unable to raise it (rule.unhandled-errors)."]]]
             }

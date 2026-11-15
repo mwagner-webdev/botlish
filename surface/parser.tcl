@@ -82,7 +82,8 @@
 #                  "with" and "context" are contextual (below); no binding
 #                  name, no type annotation, no list, no block, no colon
 #   simple       = binding | destructure | coroutineBind | return | break
-#                | continue | fail | staticIntrinsic | injection | expression
+#                | continue | fail | staticIntrinsic | injection | match
+#                | expression
 #   injection    = "inject" ( "no" "context" | "context" typeExpr
 #                  { "," typeExpr } ) ":" suite
 #                  -- RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md: the block
@@ -121,8 +122,22 @@
 #   coField      = ( "step" | "first" ) [ ":" IDENT ]
 #                  -- step the affine coroutine handle, first the first
 #                  outward result; any other name is COROUTINE-BINDING-FIELD
-#   valued       = IDENT "=" (if|loop|fold|staticIntrinsic|injection|handledExpr)
-#                | "return" (if|loop|fold|staticIntrinsic|injection|handledExpr)
+#   valued       = IDENT "=" (if|loop|fold|staticIntrinsic|injection|match|handledExpr)
+#                | "return" (if|loop|fold|staticIntrinsic|injection|match|handledExpr)
+#   match        = "match" expression ":" NEWLINE INDENT arm { arm } DEDENT
+#   arm          = "case" caseName [ IDENT | pattern ] ":" suite
+#   caseName     = [ "::" ] IDENT "::" IDENT { "::" IDENT }
+#                  -- PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md: selects
+#                  the one arm naming the scrutinee's case of a closed
+#                  enum; the arm receives the case's payload whole (IDENT)
+#                  or destructured (pattern), exactly as an "on" handler
+#                  receives an error's. Every case is named exactly once
+#                  (hir/match.tcl): no wildcard, guard, alternative,
+#                  literal or positional pattern. "match" and "case" are
+#                  contextual (AtMatch; "case" only as an arm's first
+#                  word), so `match = 1` and `case(name, check)` stay
+#                  ordinary code. Like an if, a match is a statement or the
+#                  value of a binding, return or destructuring
 #   handledExpr  = expression [ handlers ]     -- handlers only after a bare
 #                                                  call expression (item 9)
 #   handlers     = ":" NEWLINE INDENT { handler } DEDENT
@@ -513,10 +528,10 @@ namespace eval surface::parser {
     # here). A new contextual word goes here and is consumed with Word.
     variable words {
         accept alias align alternative any array as at before
-        c call callback captures class cleanup compile context coroutine
+        c call callback captures case class cleanup compile context coroutine
         dfa direct down emits end enum except exported extern field flags
         fold framework from identity import in independent inject
-        intermediate layout library module named no noescape
+        intermediate layout library match module named no noescape
         nomethod of opaque over place private proven proves read refined
         reject resource resume satisfies sendable size static then through
         thread to trait tree union variadic with write
@@ -524,9 +539,9 @@ namespace eval surface::parser {
     # The words the parser compares an identifier with only to refuse a
     # construct that does not exist (`import ... as`, `namespace NAME`, a
     # loop's `by`, a handler's or a type slot's `where`, `requires`,
-    # `implements`, `extends`): never consumed as words, so never recorded
-    # and never highlighted as one.
-    variable refusedWords {by extends implements namespace requires where}
+    # `implements`, `extends`, a match's wildcard arm `case _:`): never
+    # consumed as words, so never recorded and never highlighted as one.
+    variable refusedWords {_ by extends implements namespace requires where}
 }
 
 proc surface::parse {source args} {
@@ -2826,14 +2841,14 @@ proc surface::parser::Statement {pVar} {
         # The handler suite(s) already ended the line.
         return $statement
     }
-    if {[dict get $statement kind] in {static inject}} {
-        # The static intrinsic's (or the inject block's) suite already ended
-        # the line.
+    if {[dict get $statement kind] in {static inject match}} {
+        # The static intrinsic's (or the inject block's, or the match's)
+        # suite already ended the line.
         return $statement
     }
     if {[dict get $statement kind] in {bind return destructure coroutinebind}
             && [dict get $statement value] ne ""
-            && [dict get $statement value kind] in {if loop handledcall static inject}} {
+            && [dict get $statement value kind] in {if loop handledcall static inject match}} {
         # The if's (or loop's, or the handler suite's) suite(s) already
         # ended the line. break is deliberately excluded here (unlike
         # bind/return): PAYLOAD-FREE-BREAK.md -- break never has a value, so
@@ -2961,6 +2976,9 @@ proc surface::parser::ValueOrHandled {pVar} {
     }
     if {[AtInject p]} {
         return [Injection p]
+    }
+    if {[AtMatch p]} {
+        return [Match p]
     }
     if {[AtStaticWithoutOperation p]} {
         StaticWithoutOperationError p
@@ -3220,6 +3238,226 @@ proc surface::parser::Injection {pVar} {
 }
 
 # A statement's value: an if, a loop, or an expression.
+# 1 if the next tokens start a match (PORTABILITY-EXHAUSTIVE-MATCH-
+# MILESTONE-1.md): the contextual word "match" where a statement or a
+# statement's value starts, followed by its scrutinee. Directly followed by
+# a name, a literal, "not", "true", "false", "unit" or a rooted "::" -- an
+# adjacency no expression allows -- it is always a match, so a mistake in
+# the arms is reported as one. Followed by "(", "[", "{" or "-", which an
+# ordinary name called `match` may be followed by too (a call, an imprint,
+# a construction, a subtraction), it is a match only when its line ends with
+# ":" and the indented block after it starts with the word "case" (no other
+# construct's block does). Everywhere else -- `match = 1`, `match.f`,
+# `x.match`, `match(x)` as a value -- `match` is an ordinary name.
+proc surface::parser::AtMatch {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    if {[dict get $token kind] ne "IDENT" || [dict get $token text] ne "match"} {
+        return 0
+    }
+    set next [Kind p 1]
+    if {$next in {IDENT INT DECIMAL STRING CHAR not true false unit ::}} {
+        return 1
+    }
+    if {$next ni {( \[ \{ -}} {
+        return 0
+    }
+    set tokens [dict get $p tokens]
+    set i [expr {[dict get $p pos] + 1}]
+    set depth 0
+    set last ""
+    while 1 {
+        set t [lindex $tokens $i]
+        if {$t eq ""} {
+            return 0
+        }
+        switch -- [dict get $t kind] {
+            ( - \[ - \{ {
+                incr depth
+            }
+            ) - \] - \} {
+                incr depth -1
+                if {$depth < 0} {
+                    return 0
+                }
+            }
+            NEWLINE - INDENT - DEDENT - EOF {
+                if {$depth == 0} {
+                    break
+                }
+            }
+        }
+        set last [dict get $t kind]
+        incr i
+    }
+    if {$last ne ":" || [dict get [lindex $tokens $i] kind] ne "NEWLINE"} {
+        return 0
+    }
+    set indent [lindex $tokens [expr {$i + 1}]]
+    set word [lindex $tokens [expr {$i + 2}]]
+    return [expr {$indent ne "" && [dict get $indent kind] eq "INDENT"
+        && $word ne "" && [dict get $word kind] eq "IDENT" && [dict get $word text] eq "case"}]
+}
+
+# "match" expression ":" NEWLINE INDENT arm { arm } DEDENT, each arm
+#
+#   "case" caseName [ IDENT | pattern ] ":" suite
+#   caseName = [ "::" ] IDENT "::" IDENT { "::" IDENT }
+#
+# (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md). An exhaustive selection of
+# one case of a closed enum: the scrutinee is evaluated once, the arm naming
+# its case runs, and the match is that arm's value. Node: match, matchSpan
+# (the word "match"), subject (the scrutinee), arms ({span caseSpan (the
+# word "case") case (a qualname node: the case's qualified name, which the
+# loader checks like any qualified reference) binding bindingSpan pattern
+# body} dicts in written order: what the arm receives of the selected case's
+# payload -- nothing, the whole payload as one binding, or an irrefutable
+# struct destructuring of it -- exactly an "on" handler's forms). "match"
+# and "case" are contextual (AtMatch; "case" only as an arm's first word):
+# `case(name, check)` and `match = 1` stay ordinary code. There is no
+# wildcard, guard, alternative, literal or positional pattern: an arm names
+# exactly one case, and the compiler proves every case is named once
+# (hir/match.tcl).
+proc surface::parser::Match {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+    upvar 1 $pVar p
+    set matchToken [Word p]
+    set start [dict get $matchToken span]
+    if {[Kind p] in {: NEWLINE DEDENT EOF}} {
+        Fail [Peek p] "a match needs the value it selects a case of: write \"match VALUE:\" and an indented block of \"case\" arms"
+    }
+    set subject [Expression p]
+    if {[Kind p] ne ":"} {
+        Fail [Peek p] "expected \":\" and an indented block of \"case\" arms after the matched value, found [Describe [Peek p]]"
+    }
+    Advance p
+    if {[Kind p] ne "NEWLINE"} {
+        Fail [Peek p] "a match's arms are an indented block: start them on a new line after the \":\", found [Describe [Peek p]]"
+    }
+    Advance p
+    if {[Kind p] ne "INDENT"} {
+        Fail [Peek p] "expected an indented block of \"case\" arms after \"match ...:\", found [Describe [Peek p]]"
+    }
+    Advance p
+    set arms {}
+    while {[Kind p] ne "DEDENT"} {
+        if {[Kind p] eq "NEWLINE"} {
+            Advance p
+            continue
+        }
+        set token [Peek p]
+        if {[dict get $token kind] ne "IDENT" || [dict get $token text] ne "case"} {
+            if {[dict get $token kind] eq "else"} {
+                Fail $token "a match has no default arm: it names every case of the enum (\"case Enum::Case:\"), so a case added later is a compile-time error until it is handled"
+            }
+            Fail $token "expected \"case\" (an arm naming one case of the matched enum: \"case Enum::Case:\"), found [Describe $token]"
+        }
+        set caseToken [Word p]
+        set armStart [dict get $caseToken span]
+        set case [MatchCaseName p]
+        set label [dict get $case namespace]::[dict get $case name]
+        set binding ""
+        set bindingSpan ""
+        set pattern ""
+        switch -- [Kind p] {
+            IDENT {
+                if {[dict get [Peek p] value] eq "where" && [Kind p 1] ne ":"} {
+                    MatchArmError p $label
+                }
+                set token [Advance p]
+                set binding [dict get $token value]
+                set bindingSpan [dict get $token span]
+            }
+            \{ {
+                set pattern [Pattern p]
+            }
+        }
+        if {[Kind p] ne ":"} {
+            MatchArmError p $label
+        }
+        set body [Suite p [expr {$binding ne "" || $pattern ne "" ? "the arm's payload binding" : "the case name"}]]
+        lappend arms [dict create span [SpanFrom p $armStart] caseSpan $armStart case $case \
+            binding $binding bindingSpan $bindingSpan pattern $pattern body $body]
+    }
+    Advance p
+    if {$arms eq {}} {
+        Fail [Peek p] "a match needs at least one \"case\" arm"
+    }
+    return [surface::ast::node match [SpanFrom p $start] matchSpan $start subject $subject arms $arms]
+}
+
+# The case name of a match arm: [ "::" ] IDENT "::" IDENT { "::" IDENT }, a
+# qualname node (QualifiedPrimary's shape: namespace, namespaceSpan, name,
+# nameSpan, rooted) -- `Node::Add`, `geo::Shape::Point`. A case is always
+# written through its enum's type name: a bare name is refused here.
+proc surface::parser::MatchCaseName {pVar} {
+    upvar 1 $pVar p
+    set rooted 0
+    set start [dict get [Peek p] span]
+    if {[Kind p] eq "::"} {
+        Advance p
+        set rooted 1
+    }
+    set token [Peek p]
+    if {[dict get $token kind] ne "IDENT"} {
+        if {[dict get $token kind] in {INT DECIMAL STRING CHAR true false unit -}} {
+            Fail $token "a match arm names an enum case (\"case Enum::Case:\"), never a literal: a match selects among the cases of a closed enum; compare other values with \"if\""
+        }
+        Fail $token "expected an enum case after \"case\" (\"case Enum::Case:\"), found [Describe $token]"
+    }
+    set first $token
+    Advance p
+    if {[Kind p] ne "::"} {
+        if {[dict get $first value] eq "_"} {
+            Fail $first "a match has no wildcard arm: it names every case of the enum (\"case Enum::Case:\"), so a case added later is a compile-time error until it is handled"
+        }
+        Fail $first "a match arm names a case through its enum's type: write \"case Enum::[dict get $first value]:\" (a case's bare name is never visible)"
+    }
+    set segments [list [dict get $first value]]
+    set namespaceSpan [surface::ast::cover $start [dict get $first span]]
+    Advance p
+    set member [Expect p IDENT "a case name after \"::\""]
+    while {[Kind p] eq "::"} {
+        lappend segments [dict get $member value]
+        set namespaceSpan [surface::ast::cover $start [dict get $member span]]
+        Advance p
+        set member [Expect p IDENT "a case name after \"::\""]
+    }
+    return [surface::ast::node qualname [SpanFrom p $start] \
+        namespace [join $segments ::] namespaceSpan $namespaceSpan \
+        name [dict get $member value] nameSpan [dict get $member span] rooted $rooted]
+}
+
+# Rejects what would make a match arm more than one case plus an
+# irrefutable payload binding: a guard (`case E::C if ...`), several cases
+# in one arm (`case E::A, E::B:`, `case E::A | E::B:`), a positional
+# payload (`case E::C(a, b):`) or a second binding form.
+proc surface::parser::MatchArmError {pVar label} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    switch -- [dict get $token kind] {
+        : { return }
+        if {
+            Fail $token "a match arm selects only by the case (\"case $label:\"): there are no guards; test the payload with an ordinary \"if\" inside the arm"
+        }
+        , {
+            Fail $token "a match arm names exactly one case: write one \"case\" arm per case"
+        }
+        ( {
+            Fail $token "a case's payload is received by name, never positionally: bind it whole (\"case $label payload:\") or destructure its fields (\"case $label \{field, other: name\}:\")"
+        }
+        IDENT {
+            if {[dict get $token value] eq "where"} {
+                Fail $token "a match arm selects only by the case (\"case $label:\"): there are no guards; test the payload with an ordinary \"if\" inside the arm"
+            }
+        }
+    }
+    if {[dict get $token text] eq "|"} {
+        Fail $token "a match arm names exactly one case: write one \"case\" arm per case"
+    }
+    Fail $token "expected \":\" after the arm's case and its optional payload binding (\"case $label:\", \"case $label payload:\" or \"case $label \{field, ...\}:\"), found [Describe $token]"
+}
+
 proc surface::parser::Value {pVar} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
@@ -5192,7 +5430,7 @@ proc surface::parser::CoroutineBind {pVar} {
         }
     }
     Expect p = "\"=\""
-    if {[Kind p] in {if loop} || [AtFold p]} {
+    if {[Kind p] in {if loop} || [AtFold p] || [AtMatch p]} {
         Fail [Peek p] "the right side of a coroutine binding is the call that starts the coroutine, found [Describe [Peek p]]"
     }
     set value [ValueOrHandled p]

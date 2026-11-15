@@ -18,8 +18,14 @@
 # own imports add no member named concat or complement.) A method call whose
 # function exists in a namespace the file does not import is that missing
 # import (MissingImport, DIAGNOSTIC-RECOVERY.md): std::str::concat, an intrinsic,
-# is known to every compilation; byte, a module nothing here loads, is not
-# searched.
+# is known to every compilation; std::byte is loaded here though no file of
+# the suite imports it -- the framework's std::test imports std::str, whose
+# encode_utf8 contract names std::byte::Byte, so std::byte is loaded with it
+# (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md) -- and so
+# complement is its missing import, as when a type import loads it
+# (methods-type-import-only.bot). The Tcl original's program with no module
+# loaded at all is no longer expressible in a suite, which always imports
+# std::test: that half stays the Tcl test's.
 import std::compiler
 import std::list
 import std::test
@@ -40,12 +46,14 @@ fn register_visibility_tests():
 
     # method-not-visible-no-type-import-needed-or-used: std::byte::complement
     # takes a Byte, but with nothing of byte imported 200.complement() has
-    # no function `complement` in scope.
+    # no function `complement` in scope: std::byte is loaded (for std::str's
+    # contract, through the framework), so the call is its missing import,
+    # never a call of it.
     fn b_no_import() errors std::compiler::CompilerError:
         static compile:
             x = 200
             x.complement()
-    std::test::rejects_containing("method-not-visible-no-type-import-needed-or-used/no-import", std::compiler::DiagnosticCode::NotAStruct, "cannot project field \"complement\" from a value of type int: only a struct has fields; as a method-style call, no function named \"complement\" is visible here either", b_no_import)
+    std::test::rejects_containing("method-not-visible-no-type-import-needed-or-used/no-import", std::compiler::DiagnosticCode::MissingImport, "namespace \"std::byte\" is not imported; add `import std::byte` to use `std::byte::complement`", b_no_import)
 
 with context std::test::suite()
 register_visibility_tests()

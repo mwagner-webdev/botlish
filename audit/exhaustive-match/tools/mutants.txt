@@ -1,0 +1,314 @@
+# Mutants of exhaustive matches (audit/exhaustive-match/tools/mutate.tcl;
+# PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md, section 14): each a
+# deliberate bug in one of the milestone's invariants -- exhaustiveness,
+# duplicate and nominal coverage, selection by identity only, a payload
+# taken only under its own selection, the payload's declared type, one
+# evaluation of the scrutinee, ownership of an affine scrutinee, the
+# readers' re-checks, the backends' selection.
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. A mutant editing native/src/ is a native
+# mutant: mutate.tcl rebuilds the native backend for it. Lines starting with
+# # outside an edit are comments.
+#
+# Not here, with the reason:
+#
+#   * a binding escaping its arm: an arm's bindings are bound in its `if`
+#     branch's scope, which the ordinary resolution of branch scopes closes
+#     (em-payload-binding-diagnostics's UNBOUND); there is no match-specific
+#     code to mutate.
+#   * an arm left out of the result's join, an arm's return or failure
+#     turned into a value: the arms are an `if` chain, joined and completed
+#     by the ordinary `if` rules (hir/types.tcl's If, the completion walk),
+#     whose own harnesses mutate them.
+#   * a native payload left unrooted while it is extracted: rt_enum_payload
+#     reads one field and allocates nothing, so no collection can run while
+#     the payload is unrooted (em-gc-stress and the fuzzer's -gc-stress run
+#     check what the arm then allocates).
+#   * a semantic instance's case facts surviving its rollback: a match
+#     writes no HIR field while it is typed (MatchSyntax writes the
+#     constants at resolution; the selections' types are pure functions of
+#     them), so there is nothing for a walk to leave behind (em-rollback-
+#     audit runs the audit).
+
+# ---------------------------------------------------------------------------
+# Coverage (hir/match.tcl)
+
+@@ missing-case-accepted a match that does not name every case of its enum is accepted
+## hir/match.tcl
+<<<<
+    if {$missing ne {}} {
+        hir::Diagnose hir MATCH-NOT-EXHAUSTIVE
+====
+    if {0 && $missing ne {}} {
+        hir::Diagnose hir MATCH-NOT-EXHAUSTIVE
+>>>>
+
+@@ duplicate-case-accepted a case named by two arms is accepted
+## hir/match.tcl
+<<<<
+        if {[dict exists $seen $case]} {
+            set first [dict get $seen $case]
+            dict lappend hir diagnostics
+====
+        if {0} {
+            set first [dict get $seen $case]
+            dict lappend hir diagnostics
+>>>>
+
+@@ foreign-case-counted an arm naming a case of another enum counts as the same-spelled case of the scrutinee's enum
+## hir/match.tcl
+<<<<
+        if {[dict get $arm id] ne $id} {
+            incr foreign
+====
+        if {0} {
+            incr foreign
+>>>>
+
+@@ any-scrutinee-accepted a scrutinee of no enum type (any, an Int) is accepted, its coverage judged by the arms' enum
+## hir/match.tcl
+<<<<
+    } else {
+        hir::Diagnose hir TYPE [ScrutineeMessage $hir $type] $value
+        return
+    }
+====
+    } else {
+        set ids [lsort -unique [lmap arm $resolved {dict get $arm id}]]
+        set id [lindex $ids 0]
+    }
+>>>>
+
+@@ check-not-run the match checks are never run
+## hir/hir.tcl
+<<<<
+    hir::match::verify hir
+====
+>>>>
+
+@@ reader-trusts-text HIR text is read without checking its matches again
+## hir/read.tcl
+<<<<
+    set problem [hir::match::validate $hir]
+====
+    set problem ""
+>>>>
+
+@@ interchange-trusts-text interchange text is read without checking its matches again
+## hir/interchange.tcl
+<<<<
+    set problem [hir::match::validate $hir]
+====
+    set problem ""
+>>>>
+
+@@ stolen-payload-accepted the shape check accepts an arm that takes the payload of another case than it selects
+## hir/match.tcl
+<<<<
+        if {$taken eq "" || $taken ne $selection} {
+====
+        if {$taken eq ""} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Resolution of the case names (hir/resolve.tcl)
+
+@@ not-a-case-silent an arm naming a namespace member, not an enum case, is reported nowhere
+## hir/resolve.tcl
+<<<<
+    if {$id eq ""} {
+        set problem [dict create kind MATCH-NOT-A-CASE origin $origin message \
+====
+    if {$id eq "" && 0} {
+        set problem [dict create kind MATCH-NOT-A-CASE origin $origin message \
+>>>>
+
+@@ payload-free-binding-accepted a payload bound for a payload-free case is accepted (unit)
+## hir/resolve.tcl
+<<<<
+        if {[dict get $marker role] eq "payload" && [dict get $marker bound]
+                && ![hir::enums::hasPayload $id $case]} {
+====
+        if {[dict get $marker role] eq "payload" && [dict get $marker bound]
+                && ![hir::enums::hasPayload $id $case] && 0} {
+>>>>
+
+@@ case-of-first-arm every arm's selection names the first arm's case
+## hir/resolve.tcl
+<<<<
+        set test [MatchSelection [dict get $level condition] $ns]
+====
+        set test [MatchSelection [dict get $level condition] $ns]
+        if {$inner ne ""} {
+            set firstArgs [dict get $test args]
+            lset firstArgs 2 [lindex [dict get $inner condition args] 2]
+            dict set test args $firstArgs
+        }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Lowering (surface/lower.tcl)
+
+@@ scrutinee-per-selection each selection evaluates the scrutinee again instead of reading its binding
+## surface/lower.tcl
+<<<<
+        set test [MatchCall $caseOrigin enum#is $subject $marker]
+====
+        set test [MatchCall $caseOrigin enum#is $subject $marker]
+        dict set test args [lreplace [dict get $test args] 0 0 [Node [dict get $node subject]]]
+>>>>
+
+@@ unbound-arm-keeps-scrutinee an arm that binds nothing takes no payload, so it leaves the scrutinee owned
+## surface/lower.tcl
+<<<<
+        set body [list [hir::syntax::bindNode $payloadOrigin $payloadName $take] {*}$body]
+====
+        if {$bound} {
+            set body [list [hir::syntax::bindNode $payloadOrigin $payloadName $take] {*}$body]
+        }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Typing and ownership
+
+@@ payload-type-of-first-case an arm's payload is typed as its enum's first payload-bearing case's
+## hir/types.tcl
+<<<<
+                    if {[hir::enums::hasPayload $id $case]} {
+                        return [hir::enums::payloadType $id $case]
+                    }
+                    return unit
+====
+                    foreach other [hir::enums::cases $id] {
+                        if {[hir::enums::hasPayload $id $other]} {
+                            return [hir::enums::payloadType $id $other]
+                        }
+                    }
+                    return unit
+>>>>
+
+@@ constant-branch-taken the ownership analysis treats a match's block as maybe not run: a matched affine binding is only maybe moved
+## hir/affine.tcl
+<<<<
+                1 { set else dead }
+====
+                1 { }
+>>>>
+
+@@ test-consumes the selection moves the scrutinee instead of observing it, so the next arm's selection uses a moved value
+## core/enums.tcl
+<<<<
+    -context-free 1 -ownership {observe erase erase}
+====
+    -context-free 1 -ownership {move erase erase}
+>>>>
+
+@@ payload-observes the payload is read without consuming the scrutinee, which then still owns what the arm bound
+## core/enums.tcl
+<<<<
+    -param-types {any str str} -result-type any -result-shape {enum-payload 1} \
+    -context-free 1 -ownership {move erase erase}
+====
+    -param-types {any str str} -result-type any -result-shape {enum-payload 1} \
+    -context-free 1 -ownership {observe erase erase}
+>>>>
+
+@@ selection-erases-contract a selection erases the scrutinee's callable contract, so a payload holding a typed function cannot be matched
+## hir/callables.tcl
+<<<<
+        enum-test - enum-payload {
+====
+        enum-test-mutant - enum-payload-mutant {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The Tcl runtime (core/enums.tcl)
+
+@@ tcl-select-by-case-name the Tcl selection compares the case name only, never the enum's identity
+## core/enums.tcl
+<<<<
+    return [core::value::bool [expr {[core::value::enumId $value] eq [core::value::strOf $id]
+        && [core::value::enumCaseName $value] eq [core::value::strOf $case]}]]
+====
+    return [core::value::bool [expr {[core::value::enumCaseName $value] eq [core::value::strOf $case]}]]
+>>>>
+
+@@ tcl-select-by-equality the Tcl selection compares the value with the case's payload-free value by ==
+## core/enums.tcl
+<<<<
+    return [core::value::bool [expr {[core::value::enumId $value] eq [core::value::strOf $id]
+        && [core::value::enumCaseName $value] eq [core::value::strOf $case]}]]
+====
+    return [core::value::bool [core::value::equal $value [core::value::enumValue [core::value::strOf $id] [core::value::strOf $case]]]]
+>>>>
+
+@@ tcl-payload-unchecked the Tcl payload read takes any value's payload, never checking its case
+## core/enums.tcl
+<<<<
+    if {[core::value::kind $value] ne "enum" || [core::value::enumId $value] ne $id
+            || [core::value::enumCaseName $value] ne $case} {
+====
+    if {[core::value::kind $value] ne "enum"} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Native lowering and the runtime
+
+@@ native-immediate-always-first a match over a payload-free enum selects by comparing with the first case's word
+## native/lower.tcl
+<<<<
+        set word [Assign fn "enum [EnumIndex $id] $case" $e]
+        return [Assign fn "op enumeq $value $word" $e]
+====
+        set word [Assign fn "enum [EnumIndex $id] 0" $e]
+        return [Assign fn "op enumeq $value $word" $e]
+>>>>
+
+@@ native-payload-is-value the native payload read returns the enum value itself, not its payload
+## native/lower.tcl
+<<<<
+    set index [Assign fn "int [EnumIndex $id]" $e]
+    set number [Assign fn "int $case" $e]
+    return [Assign fn "op $op $value $index $number" $e]
+====
+    set index [Assign fn "int [EnumIndex $id]" $e]
+    set number [Assign fn "int $case" $e]
+    if {$op eq "enumpayload"} {
+        return $value
+    }
+    return [Assign fn "op $op $value $index $number" $e]
+>>>>
+
+@@ rt-select-by-case-number the native selection compares the case number only, never the enum's
+## native/src/runtime/ops.rs
+<<<<
+    (is_enum(v) || heap_kind(v) == KIND_ENUMCASE) && enum_case_parts(v) == (index, case)
+====
+    (is_enum(v) || heap_kind(v) == KIND_ENUMCASE) && enum_case_parts(v).1 == case && index < u32::MAX
+>>>>
+
+@@ rt-payload-unchecked the native payload read takes any value's payload, never checking its case
+## native/src/runtime/ops.rs
+<<<<
+    if !enum_value_is(v, index, case) {
+        let info = program(p);
+====
+    if !(is_enum(v) || heap_kind(v) == KIND_ENUMCASE) {
+        let info = program(p);
+>>>>
+
+@@ c-select-negated the C backend's selection tests the other cases
+## ccompile/ccompile.tcl
+<<<<
+            return [list bool "([lindex $subject 1] == [EnumConstant $id $case])"]
+====
+            return [list bool "([lindex $subject 1] != [EnumConstant $id $case])"]
+>>>>

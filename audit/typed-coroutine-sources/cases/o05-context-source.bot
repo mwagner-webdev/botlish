@@ -1,0 +1,23 @@
+# case: contexts -- a source requiring a context the entry program installs: the provider is fixed at construction; contexts add nothing to the yield or result types
+# class: intended
+# expect: facts-widened
+# value: [11, 12, 2]
+import std::coroutine
+import std::byte
+
+context struct Base:
+    k: std::byte::Byte
+
+fn offset(n: int, context b: Base) -> int:
+    n + b.k
+
+fn source(context b: Base) -> int:
+    yield offset(1)
+    yield offset(2)
+    2
+
+with context Base {k: 10}
+coroutine {step, first} = source()
+a = step()
+final = step()
+[first, a, final]

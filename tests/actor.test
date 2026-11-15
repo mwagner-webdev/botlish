@@ -340,7 +340,7 @@ foreach {name kind} {
     forge-request       OPAQUE-CONSTRUCTION
     forge-receiver      OPAQUE-CONSTRUCTION
     read-address        OPAQUE-REPRESENTATION
-    copy-inbox          AFFINE-NOT-DEFINITELY-LIVE
+    copy-inbox          USE-AFTER-MOVE
     listen-twice        USE-AFTER-MOVE
     drain-twice         USE-AFTER-MOVE
     resume-started      USE-AFTER-MOVE

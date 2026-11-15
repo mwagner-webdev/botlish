@@ -1,0 +1,28 @@
+# case: errors -- the consumer's handler value on a Byte source's resume: a handler that supplies -1 makes the bound value an int again; a Byte handler value keeps it a Byte (the handler is one more producer of the value)
+# class: intended
+# expect: precise
+# value: [65, 65]
+import std::coroutine
+import std::byte
+
+error Broke
+
+fn source(b: std::byte::Byte) -> std::byte::Byte errors Broke:
+    yield b
+    if b > 100:
+        fail Broke
+    b
+
+fn take(b: std::byte::Byte) -> int:
+    b
+
+fn run(b: std::byte::Byte) -> List[int]:
+    coroutine {step, first} = source(b):
+        on Broke:
+            0
+    second = step():
+        on Broke:
+            0
+    [take(first), take(second)]
+
+run(65)

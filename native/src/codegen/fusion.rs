@@ -1040,11 +1040,12 @@ fn rename(inst: &Inst, reg: &dyn Fn(Reg) -> Reg, label: &dyn Fn(Label) -> Label)
             may_gc: *may_gc,
         },
         Inst::CallValue { dst, callee, args } => Inst::CallValue { dst: reg(*dst), callee: reg(*callee), args: regs(args) },
-        Inst::ForeignCall { dst, foreign, args, exposed, discard, varargs } => Inst::ForeignCall {
+        Inst::ForeignCall { dst, foreign, args, exposed, mutable, discard, varargs } => Inst::ForeignCall {
             dst: reg(*dst),
             foreign: *foreign,
             args: regs(args),
             exposed: exposed.clone(),
+            mutable: mutable.clone(),
             discard: *discard,
             varargs: varargs.clone(),
         },

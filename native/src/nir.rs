@@ -244,6 +244,22 @@ pub enum OpCode {
     /// numbers as `int` constants -- the value of a payload-bearing case,
     /// one EnumCaseObj (runtime::ops's rt_enum_case). Never fails.
     EnumCase,
+    /// enum#is (core/enums.tcl; PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md):
+    /// `op enumis V E C`, E and C the program's enum and case numbers as
+    /// `int` constants -- whether V (an immediate case word or an
+    /// EnumCaseObj) is a value of that case: its identity only, never its
+    /// payload (runtime::ops's rt_enum_is). Never fails.
+    EnumIs,
+    /// enum#payload: `op enumpayload V E C` -- the payload of V, a value of
+    /// that case (its EnumCaseObj's payload struct; unit for a payload-free
+    /// case). A match takes it only under its own enum#is (hir/match.tcl);
+    /// the identity is checked again, failing (UNMATCHED) on another case's
+    /// value, never reading it (runtime::ops's rt_enum_payload).
+    EnumPayload,
+    /// enum#unmatched: `op enumunmatched` -- the end of a match no arm
+    /// selected, which an exhaustive match never reaches: always fails
+    /// (UNMATCHED; runtime::ops's rt_enum_unmatched).
+    EnumUnmatched,
     /// Structural hash (core/hashing.tcl's hash): consistent with VEq,
     /// masked to 61 bits so the result never needs a BigInt. Bootstrap
     /// native, candidate for stdlib replacement: see core/hashing.tcl's
@@ -1026,6 +1042,9 @@ op_spellings! {
     "mkok" => MkOk,
     "mkerror" => MkError,
     "enumcase" => EnumCase,
+    "enumis" => EnumIs,
+    "enumpayload" => EnumPayload,
+    "enumunmatched" => EnumUnmatched,
     "hash" => Hash,
     "hashtotal" => HashTotal,
     "tablehash" => TableHash,
@@ -1222,7 +1241,7 @@ impl OpCode {
         use OpCode::*;
         match self {
             ListNew | CleanupTable => None,
-            Argv | CPtrNull | CoFailed => Some(0),
+            Argv | CPtrNull | CoFailed | EnumUnmatched => Some(0),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
             StrLen | StrLower | ListLen | ListFlat | TreeChildren | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
@@ -1234,7 +1253,7 @@ impl OpCode {
             | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone
             | CoRelease | CoAbandon | CPtrIsNull | CPtrSame | CPtrFixture | CPtrFixtureAddress | CPtrFixtureMemory | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot
             | MutArrayFromList | MutArrayToList | MutArrayEmpty | MutArrayTakeFront => Some(1),
-            D64Lt | D64Le | D64Gt | D64Ge | D64Eq | EnumCase => Some(3),
+            D64Lt | D64Le | D64Gt | D64Ge | D64Eq | EnumCase | EnumIs | EnumPayload => Some(3),
             Substr | SubstrProven | BytesSlice | BytesUtf16LeNul | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
             | MvSwap | MutArraySwap | MutArrayGenerateDrop | FfiFixtureFill | FfiFixtureFillChecked | FfiFixtureCopy
             | TransferEncode | TransferDecode => Some(3),
@@ -1392,12 +1411,19 @@ pub enum Inst {
     Call { dst: Reg, func: FuncId, args: Vec<Reg>, may_error: bool, may_gc: bool },
     CallEnv { dst: Reg, func: FuncId, closure: Reg, args: Vec<Reg>, may_error: bool, may_gc: bool },
     CallValue { dst: Reg, callee: Reg, args: Vec<Reg> },
-    /// `%d = foreigncall F %a... [exposed=I,J] [discard]`: a C call
-    /// (C-FFI.md) of the program's foreign function F. Every operand is
+    /// `%d = foreigncall F %a... [exposed=I,J] [mutable=J] [discard]`: a C
+    /// call (C-FFI.md) of the program's foreign function F. Every operand is
     /// tagged: a C integer argument an Int, a raw pointer a C address word,
-    /// and an operand EXPOSED a byte exposure's payload address (a small
-    /// Int: native/lower.tcl's ExposeStorage, kept alive by its keepalive
-    /// after this call). codegen::clif converts each to its C ABI class,
+    /// and an operand EXPOSED the byte storage whose payload the call
+    /// exposes (C-POINTER-BORROWING.md; native/lower.tcl's BorrowCall, kept
+    /// alive by its keepalive after this call): the readable kind
+    /// (KIND_BYTES), or the writable one (KIND_MUTBYTES) for an operand also
+    /// MUTABLE -- a run-time kind check of the call, never interchanged.
+    /// The call itself makes the payload address, the storage's address
+    /// plus the payload offset, at the call: a machine address of its full
+    /// width, which no Botlish value holds (an Android heap address's tag
+    /// included: RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md).
+    /// codegen::clif converts each to its C ABI class,
     /// calls the linked symbol directly with the platform C calling
     /// convention (no helper, no symbol lookup, no Tcl), and converts the
     /// result back: an Int of its class, a C address word (a raw address
@@ -1416,7 +1442,7 @@ pub enum Inst {
     /// default argument promotion makes it (VarArg). The call's machine
     /// signature is this call's own (codegen::clif::c_call_signature); no
     /// list or argument array exists at run time.
-    ForeignCall { dst: Reg, foreign: u32, args: Vec<Reg>, exposed: Vec<bool>, discard: bool, varargs: Vec<VarArg> },
+    ForeignCall { dst: Reg, foreign: u32, args: Vec<Reg>, exposed: Vec<bool>, mutable: Vec<bool>, discard: bool, varargs: Vec<VarArg> },
     /// A direct call of a scalar-replacement companion function (a function
     /// with `results` > 1: see Function::results): like Call, but the
     /// callee returns several tagged Values at once -- the fields of a
@@ -3224,6 +3250,7 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                     j += 1;
                 }
                 let mut exposed = vec![false; args.len()];
+                let mut mutable = vec![false; args.len()];
                 let mut discard = false;
                 let mut varargs = Vec::new();
                 for t in &tokens[j..] {
@@ -3241,6 +3268,14 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                                 match w.parse::<usize>() {
                                     Ok(i) if i < args.len() && !exposed[i] => exposed[i] = true,
                                     _ => return p.err("foreigncall exposed= must list distinct operand indices"),
+                                }
+                            }
+                        }
+                        Token::Pair(k, v) if k == "mutable" => {
+                            for w in v.split(',') {
+                                match w.parse::<usize>() {
+                                    Ok(i) if i < args.len() && !mutable[i] => mutable[i] = true,
+                                    _ => return p.err("foreigncall mutable= must list distinct operand indices"),
                                 }
                             }
                         }
@@ -3270,10 +3305,13 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 if let Some(i) = exposed.iter().zip(&decl.params).position(|(e, c)| *e && *c != CAbi::Ptr) {
                     return p.err(format!("foreigncall of {}: operand {i} is exposed at a non-pointer parameter", decl.name));
                 }
+                if let Some(i) = mutable.iter().zip(&exposed).position(|(m, e)| *m && !*e) {
+                    return p.err(format!("foreigncall of {}: operand {i} is mutable= but not exposed=", decl.name));
+                }
                 if discard && !decl.alias.is_some_and(|a| exposed[a as usize]) {
                     return p.err(format!("foreigncall of {}: discard needs a result aliasing an exposed operand", decl.name));
                 }
-                Inst::ForeignCall { dst, foreign, args, exposed, discard, varargs }
+                Inst::ForeignCall { dst, foreign, args, exposed, mutable, discard, varargs }
             }
             "callmulti" => Inst::CallMulti { dsts, func: num(i)?, args: regs_from(i + 1)?, may_error: true, may_gc: true },
             "callenvmulti" => {

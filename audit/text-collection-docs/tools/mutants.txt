@@ -99,10 +99,14 @@ There is no decoding operation back from bytes to a String. A
 std::abi::bytes::Bytes is made from the List with
 >>>>
 
-@@ doc-static-type-unconditional encode_utf8's page states its List[std::byte::Byte] type unconditionally again, without the std::byte condition or the plain list
+@@ doc-static-type-conditional encode_utf8's page states the import-dependent type again (List[std::byte::Byte] only with std::byte loaded, the plain list otherwise), which the compiler no longer does (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md)
 !! tcd-doc-utf8-static-type
 ## compilerpedia/notes/stdlib.notes
 <<<<
+Its static type is List[std::byte::Byte] in every program that calls it:
+importing std::str is enough, whatever else the program imports. Every
+element is proven a std::byte::Byte, an Int in 0..255, wherever it flows
+====
 Its static type depends, today, on what the compilation has loaded. When
 the program has loaded std::byte -- an `import std::byte` in any of its
 files, or an import of a module that loads it, such as std::abi::bytes --
@@ -112,13 +116,13 @@ way; only what the compiler can prove about them differs. So where an
 element must be proven a Byte (a std::byte::Byte parameter, an index into
 a 256-entry table, std::abi::bytes::from_list's List[std::byte::Byte]),
 import std::byte or std::abi::bytes.
-====
-Its static type is List[std::byte::Byte], so it feeds
-std::abi::bytes::from_list (the bytes a write(2) or a C call takes) and
-ascii:: classification directly.
 >>>>
 ## compilerpedia/generated/stdlib.topic
 <<<<
+Its static type is List[std::byte::Byte] in every program that calls it:
+importing std::str is enough, whatever else the program imports. Every
+element is proven a std::byte::Byte, an Int in 0..255, wherever it flows
+====
 Its static type depends, today, on what the compilation has loaded. When
 the program has loaded std::byte -- an `import std::byte` in any of its
 files, or an import of a module that loads it, such as std::abi::bytes --
@@ -128,10 +132,6 @@ way; only what the compiler can prove about them differs. So where an
 element must be proven a Byte (a std::byte::Byte parameter, an index into
 a 256-entry table, std::abi::bytes::from_list's List[std::byte::Byte]),
 import std::byte or std::abi::bytes.
-====
-Its static type is List[std::byte::Byte], so it feeds
-std::abi::bytes::from_list (the bytes a write(2) or a C call takes) and
-ascii:: classification directly.
 >>>>
 
 @@ doc-decode-undiscoverable decode utf8 no longer finds std::abi::bytes::decode_utf8 (the internal byte_store substrate wins again)

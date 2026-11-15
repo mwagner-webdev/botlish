@@ -1,0 +1,14 @@
+# most-2.bot -- a 2-field fold, every field updated per iteration (tools/gen-width.tcl).
+import std::list
+
+struct S:
+    f0: int
+    f1: int
+
+fn f(n: int) -> int:
+    t = fold i from 0 to n with intermediate s S {f0: 0, f1: 0}:
+        S {f0: (s.f0 + i * 0 + 1).mod(1000), f1: (s.f1 + i * 1 + 1).mod(1000)}
+    t.f0 + t.f1
+
+n = 1000
+f(n)

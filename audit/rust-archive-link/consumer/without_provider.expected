@@ -1,0 +1,1 @@
+value {list {{str {version 1}} {str {toolchain RUSTC}} {str {digest items=3 unique=2 bytes=20 longest=10 fnv1a=ddc03a852782f54b}} {str {runtime work 188890}} {str {churn 5700}} {str {panics 2}} {str {unit allocator counts the unit only}} {str {notify without provider -38}}}}

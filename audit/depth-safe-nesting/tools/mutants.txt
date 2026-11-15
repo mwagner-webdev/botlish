@@ -1081,17 +1081,17 @@ proc hir::escape::ChooseLevel {structOpts tree prefix blocked ceiling ea er cyc 
 >>>>
 ## hir/escape.tcl
 <<<<
-proc hir::escape::Classify {hir instance arity e {structOpts {}}} {
+proc hir::escape::Classify {hir instance arity e {structOpts {}} {refJoin 0}} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
-proc hir::escape::Classify {hir instance arity e {structOpts {}}} {
+proc hir::escape::Classify {hir instance arity e {structOpts {}} {refJoin 0}} {
 >>>>
 ## hir/escape.tcl
 <<<<
-proc hir::escape::ClassifyIf {hir instance arity e structOpts} {
+proc hir::escape::ClassifyIf {hir instance arity e structOpts {refJoin 0}} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
-proc hir::escape::ClassifyIf {hir instance arity e structOpts} {
+proc hir::escape::ClassifyIf {hir instance arity e structOpts {refJoin 0}} {
 >>>>
 ## hir/escape.tcl
 <<<<
@@ -1099,6 +1099,27 @@ proc hir::escape::CutFields {shape cut} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
 proc hir::escape::CutFields {shape cut} {
+>>>>
+## hir/escape.tcl
+<<<<
+proc hir::escape::FoldShape {hir instance arity e structOpts} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::escape::FoldShape {hir instance arity e structOpts} {
+>>>>
+## hir/escape.tcl
+<<<<
+proc hir::escape::NoLossSequence {view f matSet keep sequence state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::escape::NoLossSequence {view f matSet keep sequence state} {
+>>>>
+## hir/escape.tcl
+<<<<
+proc hir::escape::NoLossWalk {view f matSet keep x state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::escape::NoLossWalk {view f matSet keep x state} {
 >>>>
 ## hir/escape.tcl
 <<<<

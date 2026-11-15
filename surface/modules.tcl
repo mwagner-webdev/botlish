@@ -123,9 +123,12 @@
 # A namespace that is being loaded when it is imported again is a dependency
 # cycle (Error CYCLE); one already fully loaded is simply reused (each module
 # is parsed and resolved at most once per program, regardless of how many
-# files import it). A namespace exists if it has a module file or compiler
-# intrinsics (`str`, `std::linux::abi::x86_64`), so an intrinsics-only namespace is
-# importable with no file. The result of the header, per file, is its
+# files import it). An import of a namespace whose natives' result contracts
+# name a standard-library type also loads that type's module, as another
+# module's import would: no name of it becomes visible to the importing file
+# (ContractTypes, "Contract types" below). A namespace exists if it has a
+# module file or compiler intrinsics (`str`, `std::linux::abi::x86_64`), so
+# an intrinsics-only namespace is importable with no file. The result of the header, per file, is its
 # import environment (NewState's `imports`: the dependency graph), handed to
 # hir::buildSyntax as -imports; the AST (cached, importer-neutral) keeps the
 # header only as `program.imports`.
@@ -1979,6 +1982,133 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""} {scope 
     dict set state physical [lrange [dict get $state physical] 0 end-1]
 }
 
+# Contract types (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md).
+# A native's result contract may name a source-declared type of the standard
+# library (core/native.tcl's `typed` result shape: std::str::encode_utf8's
+# result is List[std::byte::Byte]). The contract is the native's, so its
+# type must be the same in every compilation that can reach the native,
+# whatever else the program imports. Once the import closure is loaded,
+# every module that declares a type the natives of a reachable namespace
+# name (core::native::contractTypes) is loaded too, if the program did not
+# load it already. A namespace is reachable when a file of the compilation
+# imports it, when it is a loaded module's own, or when it is the root ("").
+#
+# The module is loaded exactly as an import by another standard-library
+# module would load it (LoadNamespace): its own header loads its own
+# dependencies, it is parsed and checked once, and it grants nothing to any
+# file -- CheckRef, method candidates and `import type` read a file's own
+# imports, so no name of the module becomes visible where it is not
+# imported. Loading the whole module, not just the type's declaration, is
+# what keeps the type the same type: what a type is includes its owner
+# module's declarations (a trait's conformance reads the witness's owner
+# namespace, hir::traits::satisfies), so a type declared without its module
+# would satisfy a trait in a program that imports the module and fail it in
+# one that does not. The module's paths are the front-end cache's
+# dependencies, which surface::cache::Dependencies derives from the HIR's
+# import environments as this does (ContractModules): no import names it.
+# Loading repeats until no reachable
+# namespace names a module that is not loaded (a loaded module's own imports
+# are reachable), in sorted order: the result does not depend on the order of
+# the program's imports.
+#
+# A standard library that has no module for the type (a test's scratch
+# library, $::core::libraryDir holding only its own modules) declares no
+# such type, and nothing is loaded: no import could load the module either
+# (`import` of it is UNKNOWN-NAMESPACE), so the result -- the native's plain
+# -result-type -- still does not depend on what the program imports. The
+# shipped library has every contract's module (tests/encode-utf8-type-
+# stability.test's census). A contract the library contradicts -- a type of
+# a platform's module, or a module that does not declare the type -- is the
+# standard library's error: a COMPILER-INTERNAL failure, never a diagnostic
+# of the program and never a fallback to a less precise type. So is, at type
+# inference, a declaration whose domain does not admit the contract's range
+# (hir::types::ShapeResult's `typed` case).
+proc surface::modules::ContractTypes {stateVar} {
+    upvar 1 $stateVar state
+    # The standard library at hand has no such module (a test's scratch
+    # library): no import could load it either, so nothing is declared.
+    set absent [dict create]
+    while 1 {
+        set wanted [ContractOwners [dict get $state imports]]
+        set missing [lmap owner [lsort [dict keys $wanted]] {
+            if {[dict exists $state loaded $owner] || [dict exists $absent $owner]} continue
+            set owner
+        }]
+        if {$missing eq {}} {
+            break
+        }
+        foreach owner $missing {
+            set names [dict get $wanted $owner]
+            set first [lindex [lsort [dict keys $names]] 0]
+            if {![StandardNamespace $owner]} {
+                ContractError [dict get $names $first] ${owner}::$first \
+                    "\"$owner\" is no standard namespace"
+            }
+            if {![HasModule $owner]} {
+                dict set absent $owner 1
+                continue
+            }
+            if {[PlatformOf $owner] ne ""} {
+                ContractError [dict get $names $first] ${owner}::$first \
+                    "\"$owner\" is a platform's module, which not every target has"
+            }
+            set path [ModuleFile $owner [dict get $state target] ""]
+            LoadNamespace state $owner "" $path "#std" $owner
+        }
+    }
+    dict for {owner names} [ContractOwners [dict get $state imports]] {
+        if {[dict exists $absent $owner]} continue
+        foreach name [lsort [dict keys $names]] {
+            if {$name ni [dict get $state loadedTypes $owner]} {
+                ContractError [dict get $names $name] ${owner}::$name \
+                    "module \"$owner\" declares no type \"$name\""
+            }
+        }
+    }
+}
+
+# OWNER -> {NAME -> NATIVE} for every type ${OWNER}::NAME the result contract
+# of a native of a namespace a compilation can reach names, NATIVE the first
+# such native in sorted order (ContractTypes). IMPORTS is the compilation's
+# import environments (the loader's `imports`, a HIR's `declarations
+# imports`): module identity ("" the entry program) -> {namespaces NS...
+# types ...}.
+proc surface::modules::ContractOwners {imports} {
+    set reachable [list ""]
+    dict for {key environment} $imports {
+        if {$key ne ""} {
+            lappend reachable $key
+        }
+        lappend reachable {*}[dict get $environment namespaces]
+    }
+    set wanted [dict create]
+    foreach ns [lsort -unique $reachable] {
+        foreach {type native} [core::native::contractTypes $ns] {
+            set owner [namespace qualifiers $type]
+            set name [namespace tail $type]
+            if {![dict exists $wanted $owner $name]} {
+                dict set wanted $owner $name $native
+            }
+        }
+    }
+    return $wanted
+}
+
+# The standard modules the loader loads, or would load were they there, for
+# the contract types of the compilation whose import environments are
+# IMPORTS (ContractOwners), sorted: the front-end cache's dependencies
+# (surface::cache::Dependencies), which no import names.
+proc surface::modules::ContractModules {imports} {
+    return [lsort [dict keys [ContractOwners $imports]]]
+}
+
+# Raises the COMPILER-INTERNAL failure of the result contract of native
+# NATIVE, which names TYPE: WHY says what the standard library got wrong.
+proc surface::modules::ContractError {native type why} {
+    return -code error -errorcode {CORE SEMANTIC COMPILER-INTERNAL} \
+        "internal compiler error: the result contract of $native names $type, which the standard library does not declare as its contract needs: $why"
+}
+
 # The directory DIR with every symbolic link in it resolved, its last
 # component's included (file normalize resolves all but the last).
 proc surface::modules::RealDirectory {dir} {
@@ -2956,6 +3086,7 @@ proc surface::modules::LoadNamespaces {namespaces args} {
     foreach name $namespaces {
         LoadNamespace state $name ""
     }
+    ContractTypes state
     RaiseReferenceErrors $state
     return [dict create sections [dict get $state sections] files [dict get $state files] \
         functions [dict get $state loaded] typeDecls [dict get $state typeDecls] \
@@ -2998,6 +3129,7 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
     Recovered state $ast "" f1
     try {
         set ast [CollectAndLoad state $ast ""]
+        ContractTypes state
         RaiseReferenceErrors $state
     } on error {message options} {
         # A diagnostic in a module file names the imports that load it.

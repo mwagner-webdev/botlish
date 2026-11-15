@@ -1,0 +1,13 @@
+# case: matrix -- yields str, returns int (lines and a line count): rejected
+# class: rejected-precision
+# expect: rejected COROUTINE-RESULT-MISMATCH
+import std::coroutine
+import std::list
+
+fn source(lines: List[str]) -> int:
+    loop line in lines:
+        yield line
+    lines.length()
+
+coroutine {step, first} = source(["a", "b"])
+first

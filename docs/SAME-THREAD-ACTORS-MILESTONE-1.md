@@ -323,7 +323,10 @@ construction), and the top level receives with `drain`.
 * `listen` consumes the Inbox: a second listen, a second actor given the
   same Inbox, a second `drain` are rejected (`reject-listen-twice.bot`
   USE-AFTER-MOVE, `reject-copy-inbox.bot` AFFINE-NOT-DEFINITELY-LIVE,
-  `reject-drain-twice.bot` USE-AFTER-MOVE).
+  `reject-drain-twice.bot` USE-AFTER-MOVE). (`reject-copy-inbox.bot` is
+  USE-AFTER-MOVE since PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md: the
+  ownership analysis takes an inject block, `if true:`, as run, so the
+  Inbox moved into the first actor is definitely moved for the second.)
 * An Inbox cannot be made from an Address (`listen(address)` is IMPRINT),
   forged (OPAQUE-CONSTRUCTION) or read apart (OPAQUE-REPRESENTATION).
 * `listen` binds the mailbox to the actor's task for good; a host serves a

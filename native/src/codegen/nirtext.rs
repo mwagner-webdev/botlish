@@ -148,11 +148,15 @@ pub fn inst(program: &Program, inst: &Inst) -> String {
             format!("    %{dst} = callenv {func} %{closure}{}", regs(args))
         }
         Inst::CallValue { dst, callee, args } => format!("    %{dst} = callvalue %{callee}{}", regs(args)),
-        Inst::ForeignCall { dst, foreign, args, exposed, discard, varargs } => {
+        Inst::ForeignCall { dst, foreign, args, exposed, mutable, discard, varargs } => {
             let mut line = format!("    %{dst} = foreigncall {foreign}{}", regs(args));
             let shown = positions(exposed).replace(' ', ",");
             if !shown.is_empty() {
                 let _ = write!(line, " exposed={shown}");
+            }
+            let shown = positions(mutable).replace(' ', ",");
+            if !shown.is_empty() {
+                let _ = write!(line, " mutable={shown}");
             }
             if !varargs.is_empty() {
                 let list: Vec<String> =

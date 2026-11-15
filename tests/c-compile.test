@@ -704,6 +704,410 @@ with context Divisor {d: 0}
 total(17)
 }
 
+# Coroutines (C-COROUTINE-FRAMES-MILESTONE-1.md): every construct of the
+# supported subset, against every other backend.
+
+# COROUTINES.md's principal program: a yield two calls deep, a struct
+# message protocol, a completed coroutine answering its final result again
+dict set ::ccCorpus coroutine-principal {
+struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+fn deep(base: int, resume Message) -> int:
+    message = yield Event {value: base}
+    message.value
+
+fn worker(base: int, resume Message) -> Event:
+    x = deep(base)
+    message = yield Event {value: x}
+    return Event {value: message.value}
+
+coroutine {step, first} = worker(10)
+
+second = step(Message {value: 20})
+final = step(Message {value: 30})
+again = step(Message {value: 999})
+[first, second, final, again]
+}
+
+# two coroutines of one root and one of another, suspended at different
+# points and resumed out of order (a single state variable per root would
+# mix them up), completion, the cached final result, done?
+dict set ::ccCorpus coroutine-interleaved {
+import std::coroutine
+
+type Small = Int in 0..100
+
+fn counter(start: Small, step: Small):
+    loop k from 0 to 3:
+        yield start + k * step
+    start * 1000
+
+fn letter(base: Small):
+    yield base
+    base + 50
+
+coroutine {step: a, first: a1} = counter(10, 1)
+coroutine {step: b, first: b1} = counter(20, 5)
+coroutine {step: c, first: c1} = letter(7)
+b2 = b()
+b3 = b()
+a2 = a()
+c2 = c()
+a3 = a()
+c3 = c()
+bdone = b()
+adone = a()
+b4 = b()
+done = [std::coroutine::done?(a), std::coroutine::done?(b), std::coroutine::done?(c)]
+[a1, a2, a3, adone, b1, b2, b3, bdone, b4, c1, c2, c3, done]
+}
+
+# yields inside a fold, after continue, before break and return, inside a
+# handler of a declared error, with a struct message
+dict set ::ccCorpus coroutine-control {
+type Small = Int in 0..1000
+
+error Stop
+
+struct Msg:
+    v: Small
+
+fn risky(n: Small) errors Stop:
+    if n == 3:
+        fail Stop
+    n
+
+fn walker(limit: Small, resume Msg):
+    fold i from 0 to limit with intermediate acc 0:
+        if i == 1:
+            continue
+        m = yield acc + i
+        r = risky(m.v):
+            on Stop:
+                m2 = yield 999
+                m2.v
+        if r > 50:
+            break
+        if r == 7:
+            return 777
+        acc + r
+
+coroutine {step: w, first: a} = walker(6)
+b = w(Msg {v: 2})
+c = w(Msg {v: 3})
+d = w(Msg {v: 4})
+e = w(Msg {v: 5})
+f = w(Msg {v: 60})
+g = w(Msg {v: 1})
+[a, b, c, d, e, f, g]
+}
+
+# a declared error after a yield crosses the resume and is cached (every
+# later resume raises it again, running nothing); a failure before the
+# first yield crosses the construction
+dict set ::ccCorpus coroutine-errors {
+type Small = Int in 0..1000
+
+error Broken
+error Early
+
+fn worker(n: Small) errors Broken:
+    yield n
+    if n > 5:
+        fail Broken
+    yield n + 1
+    n + 2
+
+fn early(n: Small) errors Early:
+    if n > 0:
+        fail Early
+    yield n
+    n
+
+fn run(n: Small) -> int:
+    coroutine {step: s, first: f} = worker(n):
+        on Broken:
+            -1
+    a = s():
+        on Broken:
+            100
+    b = s():
+        on Broken:
+            200
+    c = s():
+        on Broken:
+            300
+    f * 1000000 + a * 1000 + b * 10 + c
+
+fn startup(n: Small) -> int:
+    coroutine {step: s, first: f} = early(n):
+        on Early:
+            995
+    g = s():
+        on Early:
+            996
+    f * 10 + g
+
+[run(3), run(9), startup(0), startup(4)]
+}
+
+# a run-time error of the language in a later segment ends the run with
+# Botlish's own code and message
+dict set ::ccCorpus coroutine-mod-zero {
+type Small = Int in 0..1000
+
+fn zero(n: Small):
+    yield n
+    n.mod(n - n)
+
+coroutine {step: s, first: f} = zero(4)
+x = s()
+f + x
+}
+
+# a coroutine that constructs and drives another across its own yields,
+# two instances of it interleaved
+dict set ::ccCorpus coroutine-nested {
+type Small = Int in 0..1000
+
+fn inner(base: Small):
+    yield base
+    yield base + 1
+    base + 2
+
+fn outer(base: Small):
+    coroutine {step: s, first: a} = inner(base)
+    yield a
+    b = s()
+    yield b
+    c = s()
+    c + 100
+
+coroutine {step: o, first: x1} = outer(10)
+coroutine {step: p, first: y1} = outer(20)
+x2 = o()
+y2 = p()
+x3 = o()
+y3 = p()
+y4 = p()
+x4 = o()
+x5 = o()
+[x1, y1, x2, y2, x3, y3, y4, x4, x5]
+}
+
+# a coroutine needing a context and a context trait keeps the providers
+# its construction selected; one constructed inside an inject block
+dict set ::ccCorpus coroutine-contexts {
+type Small = Int in 0..100
+
+context struct Base:
+    k: Small
+
+context struct Fee:
+    cents: Small
+
+context trait Clock:
+    fn now() -> Small
+
+context struct SimClock:
+    t: Small
+
+fn now(context c: SimClock) -> Small:
+    c.t
+
+fn stamp(context clock: Clock) -> Small:
+    clock.now()
+
+fn charge(context f: Fee) -> Small:
+    f.cents
+
+fn gen(n: Small, context b: Base):
+    yield n + b.k
+    yield stamp()
+    n
+
+fn billed(n: Small):
+    yield charge()
+    n
+
+fn restricted() -> int:
+    inject context Fee:
+        coroutine {step: s, first: a} = billed(9)
+        a * 100 + s()
+
+with context Base {k: 1}
+with context SimClock {t: 7}
+with context Fee {cents: 3}
+coroutine {step: c, first: a} = gen(3)
+x = c()
+y = c()
+z = c()
+[a, x, y, z, restricted()]
+}
+
+# handles moved, passed to functions that resume them, returned, joined by
+# an if, observed with done?
+dict set ::ccCorpus coroutine-handles {
+import std::coroutine
+
+type Small = Int in 0..1000
+
+fn ticks(n: Small) -> int:
+    loop i from 0 to n:
+        yield i * 10
+    n
+
+fn pump(h: Coroutine{args: [], return: int, errors: []}, times: Small) -> int:
+    fold k from 0 to times with intermediate acc 0:
+        acc + h()
+
+fn twice(h: Coroutine{args: [], return: int, errors: []}) -> Coroutine{args: [], return: int, errors: []}:
+    h()
+    h
+
+fn pick(flag: bool, x: Coroutine{args: [], return: int, errors: []}, y: Coroutine{args: [], return: int, errors: []}) -> Coroutine{args: [], return: int, errors: []}:
+    if flag:
+        x
+    else:
+        y
+
+fn main() -> int:
+    coroutine {step: a} = ticks(5)
+    coroutine {step: b} = ticks(3)
+    coroutine {step: e} = ticks(2)
+    coroutine {step: f} = ticks(9)
+    d = std::coroutine::done?(a)
+    moved = b
+    c = twice(moved)
+    g = pick(true, e, f)
+    x = pump(a, 2)
+    y = pump(c, 3)
+    z = pump(g, 4)
+    if not d:
+        x * 1000000 + y * 1000 + z
+    else:
+        0
+
+main()
+}
+
+# constructions inside a loop (their storage reused per iteration), inside
+# a yielding fold, and a yielding self tail call (a loop over one frame)
+dict set ::ccCorpus coroutine-loops {
+fn gen(n: int):
+    yield n
+    yield n * 2
+    n * 3
+
+fn sum(k: int) -> int:
+    fold i from 0 to k with intermediate acc 0:
+        coroutine {step: s, first: a} = gen(i)
+        b = s()
+        c = s()
+        acc + a + b + c
+
+fn inside(k: int):
+    fold i from 0 to k with intermediate acc 0:
+        coroutine {step: s, first: a} = gen(i)
+        b = s()
+        m = yield a + b
+        acc + a + b
+
+fn count(n: int, acc: int):
+    if n == 0:
+        return acc
+    yield acc
+    count(n - 1, acc + n)
+
+coroutine {step: s, first: a} = inside(3)
+b = s()
+c = s()
+d = s()
+coroutine {step: t, first: t1} = count(4, 0)
+t2 = t()
+t3 = t()
+t4 = t()
+t5 = t()
+t6 = t()
+[sum(5), a, b, c, d, t1, t2, t3, t4, t5, t6]
+}
+
+# a generator that never completes, an omitted step and an omitted first
+dict set ::ccCorpus coroutine-endless {
+import std::coroutine
+
+type Small = Int in 0..1000
+
+fn naturals(from: Small):
+    loop:
+        yield from
+
+fn squares(limit: Small):
+    loop i from 0 through limit:
+        yield i * i
+    -1
+
+coroutine {step: n, first: n0} = naturals(5)
+n1 = n()
+n2 = n()
+coroutine {first: alone} = squares(3)
+coroutine {step: q} = squares(2)
+q1 = q()
+q2 = q()
+q3 = q()
+q4 = q()
+[n0, n1, n2, alone, q1, q2, q3, q4, std::coroutine::done?(n)]
+}
+
+# a handle passed into another coroutine at its construction and resumed
+# from its segments; one yielding helper serving two roots of one
+# protocol, called twice from one of them (two frames in one union)
+dict set ::ccCorpus coroutine-shared {
+type Small = Int in 0..100
+
+struct Ask:
+    k: Small
+
+fn source(n: Small) -> int:
+    loop i from 0 to n:
+        yield i
+    -1
+
+fn shared(base: int, resume Ask) -> int:
+    m = yield base
+    m.k + base
+
+fn first(x: int, resume Ask) -> int:
+    a = shared(x)
+    b = shared(a)
+    a + b
+
+fn second(x: int, resume Ask) -> int:
+    shared(x * 2)
+
+fn consumer(h: Coroutine{args: [], return: int, errors: []}) -> int:
+    a = h()
+    yield a
+    b = h()
+    yield b
+    a + b
+
+coroutine {step: s} = source(5)
+coroutine {step: c, first: c1} = consumer(s)
+c2 = c()
+c3 = c()
+coroutine {step: f, first: f1} = first(1)
+coroutine {step: g, first: g1} = second(5)
+f2 = f(Ask {k: 10})
+g2 = g(Ask {k: 20})
+f3 = f(Ask {k: 30})
+[c1, c2, c3, f1, f2, f3, g1, g2]
+}
+
 foreach name [dict keys $::ccCorpus] {
     test cc-parity-$name "the C backend agrees with every other backend on the $name corpus program" \
         -constraints hostCC -body {
@@ -1462,7 +1866,9 @@ ok()
 
 # (The Linux program is compiled for a Linux target, the host's own on Linux:
 # std::linux is the Linux platform's, UNSUPPORTED-PLATFORM for any other.)
-test cc-ctx-unsupported-around-contexts "a program whose contexts are representable but which uses what C does not compile (the portable I/O over Linux system calls and Strings; a coroutine) is C UNSUPPORTED at those constructs" -body {
+# A coroutine that needs a context compiles since
+# C-COROUTINE-FRAMES-MILESTONE-1.md (the coroutine corpus programs).
+test cc-ctx-unsupported-around-contexts "a program whose contexts are representable but which uses what C does not compile (the portable I/O over Linux system calls and Strings) is C UNSUPPORTED at those constructs" -body {
     set hello [surface::compile {import std::io
 import std::linux::io
 
@@ -1474,25 +1880,10 @@ hello():
     on std::io::WriteFailed:
         unit
 } -warnings off -target [linuxTarget]]
-    set coro [surface::compile {type Small = Int in 0..100
-
-context struct Base:
-    k: Small
-
-fn gen(n: Small, context b: Base) -> int:
-    yield n + b.k
-    0
-
-with context Base {k: 1}
-coroutine {step: c} = gen(3)
-5
-} -warnings off]
-    lmap hir [list $hello $coro] {
-        catch {ccompile::program $hir -prefix u} message options
-        list [dict get $options -errorcode] [expr {[llength [dict getdef $options -diagnostics {}]] > 0}] \
-            [string match "*context*" [lindex [split $message \n] 0]]
-    }
-} -result {{{C UNSUPPORTED} 1 0} {{C UNSUPPORTED} 1 0}}
+    catch {ccompile::program $hello -prefix u} message options
+    list [dict get $options -errorcode] [expr {[llength [dict getdef $options -diagnostics {}]] > 0}] \
+        [string match "*context*" [lindex [split $message \n] 0]]
+} -result {{C UNSUPPORTED} 1 0}
 
 test cc-ctx-unverified-refused "a lenient HIR that failed context verification is never compiled: its first context diagnostic is the error" -body {
     set hir [surface::compile "type Small = Int in 0..100\ncontext struct Clock:\n    t: Small\nfn now(context c: Clock) -> Small:\n    c.t\nnow()\n" -warnings off -strict 0]
@@ -1517,6 +1908,400 @@ test cc-ctx-deterministic "a context program gives the same files, byte for byte
 
 # ---------------------------------------------------------------------------
 # The command line
+
+# ---------------------------------------------------------------------------
+# Coroutines (C-COROUTINE-FRAMES-MILESTONE-1.md): persistent stackless
+# frames. The corpus programs above run every construct against every other
+# backend; these tests check the representation itself -- explicit frames,
+# storage of the constructing function, nothing at file scope, the
+# construction's context pointers, no runtime service or allocation -- the
+# kiosk example, freestanding and cross-target builds, and what the backend
+# refuses.
+
+set ::ccKiosk [file join $::projectRoot examples c-freestanding kiosk]
+set ::ccCoroutineCorpus [lsearch -all -inline [dict keys $::ccCorpus] coroutine-*]
+
+# The two kiosk configurations, generated into one directory once.
+proc ccKiosks {} {
+    if {![info exists ::ccKiosksGen]} {
+        set dir [ccDir]
+        set ::ccKiosksGen [lmap f {kiosk_bench kiosk_field} {
+            ccGenerateFile [file join $::ccKiosk $f.bot] $dir
+        }]
+    }
+    return $::ccKiosksGen
+}
+
+# The text of file NAME of generated program GEN.
+proc ccText {gen name} {
+    return [dict get $gen out files $name]
+}
+
+# The body of C struct typedef NAME in TEXT: its member lines, trimmed.
+proc ccStructMembers {text name} {
+    if {![regexp "typedef struct $name \\{\n(.*?)\n\\} $name;" $text -> body]} {
+        error "no struct $name"
+    }
+    return [lmap line [split $body \n] {string trim $line}]
+}
+
+test cc-co-kiosk "the kiosk example, installed two ways, agrees with every backend and with its expect line; neither configuration needs a runtime service" -constraints hostCC -body {
+    set results {}
+    foreach gen [ccKiosks] f {kiosk_bench kiosk_field} {
+        set got [lmap compiler $::ccCompilers {
+            lmap opt {-O0 -O2} {ccRun [ccBuild $gen $compiler {} $opt]}
+        }]
+        set all [lsort -unique [concat {*}$got [list [ccReferenceOf [dict get $gen hir]]]]]
+        set out [dict get $gen out]
+        lappend results [expr {$all eq [list [ccExpected [file join $::ccKiosk $f.bot]]]}] \
+            [dict get $out services] [dict get $out display] [dict exists $out files botlish_rt_v1.h]
+    }
+    set results
+} -result {1 {} {} 0 1 {} {} 0}
+
+test cc-co-kiosk-two-apps "both kiosk configurations, each with three independently suspended activities per session, run interleaved in one executable; repeated runs agree" -constraints hostCC -body {
+    lassign [ccKiosks] a b
+    set expected [ccTwoAppsExpected $a $b]
+    lsort -unique [lmap compiler $::ccCompilers {
+        lassign [ccExec [list [ccTwoApps $a $b $compiler 0]]] status output
+        list $status [expr {[string trim $output] eq $expected}]
+    }]
+} -result {{0 1}}
+
+test cc-co-kiosk-freestanding "the kiosk's two configurations run in one static executable with no C library, no Botlish runtime, no provider and no undefined symbol" -constraints {gcc linuxX86_64 nm} -body {
+    lassign [ccKiosks] a b
+    set exe [ccTwoApps $a $b gcc 1]
+    lassign [ccExec [list $exe]] status output
+    list $status [expr {[string trim $output] eq [ccTwoAppsExpected $a $b]}] \
+        [string trim [lindex [ccExec [list nm -u $exe]] 1]]
+} -result {0 1 {}}
+
+test cc-co-kiosk-cross "the kiosk executable, with no C library, runs on other architectures and agrees" -constraints ccCross -body {
+    lassign [ccKiosks] a b
+    set expected [ccTwoAppsExpected $a $b]
+    set mismatches {}
+    set runs 0
+    foreach {target emulator libgcc} $::ccCross {
+        set exe [ccTwoApps $a $b clang 1 $target $libgcc]
+        lassign [ccExec [concat $emulator [list $exe]]] status output
+        incr runs
+        if {$status != 0 || [string trim $output] ne $expected} {
+            lappend mismatches "$target: $status $output"
+        }
+    }
+    list [expr {$runs > 0}] $mismatches
+} -result {1 {}}
+
+test cc-co-kiosk-warning-clean "the kiosk's entry programs and modules compile under -warnings error" -body {
+    lmap f {kiosk_bench kiosk_field} {
+        catch {surface::readProgramFile [file join $::ccKiosk $f.bot] -warnings error} message
+        expr {[dict exists $message exprs] ? "ok" : $message}
+    }
+} -result {ok ok}
+
+# The coroutine corpus programs and the kiosk, built with no C library
+# (linux_start.c), run under qemu-user on other architectures (an emulator,
+# not hardware) against the reference.
+test cc-co-cross-execution "the coroutine corpus programs built with no C library run on other architectures and agree" -constraints ccCross -body {
+    set mismatches {}
+    set runs 0
+    foreach name $::ccCoroutineCorpus {
+        set source [dict get $::ccCorpus $name]
+        set gen [ccGenerate $source]
+        set dir [dict get $gen dir]
+        set expected [ccReference $source {interp compile}]
+        foreach {target emulator libgcc} $::ccCross {
+            set exe [file join $dir prog.$target]
+            set command [list clang --target=$target -fuse-ld=lld {*}$::ccStrict -O2 -ffreestanding -nostdlib -static \
+                -fno-stack-protector -fno-pic -DBOTLISH_PROGRAM=prog "-DBOTLISH_PROGRAM_HEADER=\"prog.h\"" \
+                -I $dir -I [file join $::projectRoot ccompile] [file join $::ccHarness linux_start.c] \
+                [file join $dir prog.c] [file join $dir prog_display.c] \
+                [file join $::ccProviders botlish_rt_v1_int_arena.c] {*}$libgcc -o $exe]
+            lassign [ccExec $command] status output
+            if {$status} {
+                lappend mismatches "$name $target: build: $output"
+                continue
+            }
+            set got [string trim [lindex [ccExec [concat $emulator [list $exe]]] 1]]
+            incr runs
+            if {$got ne $expected} {
+                lappend mismatches "$name $target: $got (expected $expected)"
+            }
+        }
+    }
+    list [expr {$runs > 0}] $mismatches
+} -result {1 {}}
+
+# Compiled for small targets (no execution): every object compiles under the
+# strict flags and references no Botlish symbol but the services its
+# manifest lists -- no coroutine runtime exists to reference. (At -O2, as
+# cc-ctx-cross-targets: clang 18's AVR backend runs out of registers at -O0
+# on 64-bit arithmetic, a limit of that compiler.)
+test cc-co-cross-targets "coroutine programs compile for 8- to 64-bit targets and reference nothing coroutine-related there" -constraints {clang llvmNm} -body {
+    set gens [ccKiosks]
+    foreach name {coroutine-principal coroutine-interleaved coroutine-nested coroutine-contexts} {
+        lappend gens [ccGenerate [dict get $::ccCorpus $name] [string map {- _} $name]]
+    }
+    set problems {}
+    foreach gen $gens {
+        set dir [dict get $gen dir]
+        set p [dict get $gen prefix]
+        set allowed [lmap s [concat [dict get $gen out services] [dict get $gen out display]] {
+            lindex [dict get $::ccompile::services $s] 0
+        }]
+        foreach target {thumbv6m-none-eabi thumbv7m-none-eabi riscv32-unknown-elf riscv64-unknown-elf msp430-none-elf
+                avr mips-unknown-elf powerpc-unknown-elf aarch64-none-elf} {
+            set extra [expr {$target eq "avr" ? "-mmcu=atmega328p" : ""}]
+            foreach unit [list $p ${p}_display] {
+                set object [file join $dir $unit.$target.o]
+                lassign [ccExec [list clang --target=$target {*}$extra {*}$::ccStrict -ffreestanding -O2 -I $dir \
+                    -I [file join $::projectRoot ccompile] -c [file join $dir $unit.c] -o $object]] status output
+                if {$status} {
+                    lappend problems "$p $target: $output"
+                    continue
+                }
+                foreach line [split [lindex [ccExec [list llvm-nm -u $object]] 1] \n] {
+                    set symbol [lindex $line end]
+                    if {[string match *${p}_* $symbol] || ([string match botlish_* $symbol] && $symbol ni $allowed)} {
+                        lappend problems "$p $target: $symbol"
+                    }
+                }
+            }
+        }
+    }
+    set problems
+} -result {}
+
+test cc-co-freestanding-objects "every undefined symbol of a coroutine program's freestanding object is a runtime service its manifest lists or a memory function the toolchain may call (none at all for the kiosk)" -constraints {hostCC nm} -body {
+    set problems {}
+    set kiosk {}
+    set gens [ccKiosks]
+    foreach name $::ccCoroutineCorpus {
+        lappend gens [ccGenerate [dict get $::ccCorpus $name] [string map {- _} $name]]
+    }
+    foreach gen $gens {
+        set dir [dict get $gen dir]
+        set p [dict get $gen prefix]
+        set allowed [lmap s [concat [dict get $gen out services] [dict get $gen out display]] {
+            lindex [dict get $::ccompile::services $s] 0
+        }]
+        foreach compiler $::ccCompilers {
+            foreach unit [list $p ${p}_display] {
+                set object [file join $dir $unit.$compiler.o]
+                lassign [ccExec [list $compiler {*}$::ccStrict -O2 -ffreestanding -I $dir \
+                    -I [file join $::projectRoot ccompile] -c [file join $dir $unit.c] -o $object]] status output
+                if {$status} {
+                    error $output
+                }
+                foreach line [split [lindex [ccExec [list nm -u $object]] 1] \n] {
+                    set symbol [lindex $line end]
+                    if {$symbol eq ""} continue
+                    if {$::tcl_platform(os) eq "Darwin"} {
+                        # (Mach-O spells a C symbol with a leading underscore.)
+                        regsub {^_} $symbol "" symbol
+                    }
+                    if {[string match kiosk_* $p]} {
+                        lappend kiosk $symbol
+                    } elseif {$symbol ni $allowed && $symbol ni {memcpy memmove memset memcmp}} {
+                        # (The four memory functions are the C toolchain's
+                        # own obligation, C-COMPILE-FREESTANDING-MILESTONE-1.md
+                        # section 5: a compiler may call them for a struct
+                        # copy whatever the source says.)
+                        lappend problems "$p: $symbol"
+                    }
+                }
+            }
+        }
+    }
+    list $problems $kiosk
+} -result {{} {}}
+
+# A function's frame holds what survives its suspensions and nothing else:
+# here b (read after the first yield) and the parameter, never a (dead
+# before it) or the temporaries of the arithmetic. gen and the thunk each
+# start with a dispatch; gen suspends at its two yields, the thunk where its
+# call of gen suspends: three resume labels.
+test cc-co-frames-explicit "each yielding function has an explicit frame type in the header holding exactly its parameters and the values live across a suspension; each construction kind a storage type" -body {
+    set gen [ccGenerate {type Small = Int in 0..100
+
+fn gen(n: Small):
+    a = n + 1
+    b = a * 2
+    yield a
+    yield b
+    0
+
+coroutine {step: s, first: x} = gen(3)
+[x, s(), s()]
+} fr]
+    set h [ccText $gen fr.h]
+    set c [ccText $gen fr.c]
+    regexp {typedef struct (fr_[0-9]+_gen_frame)} $h -> frame
+    list [regsub -all {_[0-9]+;} [join [ccStructMembers $h $frame] " "] {_N;}] \
+        [ccStructMembers $h fr_co1] \
+        [regexp -all {switch \(fr->resume\)} $c] [regexp -all {return fr_SUSPEND;} $c] \
+        [regexp -all {resume_[0-9]+:;} $c]
+} -result {{unsigned char resume; int64_t p_n_N; int64_t v_b_N;} {{fr_coh1 head;} {fr_1_coroutine_frame body;}} 2 3 3}
+
+# Storage is the constructing function's: nothing at file scope (two
+# coroutines of one root never share state), one storage object per
+# construction, zeroed where the construction is, and a handle is a pointer
+# to it -- a move copies the pointer, never the storage.
+test cc-co-storage-of-the-constructor "every construction's storage is an object of the constructing function, zeroed there; no writable file-scope object exists; no storage object is ever copied" -body {
+    set results {}
+    foreach name {coroutine-interleaved coroutine-handles coroutine-nested} {
+        set gen [ccGenerate [dict get $::ccCorpus $name] st]
+        set c [ccText $gen st.c]
+        set sources [regexp -all {coroutine \{} [dict get $::ccCorpus $name]]
+        set zeroed [regexp -all {co[0-9]+ = \(st_co[0-9]+\)\{0\};} $c]
+        set copies [regexp -all -line {co[0-9]+ = (?!\(st_co[0-9]+\)\{0\})} $c]
+        lappend results [ccFileScopeObjects $c] [expr {$zeroed == $sources}] $copies
+    }
+    set results
+} -result {{} 1 0 {} 1 0 {} 1 0}
+
+test cc-co-no-stack-switching "the generated C uses no stack switching, setjmp, ucontext, fiber, thread, allocation or extension: only the three freestanding headers" -body {
+    set gen [ccGenerate [dict get $::ccCorpus coroutine-nested] ns]
+    set text "[ccText $gen ns.h][ccText $gen ns.c]"
+    list [regexp -all -inline {#include <[^>]*>} $text] \
+        [regexp {setjmp|longjmp|ucontext|swapcontext|pthread|malloc|free\(|__builtin|asm|__attribute__} $text]
+} -result {{{#include <stdbool.h>} {#include <stddef.h>} {#include <stdint.h>}} 0}
+
+# A coroutine keeps the providers its construction selected: its storage
+# holds exactly the pointers its root's requirement names, filled in at the
+# construction; a resume passes none (the resume function takes only the
+# handle), and the frame types hold no context pointer.
+test cc-co-contexts-retained "a coroutine's storage holds exactly its construction's context pointers; the resume function takes none; frames hold none" -body {
+    lassign [ccKiosks] bench field
+    set h [ccText $bench kiosk_bench.h]
+    set c [ccText $bench kiosk_bench.c]
+    set storage {}
+    foreach kind {kiosk_bench_co1 kiosk_bench_co2 kiosk_bench_co3} {
+        lappend storage [lmap m [ccStructMembers $h $kind] {
+            if {[string match *ctx_* $m]} {set m} else continue
+        }]
+    }
+    set frameContexts 0
+    foreach frame [regexp -all -inline {typedef struct ([a-z0-9_]+_frame) \{} $h] {
+        if {[string match *_frame $frame]} {
+            incr frameContexts [llength [lsearch -all [ccStructMembers $h $frame] *ctx_*]]
+        }
+    }
+    list $storage $frameContexts [regexp -all -inline {static kiosk_bench_status kiosk_bench_coh[0-9]_resume\([^)]*\);} $c]
+} -result {{{} {{kiosk_bench_bench_SimClock *ctx_bench_SimClock;}} {{kiosk_bench_bench_BenchTerminal *ctx_bench_BenchTerminal;} {kiosk_bench_bench_SimClock *ctx_bench_SimClock;}}} 0 {{static kiosk_bench_status kiosk_bench_coh1_resume(kiosk_bench_coh1 *co, kiosk_bench_meter_Screen *out);} {static kiosk_bench_status kiosk_bench_coh2_resume(kiosk_bench_coh2 *co, kiosk_bench_meter_Beat *out);} {static kiosk_bench_status kiosk_bench_coh3_resume(kiosk_bench_coh3 *co, kiosk_bench_meter_Status *out);}}}
+
+test cc-co-manifest-frames "the manifest lists exactly the coroutine types the header defines; a program without coroutines has no coroutine section" -body {
+    lassign [ccKiosks] bench
+    set h [ccText $bench kiosk_bench.h]
+    set manifest [ccText $bench kiosk_bench.runtime.json]
+    set listed [lmap {- t} [regexp -all -inline {"type": "([^"]*)"} $manifest] {set t}]
+    set defined [lmap {- t} [regexp -all -inline {\} (kiosk_bench_(?:co[0-9]+|coh[0-9]+|[0-9]+_[A-Za-z0-9_]*_frame));} $h] {set t}]
+    set plain [ccText [ccGenerate [dict get $::ccCorpus pure] pure] pure.runtime.json]
+    list [expr {$listed eq $defined}] [llength $listed] [string match *coroutine_frames* $plain]
+} -result {1 12 0}
+
+# The storage types' sizes as the host's C compiler lays them out (the
+# manifest's types; frame-sizes.sh, which runs a hosted probe for the host):
+# a storage type holds its handle target and its thunk's frame, which holds
+# its root's.
+test cc-co-frame-sizes "frame-sizes.sh measures every coroutine type; each storage type is at least its handle target and its frame" -constraints {hostCC unixShell} -body {
+    lassign [ccKiosks] bench
+    set lines [exec sh [file join $::projectRoot examples c-freestanding frame-sizes.sh] [dict get $bench dir] kiosk_bench]
+    set size [dict create]
+    foreach line [split $lines \n] {
+        lassign $line target type bytes align
+        dict set size $type $bytes
+    }
+    set h [ccText $bench kiosk_bench.h]
+    set ok 1
+    foreach kind {kiosk_bench_co1 kiosk_bench_co2 kiosk_bench_co3} {
+        set parts 0
+        foreach member [ccStructMembers $h $kind] {
+            regexp {^([A-Za-z0-9_]+) (head|body);$} $member -> type
+            if {[info exists type] && [dict exists $size $type]} {
+                incr parts [dict get $size $type]
+            }
+            unset -nocomplain type
+        }
+        if {[dict get $size $kind] < $parts} {
+            set ok 0
+        }
+    }
+    list [dict size $size] $ok [expr {[tcl::mathfunc::min {*}[dict values $size]] > 0}]
+} -result {12 1 1}
+
+test cc-co-deterministic "a coroutine program gives the same files, byte for byte" -body {
+    set a [ccompile::program [surface::compile [dict get $::ccCorpus coroutine-nested] -warnings off] -prefix d]
+    set b [ccompile::program [surface::compile [dict get $::ccCorpus coroutine-nested] -warnings off] -prefix d]
+    expr {[dict get $a files] eq [dict get $b files]}
+} -result 1
+
+test cc-co-unsupported-recursion "a yielding function that calls itself (not as a tail call), or constructs a coroutine of itself, is C UNSUPPORTED where the cycle closes: its frame would hold itself" -body {
+    list [ccUnsupported {fn walk(n: int) -> int:
+    if n > 0:
+        walk(n - 1)
+    yield n
+    n
+
+coroutine {step: s, first: a} = walk(3)
+a + s()
+}] [ccUnsupported {fn tree(n: int) -> int:
+    if n > 0:
+        coroutine {step: s, first: a} = tree(n - 1)
+        yield a
+    yield n
+    n
+
+coroutine {step: s, first: a} = tree(3)
+a + s()
+}]
+} -result {{{C UNSUPPORTED} {3:9: the C backend cannot compile a coroutine whose suspended calls recurse (a function that may yield, called or constructed again from its own suspended call chain, needs a frame that holds itself: unbounded storage) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service} 1} {{C UNSUPPORTED} {3:41: the C backend cannot compile a coroutine whose suspended calls recurse (a function that may yield, called or constructed again from its own suspended call chain, needs a frame that holds itself: unbounded storage) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service} 1}}
+
+test cc-co-unsupported-escape "a function that constructs a coroutine and may return a handle is C UNSUPPORTED (its storage would end with the function); one that returns a handle it received compiles" -body {
+    list [ccUnsupported {fn gen(n: int) -> int:
+    yield n
+    n
+
+fn make(n: int) -> Coroutine{args: [], return: int, errors: []}:
+    coroutine {step: s} = gen(n)
+    s
+
+h = make(3)
+h()
+}] [ccUnsupported [dict get $::ccCorpus coroutine-handles]]
+} -result {{{C UNSUPPORTED} {6:5: the C backend cannot compile a function that may return a handle of a coroutine it constructs (the coroutine's frame is storage of the function's own frame, which ends when it returns) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service} 1} compiled}
+
+test cc-co-unsupported-aggregate "a handle held in a struct is C UNSUPPORTED, located" -body {
+    lrange [ccUnsupported {fn gen(n: int) -> int:
+    yield n
+    n
+
+coroutine {step: s} = gen(3)
+p = {a: s, k: 1}
+{a, k} = p
+a() + k
+}] 0 1
+} -result {{C UNSUPPORTED} {6:5: the C backend cannot compile a coroutine handle held in a struct or a List (Coroutine{args: [], return: int, errors: []}) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service}}
+
+test cc-co-unsupported-mixed-slots "a yielding helper reached by coroutines whose outward values have different C representations is C UNSUPPORTED at the call that reaches it second" -body {
+    lrange [ccUnsupported {type Small = Int in 0..100
+
+fn helper(n: Small) -> int:
+    yield n
+    n
+
+fn wide(n: Small) -> int:
+    helper(n)
+
+fn narrow(n: Small) -> Small:
+    helper(n)
+    n
+
+coroutine {step: s, first: a} = wide(1)
+coroutine {step: t, first: b} = narrow(2)
+[a, b]
+}] 0 1
+} -result {{C UNSUPPORTED} {11:5: the C backend cannot compile a function that may yield reached by coroutines whose outward values or messages have different C representations yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service}}
 
 test cc-cli-emit-c "-emit-c writes the files into -out DIR and names the services; nothing runs" -constraints unixShell -body {
     set dir [ccDir]

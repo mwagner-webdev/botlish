@@ -1002,7 +1002,7 @@ proc native::library::Manifest {hir name records shared {dependencies {}} {diges
         library [S $name] \
         abi [N $abiVersion] \
         target [list obj [list name [S $target] triple [S [dict get [core::cabi::target $target] triple]]]] \
-        compiler [list obj [list frontEnd [S [hir::interchange::fingerprint]] runtimeAbi [S [native::runtimeAbi]]]] \
+        compiler [list obj [list frontEnd [S [hir::interchange::fingerprint]] runtimeAbi [S [native::runtimeAbi [dict get [core::cabi::target $target] triple]]]]] \
         artifacts [list obj $files] \
         sha256 [list obj $sha256] \
         link [list arr [lmap l $links {S $l}]] \

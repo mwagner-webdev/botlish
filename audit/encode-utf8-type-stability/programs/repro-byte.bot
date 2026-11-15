@@ -1,0 +1,29 @@
+# The reproducer of STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md
+# with `import std::byte`, which nothing in it names: repro.bot without it.
+# A 256-entry table indexed by each byte of a String's UTF-8
+# encoding (TEXT-AND-COLLECTION-PRECISION-CENSUS.md's probes c4 and c5).
+import std::str
+import std::list
+import std::byte
+
+type Digit = Int in 0..9
+
+fn digit(d: Digit) -> int:
+    d
+
+fn classes(s: str) -> List[int]:
+    table = loop i from 0 to 256:
+        i + 1
+    loop b in s.encode_utf8():
+        table.at(b)
+
+fn first(s: str) -> int errors IndexNotFound:
+    bs = s.encode_utf8()
+    x = bs.at(0)
+    x
+
+fn facts(s: str):
+    loop b in s.encode_utf8():
+        digit(b)
+
+classes("héllo")

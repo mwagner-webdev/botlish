@@ -167,8 +167,8 @@ std::byte::from_int(45)} q1-byte-from-int-45-nir.bot]
     try {
         set body [nirFuncBody [nirOfFile $path] "std::byte::from_int"]
         list [regexp -all {op rilt} $body] [regexp -all {op rigt} $body] \
-                [regexp -all {faildeclared 1 "std::byte::BelowRange"} $body] \
-                [regexp -all {faildeclared 2 "std::byte::AboveRange"} $body]
+                [regexp -all {faildeclared [0-9]+ "std::byte::BelowRange"} $body] \
+                [regexp -all {faildeclared [0-9]+ "std::byte::AboveRange"} $body]
     } finally {
         removeFile q1-byte-from-int-45-nir.bot
     }
@@ -187,6 +187,11 @@ std::byte::from_int(999)} q1-byte-from-int-999.bot]
 # Generic, non-Byte control (spec item 53): the same shape, a second
 # source-defined interval domain, proves Q1's answer is not Byte-specific.
 
+# (A declared error's number in NIR is matched as any number: the modules a
+# program loads number their errors first -- std::str's encode_utf8 contract
+# loads std::byte and its two, STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-
+# MILESTONE-1.md -- and a fixed number would let a count of 0 pass for no
+# reason.)
 set ::smallCheckedSrc {import std::str
 error TooSmall
 error TooLarge
@@ -204,8 +209,8 @@ fn checkedSmall(value: int) -> Small errors TooSmall, TooLarge:
 test checked-domain-q1-generic-domain-literal-still-emits-both-checks {UPDATED BY M6, then LINUX-X86-64-SYSCALL: (name kept for the M5/M6 reports' cross-references: nothing is emitted any more) a second, non-Byte bounded domain's own checked constructor, called with a statically safe literal as its only caller, loses both fail paths -- and both dead comparisons (PureDecidedCondition) -- exactly like std::byte::from_int(45) does, confirming the mechanism is generic (hir::range::ConditionOutcome has no Byte- or type-specific code), not a Byte special case} -body {
     set body [nirFuncBody [nirOf "${::smallCheckedSrc}checkedSmall(15)"] "checkedSmall"]
     list [regexp -all {op rilt} $body] [regexp -all {op rigt} $body] \
-            [regexp -all {faildeclared 1 "TooSmall"} $body] \
-            [regexp -all {faildeclared 2 "TooLarge"} $body]
+            [regexp -all {faildeclared [0-9]+ "TooSmall"} $body] \
+            [regexp -all {faildeclared [0-9]+ "TooLarge"} $body]
 } -result {0 0 0 0}
 
 # ---------------------------------------------------------------------------
@@ -240,8 +245,8 @@ fn g(m) -> int errors TooLarge:
 fn h(s) -> int errors TooLarge:
     g(std::str::length(s))
 h(\"a long enough string\")"] "checkedSmall"]
-    list [regexp -all {faildeclared 1 "TooSmall"} $body] \
-            [regexp -all {faildeclared 2 "TooLarge"} $body]
+    list [regexp -all {faildeclared [0-9]+ "TooSmall"} $body] \
+            [regexp -all {faildeclared [0-9]+ "TooLarge"} $body]
 } -result {0 1}
 
 test checked-domain-q2-narrowed-summary-removes-both-checks {GENERIC-PREDICATE-PROOF-LOSS.md (fix 3): with g(5) as nonneg's only caller, nonneg's result summary narrows from the ascending [10,+inf) to [10, 10] (the m < 10 branch is the only live one), so checkedSmall<int> needs neither check; with hir::range::resultNarrowOpt 0 the call site reads the old one-sided summary and TooLarge stays} -body {
@@ -255,7 +260,7 @@ fn g(m) -> int errors TooLarge:
 g(5)"
     set row {{src} {
         set body [nirFuncBody [nirOf $src] "checkedSmall"]
-        list [regexp -all {faildeclared 1 "TooSmall"} $body] [regexp -all {faildeclared 2 "TooLarge"} $body]
+        list [regexp -all {faildeclared [0-9]+ "TooSmall"} $body] [regexp -all {faildeclared [0-9]+ "TooLarge"} $body]
     }}
     set hir::range::resultNarrowOpt 0
     try {
@@ -317,8 +322,8 @@ additional_unreserved_chars = std::byte::set(['-', '.', '_', '~'])} q3-nir.bot]
     try {
         set body [nirFuncBody [nirOfFile $path] "std::byte::from_int"]
         list [regexp -all {op rilt|op ilt} $body] [regexp -all {op rigt|op igt} $body] \
-                [regexp -all {faildeclared 1 "std::byte::BelowRange"} $body] \
-                [regexp -all {faildeclared 2 "std::byte::AboveRange"} $body]
+                [regexp -all {faildeclared [0-9]+ "std::byte::BelowRange"} $body] \
+                [regexp -all {faildeclared [0-9]+ "std::byte::AboveRange"} $body]
     } finally {
         removeFile q3-nir.bot
     }

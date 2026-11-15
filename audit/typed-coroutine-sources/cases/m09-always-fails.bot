@@ -1,0 +1,33 @@
+# case: matrix -- yields, then always fails: no normal completion; the outward type is the yields' (R is never); the failure crosses the last resume
+# class: intended
+# expect: facts-widened
+# value: [10, 11, -1, -2, 1]
+import std::coroutine
+
+error Broke
+
+fn source(n: int) -> int errors Broke:
+    yield n
+    yield n + 1
+    fail Broke
+
+fn run() -> List[int]:
+    coroutine {step, first} = source(10):
+        on Broke:
+            -9
+    second = step():
+        on Broke:
+            -8
+    third = step():
+        on Broke:
+            -1
+    again = step():
+        on Broke:
+            -2
+    done = if std::coroutine::done?(step):
+        1
+    else:
+        0
+    [first, second, third, again, done]
+
+run()

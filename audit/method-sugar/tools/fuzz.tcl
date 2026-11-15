@@ -371,9 +371,15 @@ proc negative {kind} {
     switch -- $kind {
         hidden-module {
             # std::byte::complement exists, takes a Byte first, but the program
-            # does not import `byte`: not visible as `complement`.
+            # does not import `byte`: not visible as `complement`. std::byte
+            # is loaded all the same -- the prelude imports std::str, whose
+            # encode_utf8 contract loads it (STDLIB-ENCODE-UTF8-RESULT-TYPE-
+            # STABILITY-MILESTONE-1.md) -- so the rejection names its missing
+            # import, as for any module loaded but not imported
+            # (tests/method-sugar.test's method-not-visible-no-type-import-
+            # needed-or-used).
             return [list "$::prelude$pred[format $::negativeBase {a.complement()}]" \
-                "" "no function named \"complement\" is visible"]
+                "" "namespace \"std::byte\" is not imported; add `import std::byte` to use `std::byte::complement`"]
         }
         hidden-later {
             return [list "$::prelude[format $::negativeBase {a.late(b)}]\nfn late(x, y):\n    x + y" \

@@ -1,0 +1,37 @@
+# stdio_io.bot -- a std::io::IO over Bionic's write(2), for the
+# tagged-pointer probe's Android processes
+# (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md, "SDL3
+# integration"): where no log daemon runs (the qemu-user userspaces) liblog
+# drops what an application writes, so a game run there reports through its
+# standard output and error instead. Every text is one byte exposure of a
+# Bionic heap block -- tagged in its top byte on Android 11 and later. A
+# test fixture, not a proposal for the standard library.
+import std::abi::bytes
+import std::ffi::c
+import std::io
+import std::list
+import std::str
+
+# ssize_t write(int fd, const void *buf, size_t count): the buffer is only
+# read during the call.
+private extern c fn c_write named "write"(fd: std::ffi::c::Int, data: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, count: std::ffi::c::ULong) -> std::ffi::c::Long
+
+opaque context struct StdioIO:
+    output: std::ffi::c::Int
+    failures: std::ffi::c::Int
+
+fn create() -> StdioIO:
+    StdioIO {output: 1, failures: 2}
+
+# (nomethod: a descriptor is not a receiver.)
+private nomethod fn written(fd: std::ffi::c::Int, text: str, context io: StdioIO) -> unit errors std::io::WriteFailed:
+    codes = std::str::encode_utf8(text)
+    if fd.c_write(std::abi::bytes::from_list(codes), std::list::length(codes)) < 0:
+        fail std::io::WriteFailed
+    unit
+
+fn write_text(text: str, context io: StdioIO) -> unit errors std::io::WriteFailed:
+    written(io.output, text)
+
+fn write_error_text(text: str, context io: StdioIO) -> unit errors std::io::WriteFailed:
+    written(io.failures, text)

@@ -339,6 +339,22 @@
           }
         },
         {
+          "match": "^\\s*(?:[A-Za-z_]\\w*\\s*=\\s*|return\\s+)?(match)\\s+(?=[^\\s=.].*:\\s*(?:#.*)?$)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.contextual.botlish"
+            }
+          }
+        },
+        {
+          "match": "^\\s+(case)\\s+(?=(?:::)?[A-Za-z_]\\w*::)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.contextual.botlish"
+            }
+          }
+        },
+        {
           "match": "\\b(coroutine)\\s*(?=\\{)",
           "captures": {
             "1": {

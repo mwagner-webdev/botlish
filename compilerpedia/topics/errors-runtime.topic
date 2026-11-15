@@ -400,6 +400,27 @@ native code compiles it to a trap.
 Report the program: the reachability proof was wrong. -contexts and
 -traits show what the compiler selected for each call.
 
+@topic error.unmatched
+title: UNMATCHED: a match selected no arm at run time
+summary: CORE SEMANTIC UNMATCHED is a defensive run-time check a checked program cannot reach: a match found no arm for its value's case, or an arm read the payload of another case.
+index: errors
+alias: enum#unmatched; enum#payload
+keywords: match, case, exhaustive, compiler bug, lenient, payload
+related: capability.match error.match-not-exhaustive error.unreachable
+code: CORE SEMANTIC UNMATCHED
+
+== MEANING
+Run time; never an error of a program the compiler accepted. A match is
+proven at compile time to name every case of its enum exactly once
+(MATCH-NOT-EXHAUSTIVE), so its chain of selections always finds the arm.
+UNMATCHED means one did not -- a program run despite its rejected match
+(a lenient build), or a compiler bug -- and the run stops there instead of
+reading a value of another case.
+
+== WHAT TO DO
+Fix the diagnostics the compilation reported; if there were none, report
+the program.
+
 @topic error.coroutine-running
 title: COROUTINE-RUNNING: a coroutine resumed while it runs
 summary: CORE SEMANTIC COROUTINE-RUNNING is a defensive run-time check that a checked program cannot reach: a coroutine was resumed from inside its own running body.
@@ -636,6 +657,26 @@ differs is a miss, rebuilt from the source.
 == WHAT TO DO
 Regenerate the .hirx file from its source with this compiler.
 
+@topic error.hir-interchange-match
+title: HIR INTERCHANGE MATCH: a .hirx file whose match is not one
+summary: HIR INTERCHANGE MATCH refuses a .hirx file with a match that does not name every case of its enum once, or a payload read outside its own case's selection.
+index: errors backends
+alias: forged match; malformed match in hirx
+keywords: hirx, interchange, match, exhaustive, payload, trust
+related: backend.hir-interchange capability.match error.hir-interchange-compiler error.match-not-exhaustive
+code: HIR INTERCHANGE MATCH
+
+== MEANING
+When a .hirx file is read; not an error of the program. Every match the
+file holds is checked again against the enum declarations it carries --
+one arm per case, each payload taken only under its own case's selection
+-- and text that fails is refused (HIR text read with -hir fails the same
+check as HIR PARSE). A cache entry that fails is a miss, rebuilt from the
+source.
+
+== WHAT TO DO
+Regenerate the .hirx file from its source with this compiler.
+
 @topic error.hir-interchange-format
 title: HIR INTERCHANGE FORMAT: a file that is not HIR interchange text
 summary: HIR INTERCHANGE FORMAT rejects a .hirx file whose header is not the interchange format's, whose version this compiler does not read, or which lacks its compiler or its HIR.
@@ -861,26 +902,38 @@ yet. Handle failures inside the callback's body.
 
 @topic error.native-address
 title: NATIVE ADDRESS: a C function returned an address Botlish cannot hold
-summary: NATIVE ADDRESS stops a run when a C function's pointer result does not fit Botlish's C pointer word (a sign-extended 60-bit address): the pointer is never truncated or masked.
+summary: NATIVE ADDRESS stops a run when a C function's pointer result does not fit the target's C pointer word: the pointer is never truncated, masked or untagged.
 index: errors backends
 alias: C pointer too wide; tagged pointer result
-keywords: extern c fn, pointer, address, std::ffi::c::Ptr, top byte, tagged pointer, aarch64
+keywords: extern c fn, pointer, address, std::ffi::c::Ptr, top byte, tagged pointer, aarch64, android, Bionic
 related: concept.c-ffi backend.native-only error.native-bool error.native-contract-violation
 code: NATIVE ADDRESS
 
 == MEANING
 Run time, native backends only (a C call runs nowhere else). An
-std::ffi::c::Ptr is a tagged word holding a sign-extended 60-bit address.
-Every canonical x86-64 address and every untagged AArch64 address fits; a
-top-byte-tagged AArch64 pointer, or a garbage value returned as a pointer,
-does not, and the call fails with "the C function NAME returned the address
-0x..., which a Botlish C pointer cannot hold ...".
+std::ffi::c::Ptr is one tagged word holding 60 bits of address, laid out
+as the target's pointers need:
+
+* On Linux, macOS and Windows the word keeps a sign-extended 60-bit
+  address: every canonical x86-64 address and every untagged AArch64
+  address fits, a top-byte-tagged one does not.
+* On Android AArch64, whose heap pointers carry a tag in their top byte
+  (Android 11 and later), the word keeps the whole top byte and a 52-bit
+  address: every address of a 48-bit address space fits, tagged or not.
+
+An address the target's word cannot hold -- a garbage value returned as a
+pointer, a top-byte-tagged pointer on a desktop target -- fails with "the
+C function NAME returned the address 0x..., which a Botlish C pointer
+cannot hold ...". A pointer read from a native view's pointer field is
+held to the same rule.
 
 == WHAT TO DO
 Check the declaration against the C header: a function declared to return
-a pointer that really returns an integer or a tagged pointer is
-mis-declared. A C library that tags its pointers needs a C wrapper that
-returns them untagged.
+a pointer that really returns an integer is mis-declared. On a desktop
+target, a C library that tags its pointers in their top byte needs a C
+wrapper that returns them untagged. On Android nothing is needed: the
+heap's tags are kept, and an application never turns Android's heap
+pointer tagging off for Botlish.
 
 @topic error.native-aot-not-ready
 title: NATIVE AOT NOT-READY: the program cannot be compiled ahead of time
@@ -1803,7 +1856,7 @@ title: C UNSUPPORTED: a construct the C backend does not compile yet
 summary: C UNSUPPORTED reports, at compile time and at the construct, a valid program part that -emit-c cannot translate to C correctly yet; it is a limit of the backend, never a missing runtime service.
 index: errors backends
 alias: c backend does not support; cannot compile to c; emit-c unsupported
-keywords: -emit-c, C, freestanding, String, List, closure, Float64, function value, payload, context
+keywords: -emit-c, C, freestanding, String, List, closure, Float64, function value, payload, context, coroutine
 related: backend.c error.c-runtime-limit cli.options
 code: C UNSUPPORTED
 code: C INPUT
@@ -1812,16 +1865,22 @@ code: C INPUT
 On -emit-c only (backend.c); the program is valid and runs on every other
 backend. The C backend compiles a subset of the language in milestone 1 --
 Ints, Bools, unit, enums, structs, a List literal as a value, functions
-called directly, if, loops and folds, declared errors and their handlers --
-and rejects the rest with this code, located at the construct (one
-diagnostic per construct the program reaches), rather than translate it
-approximately: Strings, Lists whose length is not known statically, loops
-over Lists, closures and function values, Float64, error payloads, Result
-values, coroutines, C calls, and the bitwise operations and shift_left of
-Ints the compiler cannot prove fit int64_t. Contexts compile; a context
-struct that holds a value of those kinds, or affine state (a C pointer, a
+called directly, if, loops and folds, declared errors and their handlers,
+contexts and coroutines -- and rejects the rest with this code, located at
+the construct (one diagnostic per construct the program reaches), rather
+than translate it approximately: Strings, Lists whose length is not known
+statically, loops over Lists, closures and function values, Float64, error
+payloads, Result values, C calls, and the bitwise operations and
+shift_left of Ints the compiler cannot prove fit int64_t. A context struct
+that holds a value of those kinds, or affine state (a C pointer, a
 coroutine, a collection of them), is rejected at each use, naming the
-context and the field. Nothing is written.
+context and the field. Of coroutines it rejects a yielding function that
+calls itself (other than as a tail call) or constructs a coroutine of
+itself, located where the recursion closes (its frame would hold itself);
+a function that constructs a coroutine and may return a handle (the
+coroutine's storage ends with the function); a handle inside a struct or a
+List; and a yielding function reached by coroutines whose outward values
+or messages have different C representations. Nothing is written.
 
 It is not a missing runtime service: what the generated C can call but
 not implement itself (arbitrary-precision arithmetic) compiles, and is
@@ -1832,7 +1891,9 @@ C INPUT is an input -emit-c cannot read: a .ir file (core IR text).
 == WHAT TO DO
 Run the program on another backend, or keep the C-compiled part to the
 subset: a collecting loop's List becomes a fold, a String a enum, an
-unbounded Int a domain (`type Count = Int in 0..1000000`).
+unbounded Int a domain (`type Count = Int in 0..1000000`), a recursive
+generator a loop (or a tail call), a function that makes a coroutine for
+its caller one that drives it itself.
 
 @topic error.c-runtime-limit
 title: C RUNTIME LIMIT: a runtime service ran out of storage

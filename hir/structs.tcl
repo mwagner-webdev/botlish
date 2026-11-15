@@ -2154,6 +2154,15 @@ proc hir::structs::ProjectionProblem {hir e} {
             return [list OPAQUE-REPRESENTATION "[RepresentationMessage [lindex $type 1]]$hint"]
         }
         UNKNOWN-FIELD {
+            set payload [hir::match::PayloadCase $hir $receiver]
+            if {$payload ne ""} {
+                # A match arm's payload (PORTABILITY-EXHAUSTIVE-MATCH-
+                # MILESTONE-1.md): named for its case, never as the
+                # anonymous struct it is.
+                lassign $payload id case
+                return [list UNKNOWN-FIELD [format {the payload of case %s::%s has no field "%s" (its fields: %s)%s} \
+                    [hir::enums::display $id] $case $name [join [hir::enums::fieldNames $id $case] {, }] $hint]]
+            }
             return [list UNKNOWN-FIELD [format {struct type %s has no field "%s" (known fields: %s)%s} \
                 [hir::types::show $type] $name [join [hir::types::StructLayout $type] {, }] $hint]]
         }

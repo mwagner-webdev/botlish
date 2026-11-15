@@ -1,0 +1,16 @@
+# heap.bot -- the C-pointer half of the tagged-pointer reproducer
+# (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md, "The original
+# defect"): a heap block C allocates, kept and handed back, and no byte
+# exposure at all -- so that the pointer result's refusal (NATIVE ADDRESS,
+# SDL_CreateWindow's in the earlier milestone) is seen apart from the byte
+# exposure's (hello.bot's CORE SEMANTIC RANGE). Where Bionic tags heap
+# pointers, a runtime whose C address word cannot hold the tag refuses
+# tp_alloc's result; one that can hands it back unchanged.
+import std::ffi::c
+import tp
+
+p = tp::alloc(64)
+q = std::ffi::c::clone(p)
+same = p.same()
+q.release()
+same

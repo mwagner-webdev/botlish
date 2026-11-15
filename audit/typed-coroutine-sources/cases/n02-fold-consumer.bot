@@ -1,0 +1,34 @@
+# case: phase -- the consumer as a fold whose intermediate is the latest segment's value (std::actor's host shape): the shape a done?-guarded segment fact could type (Byte inside, the count after the break); today the Byte use needs the narrowing comparison
+# class: narrowing
+# expect: widened
+# value: [195, 3]
+import std::coroutine
+import std::byte
+import std::mutable_array
+
+error NotByte
+
+fn source(b: std::byte::Byte, n: int) -> int:
+    loop i from 0 to n:
+        yield b
+        continue
+    n
+
+fn take(b: std::byte::Byte) -> int:
+    b
+
+fn run() -> List[int] errors NotByte:
+    coroutine {step, first} = source(65, 3)
+    sum = std::mutable_array::create(1, 0)
+    count = fold with intermediate cur first:
+        if std::coroutine::done?(step):
+            break
+        if cur < 0 or cur > 255:
+            fail NotByte
+        sum.set(0, sum.at(0) + take(cur))
+        step()
+    [sum.at(0), count]
+
+run():
+    on NotByte:
+        []
