@@ -1,0 +1,45 @@
+# p13 -- a request-handler-shaped sequence: parse a request line, transform
+# it, build a response, hand the response to a sink, N times. Every
+# temporary of one request is dead when the next begins: the steady state
+# needs one request's worth of storage, reused.
+import std::int
+import std::str
+
+error BadRequest
+
+struct Request:
+    verb: str
+    path: str
+    id: int
+
+fn raw(i: int) -> str:
+    "GET /items/".concat(std::int::to_string(i)).concat(" HTTP/1.1")
+
+fn parse(line: str, id: int) -> Request errors BadRequest:
+    n = std::str::length(line)
+    if n < 14:
+        fail BadRequest
+    verb = std::str::substring(line, 0, 3):
+        on LowerUnderrun:
+            fail BadRequest
+        on UpperOverrun:
+            fail BadRequest
+    path = std::str::substring(line, 4, n - 9):
+        on LowerUnderrun:
+            fail BadRequest
+        on UpperOverrun:
+            fail BadRequest
+    Request {verb: verb, path: path, id: id}
+
+fn respond(r: Request) -> str:
+    body = "{\"path\": \"".concat(r.path).concat("\", \"double\": ").concat(std::int::to_string(r.id * 2)).concat("}")
+    "HTTP/1.1 200 OK\r\ncontent-length: ".concat(std::int::to_string(std::str::length(body))).concat("\r\n\r\n").concat(body)
+
+fn handle(i: int) -> int:
+    r = parse(raw(i), i):
+        on BadRequest:
+            return 0
+    std::str::length(respond(r))
+
+fold i from 0 to 200 with intermediate sent 0:
+    sent + handle(i)

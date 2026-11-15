@@ -1,0 +1,18 @@
+# p10 -- a coroutine handle moved through a function that resumes it and
+# returns it: the handle's owner changes; the frame does not move (in C it
+# stays an object of the constructing function's frame).
+import std::coroutine
+
+fn gen(n: int) -> int:
+    loop i from 0 to n:
+        yield i
+    n
+
+fn advance(h: Coroutine{args: [], return: int, errors: []}) -> Coroutine{args: [], return: int, errors: []}:
+    h()
+    h
+
+coroutine {step, first} = gen(10)
+moved = advance(step)
+again = advance(moved)
+[first, again(), std::coroutine::done?(again)]

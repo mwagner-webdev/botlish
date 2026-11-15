@@ -1,0 +1,42 @@
+# p13-request-handler
+
+## Outcomes
+
+* interp: value 15035
+* compile: value 15035
+* cranelift: value 15035
+* cranelift-unfused: value 15035
+
+## HIR facts
+
+* may yield: none
+* coroutine thunks: 0
+* affine releases (after a statement): none
+* affine exit releases: none
+* native representation: structs {materialized 1} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 1800, bytes 81885, peak live 1800 objects/81885B, gc cycles 0, peak reachable (GC stress) 6 objects/309B; String 1600/70685B, Struct 200/11200B
+* counters construction: materializations 600, pieces 2400, materializedStringBytes 26760
+* counters copies: stringBytes 29250
+* raw inttostr String x200 5490B at p13-request-handler.bot:16:26 raw()/methodcall/receiver/arg1
+* raw construct String x200 9490B at p13-request-handler.bot:16:5 raw()/methodcall
+* parse substr String x200 5600B at p13-request-handler.bot:22:12 parse()/verb=/value/call
+* parse substr String x200 6890B at p13-request-handler.bot:27:12 parse()/path=/value/call
+* parse structnew Struct x200 11200B at p13-request-handler.bot:32:5 parse()/namedstruct
+* respond inttostr String x200 5545B at p13-request-handler.bot:35:77 respond()/body=/value/receiver/arg1
+* respond construct String x200 12235B at p13-request-handler.bot:35:12 respond()/body=/value
+* respond inttostr String x200 5400B at p13-request-handler.bot:36:50 respond()/methodcall/receiver/receiver/arg1
+* respond construct String x200 20035B at p13-request-handler.bot:36:5 respond()/methodcall
+
+## Native allocations, coroutine fusion off
+
+(no coroutine: as fused)
+
+## C backend
+
+* p13-request-handler.bot:39:9: the C backend cannot compile a value of type str yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p13-request-handler.bot:16:5: the C backend cannot compile the native operation std::str::concat yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p13-request-handler.bot:18:9: the C backend cannot compile a value of type str yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p13-request-handler.bot:34:11: the C backend cannot compile a value of type str yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service

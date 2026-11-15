@@ -1,0 +1,48 @@
+# p18-persist-precision
+
+## Outcomes
+
+* interp: value [6, 0, 15, true]
+* compile: value [6, 0, 15, true]
+* cranelift: value [6, 0, 15, true]
+* cranelift-unfused: value [6, 0, 15, true]
+
+## HIR facts
+
+* may yield: worker
+* coroutine thunks: 2
+* affine releases (after a statement): after e46: a, b
+* affine exit releases: none
+* native representation: structs {} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 1, bytes 56, peak live 1 objects/56B, gc cycles 0, peak reachable (GC stress) 1 objects/56B; List 1/56B
+* counters copies: listElements 4
+* <program> listnew List x1 56B at p18-persist-precision.bot:20:1 list
+
+## Native allocations, coroutine fusion off
+
+allocations 3, bytes 248, peak live 3 objects/248B, gc cycles 0, peak reachable (GC stress) 3 objects/248B; List 1/56B, Coroutine 2/192B
+* counters coroutines: stacksMapped 2, released 2
+* counters copies: listElements 4
+* <program> cocreate Coroutine x1 96B at p18-persist-precision.bot:18:1 coroutine
+* <program> cocreate Coroutine x1 96B at p18-persist-precision.bot:19:1 coroutine#2
+* <program> listnew List x1 56B at p18-persist-precision.bot:20:1 list
+
+## C backend
+
+* run: value: [6, 0, 15, true] (agrees)
+* runtime services: int.to_decimal
+* frame: {"type": "p18_persist_precision_coh1", "role": "handle", "holds": []}
+* frame: {"type": "p18_persist_precision_3_worker_frame", "role": "frame", "of": "worker (i3)", "holds": [], "suspension_values": ["v_x_5", "j1"]}
+* frame: {"type": "p18_persist_precision_1_coroutine_frame", "role": "frame", "of": "the coroutine of worker, constructed at p18-persist-precision.bot:18:1", "holds": ["p18_persist_precision_3_worker_frame"], "suspension_values": []}
+* frame: {"type": "p18_persist_precision_co1", "role": "storage", "of": "the storage of a coroutine of worker, constructed at p18-persist-precision.bot:18:1", "holds": ["p18_persist_precision_1_coroutine_frame", "p18_persist_precision_coh1"]}
+* frame: {"type": "p18_persist_precision_2_coroutine_frame", "role": "frame", "of": "the coroutine of worker, constructed at p18-persist-precision.bot:19:1", "holds": ["p18_persist_precision_3_worker_frame"], "suspension_values": []}
+* frame: {"type": "p18_persist_precision_co2", "role": "storage", "of": "the storage of a coroutine of worker, constructed at p18-persist-precision.bot:19:1", "holds": ["p18_persist_precision_2_coroutine_frame", "p18_persist_precision_coh1"]}
+* host sizeof/_Alignof: p18_persist_precision_coh1 24 8
+* host sizeof/_Alignof: p18_persist_precision_3_worker_frame 40 8
+* host sizeof/_Alignof: p18_persist_precision_1_coroutine_frame 48 8
+* host sizeof/_Alignof: p18_persist_precision_co1 72 8
+* host sizeof/_Alignof: p18_persist_precision_2_coroutine_frame 48 8
+* host sizeof/_Alignof: p18_persist_precision_co2 72 8

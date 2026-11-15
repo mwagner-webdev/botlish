@@ -1,0 +1,27 @@
+# p14 -- declared errors and early returns end a temporary's lifetime on
+# another path: `s` dies at the `fail` (and its payload is a fresh value
+# that crosses the call), `t` dies at the early `return`. A reused slot
+# must be free again on every exit.
+import std::int
+import std::str
+
+error TooBig:
+    limit: int
+
+fn check(i: int) -> int errors TooBig:
+    s = std::int::to_string(i).concat(" checked")
+    if i > 900:
+        fail TooBig {limit: std::str::length(s)}
+    std::str::length(s)
+
+fn early(i: int) -> int:
+    t = std::int::to_string(i)
+    if i.mod(3) == 0:
+        return 0
+    std::str::length(t.concat("x"))
+
+fold i from 0 to 1000 with intermediate acc 0:
+    a = check(i):
+        on TooBig {limit}:
+            limit
+    acc + a + early(i)

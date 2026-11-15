@@ -1,0 +1,38 @@
+# p10b-handle-returned
+
+## Outcomes
+
+* interp: value [1, 2, false]
+* compile: value [1, 2, false]
+* cranelift: value [1, 2, false]
+* cranelift-unfused: value [1, 2, false]
+
+## HIR facts
+
+* may yield: gen
+* coroutine thunks: 1
+* affine releases (after a statement): after e31: h
+* affine exit releases: none
+* native representation: structs {} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 3, bytes 192, peak live 3 objects/192B, gc cycles 0, peak reachable (GC stress) 3 objects/192B; List 1/48B, Block 1/48B, Coroutine 1/96B
+* counters coroutines: stacksMapped 1, released 1, releasedSuspended 1
+* counters copies: listElements 3
+* <program> listnew List x1 48B at p10b-handle-returned.bot:17:1 list
+* make closure Block x1 48B at p10b-handle-returned.bot:13:5 make()/coroutine/thunk
+* make cocreate Coroutine x1 96B at p10b-handle-returned.bot:13:5 make()/coroutine
+
+## Native allocations, coroutine fusion off
+
+allocations 3, bytes 192, peak live 3 objects/192B, gc cycles 0, peak reachable (GC stress) 3 objects/192B; List 1/48B, Block 1/48B, Coroutine 1/96B
+* counters coroutines: stacksMapped 1, released 1, releasedSuspended 1
+* counters copies: listElements 3
+* <program> listnew List x1 48B at p10b-handle-returned.bot:17:1 list
+* make closure Block x1 48B at p10b-handle-returned.bot:13:5 make()/coroutine/thunk
+* make cocreate Coroutine x1 96B at p10b-handle-returned.bot:13:5 make()/coroutine
+
+## C backend
+
+* p10b-handle-returned.bot:13:5: the C backend cannot compile a function that may return a handle of a coroutine it constructs (the coroutine's frame is storage of the function's own frame, which ends when it returns) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service

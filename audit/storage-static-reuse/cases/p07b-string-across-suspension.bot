@@ -1,0 +1,21 @@
+# p07b -- a heap value (a String) built before a suspension and read after
+# it: its backing must stay valid while the coroutine is suspended, whoever
+# else runs meanwhile. A String built and dropped before the yield (`gone`)
+# could share scratch with anything the consumer does while suspended.
+import std::coroutine
+import std::int
+import std::str
+
+fn worker(seed: int) -> int:
+    kept = std::int::to_string(seed).concat(" kept")
+    gone = std::int::to_string(seed).concat(" gone")
+    yield std::str::length(gone)
+    std::str::length(kept)
+
+fn drive(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        coroutine {step, first} = worker(i)
+        noise = std::int::to_string(i * 7)
+        acc + first + step() + std::str::length(noise)
+
+drive(1000)

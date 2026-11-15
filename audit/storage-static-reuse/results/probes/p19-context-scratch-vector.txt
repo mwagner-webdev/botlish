@@ -1,0 +1,35 @@
+# p19-context-scratch-vector
+
+## Outcomes
+
+* interp: value 32000
+* compile: value 32000
+* cranelift: value 32000
+* cranelift-unfused: value 32000
+
+## HIR facts
+
+* may yield: none
+* coroutine thunks: 0
+* affine releases (after a statement): none
+* affine exit releases: none
+* native representation: structs {materialized 1} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 5, bytes 152, peak live 5 objects/152B, gc cycles 0, peak reachable (GC stress) 4 objects/120B; List 1/32B, Struct 2/80B, MutableVector 2/40B
+* counters mutableVector: shares 1, growths 4, growthBytes 256
+* counters copies: listElements 1
+* <program> listnew List x1 32B at p19-context-scratch-vector.bot:17:61 with/value/field1/arg1
+* <program> mvfromlist MutableVector x1 24B at p19-context-scratch-vector.bot:17:30 with/value/field1
+* <program> structnew Struct x1 40B at p19-context-scratch-vector.bot:17:14 with/value
+* <program> mvshare MutableVector x1 16B at p19-context-scratch-vector.bot:17:1 with
+
+## Native allocations, coroutine fusion off
+
+(no coroutine: as fused)
+
+## C backend
+
+* p19-context-scratch-vector.bot:17:14: the C backend cannot compile the context struct Scratch, whose field "cells" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p19-context-scratch-vector.bot:11:27: the C backend cannot compile the context struct Scratch, whose field "cells" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service

@@ -1,0 +1,14 @@
+# p03 -- mutually exclusive branches: only one of the two temporaries
+# exists on any path, so they may share one backing slot.
+import std::int
+import std::str
+
+fn label(i: int) -> int:
+    s = if i.mod(2) == 0:
+        std::int::to_string(i).concat(" is even")
+    else:
+        std::int::to_string(i).concat(" is odd, and longer")
+    std::str::length(s)
+
+fold i from 0 to 1000 with intermediate acc 0:
+    acc + label(i)

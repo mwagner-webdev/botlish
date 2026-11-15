@@ -1,0 +1,52 @@
+# p08-two-coroutines
+
+## Outcomes
+
+* interp: value [10, 100, 11, 105, 12, 110]
+* compile: value [10, 100, 11, 105, 12, 110]
+* cranelift: value [10, 100, 11, 105, 12, 110]
+* cranelift-unfused: value [10, 100, 11, 105, 12, 110]
+
+## HIR facts
+
+* may yield: counter
+* coroutine thunks: 2
+* affine releases (after a statement): after e54: a; after e60: b
+* affine exit releases: none
+* native representation: structs {materialized 4} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 1, bytes 72, peak live 1 objects/72B, gc cycles 0, peak reachable (GC stress) 1 objects/72B; List 1/72B
+* counters copies: listElements 6
+* <program> listnew List x1 72B at p08-two-coroutines.bot:21:1 list
+
+## Native allocations, coroutine fusion off
+
+allocations 7, bytes 424, peak live 7 objects/424B, gc cycles 0, peak reachable (GC stress) 3 objects/232B; List 1/72B, Struct 4/160B, Coroutine 2/192B
+* counters coroutines: stacksMapped 2, released 2, releasedSuspended 2
+* counters copies: listElements 6
+* <program> cocreate Coroutine x1 96B at p08-two-coroutines.bot:15:1 coroutine
+* <program> cocreate Coroutine x1 96B at p08-two-coroutines.bot:16:1 coroutine#2
+* <program> structnew Struct x1 40B at p08-two-coroutines.bot:17:8 a1=/value/arg1
+* <program> structnew Struct x1 40B at p08-two-coroutines.bot:18:8 b1=/value/arg1
+* <program> structnew Struct x1 40B at p08-two-coroutines.bot:19:8 a2=/value/arg1
+* <program> structnew Struct x1 40B at p08-two-coroutines.bot:20:8 b2=/value/arg1
+* <program> listnew List x1 72B at p08-two-coroutines.bot:21:1 list
+
+## C backend
+
+* run: value: [10, 100, 11, 105, 12, 110] (agrees)
+* runtime services: int.add, int.to_decimal
+* frame: {"type": "p08_two_coroutines_coh1", "role": "handle", "holds": []}
+* frame: {"type": "p08_two_coroutines_3_counter_frame", "role": "frame", "of": "counter (i3)", "holds": [], "suspension_values": ["hi2", "acc3", "i4"]}
+* frame: {"type": "p08_two_coroutines_1_coroutine_frame", "role": "frame", "of": "the coroutine of counter, constructed at p08-two-coroutines.bot:15:1", "holds": ["p08_two_coroutines_3_counter_frame"], "suspension_values": []}
+* frame: {"type": "p08_two_coroutines_co1", "role": "storage", "of": "the storage of a coroutine of counter, constructed at p08-two-coroutines.bot:15:1", "holds": ["p08_two_coroutines_1_coroutine_frame", "p08_two_coroutines_coh1"]}
+* frame: {"type": "p08_two_coroutines_2_coroutine_frame", "role": "frame", "of": "the coroutine of counter, constructed at p08-two-coroutines.bot:16:1", "holds": ["p08_two_coroutines_3_counter_frame"], "suspension_values": []}
+* frame: {"type": "p08_two_coroutines_co2", "role": "storage", "of": "the storage of a coroutine of counter, constructed at p08-two-coroutines.bot:16:1", "holds": ["p08_two_coroutines_2_coroutine_frame", "p08_two_coroutines_coh1"]}
+* host sizeof/_Alignof: p08_two_coroutines_coh1 40 8
+* host sizeof/_Alignof: p08_two_coroutines_3_counter_frame 48 8
+* host sizeof/_Alignof: p08_two_coroutines_1_coroutine_frame 56 8
+* host sizeof/_Alignof: p08_two_coroutines_co1 96 8
+* host sizeof/_Alignof: p08_two_coroutines_2_coroutine_frame 56 8
+* host sizeof/_Alignof: p08_two_coroutines_co2 96 8

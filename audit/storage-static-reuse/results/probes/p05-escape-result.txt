@@ -1,0 +1,31 @@
+# p05-escape-result
+
+## Outcomes
+
+* interp: value 15783
+* compile: value 15783
+* cranelift: value 15783
+* cranelift-unfused: value 15783
+
+## HIR facts
+
+* may yield: none
+* coroutine thunks: 0
+* affine releases (after a statement): none
+* affine exit releases: none
+* native representation: structs {} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 4000, bytes 121566, peak live 4000 objects/121566B, gc cycles 0, peak reachable (GC stress) 3 objects/96B; String 4000/121566B
+* counters copies: stringBytes 15783
+* make inttostr String x2000 55783B at p05-escape-result.bot:8:5 make()/methodcall/receiver
+* make strcat String x2000 65783B at p05-escape-result.bot:8:5 make()/methodcall
+
+## Native allocations, coroutine fusion off
+
+(no coroutine: as fused)
+
+## C backend
+
+* p05-escape-result.bot:8:5: the C backend cannot compile the native operation std::str::concat yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service

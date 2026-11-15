@@ -1,0 +1,32 @@
+# p17-explicit-return
+
+## Outcomes
+
+* interp: value [1000000, 1000000]
+* compile: value [1000000, 1000000]
+* cranelift: value [1000000, 1000000]
+* cranelift-unfused: value [1000000, 1000000]
+
+## HIR facts
+
+* may yield: none
+* coroutine thunks: 0
+* affine releases (after a statement): none
+* affine exit releases: none
+* native representation: structs {return 1 materialized 1} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 1001, bytes 48040, peak live 1001 objects/48040B, gc cycles 0, peak reachable (GC stress) 1 objects/48B; List 1/40B, Struct 1000/48000B
+* counters copies: listElements 2
+* <program> listnew List x1 40B at p17-explicit-return.bot:23:1 list
+* explicit structnew Struct x1000 48000B at p17-explicit-return.bot:15:12 explicit()/return/value
+
+## Native allocations, coroutine fusion off
+
+(no coroutine: as fused)
+
+## C backend
+
+* run: value: [1000000, 1000000] (agrees)
+* runtime services: int.add, int.to_decimal

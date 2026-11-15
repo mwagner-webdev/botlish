@@ -1,0 +1,16 @@
+# p05 -- a temporary escaping through a function result: `make` builds a
+# String its caller keeps, so make's scratch cannot hold it; the caller's
+# binding owns it until the caller's last use.
+import std::int
+import std::str
+
+fn make(i: int) -> str:
+    std::int::to_string(i).concat(":made")
+
+fn use_it(i: int) -> int:
+    kept = make(i)
+    other = make(i + 1)
+    std::str::length(kept) + std::str::length(other)
+
+fold i from 0 to 1000 with intermediate acc 0:
+    acc + use_it(i)

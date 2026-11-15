@@ -1,0 +1,37 @@
+# p11-context-state
+
+## Outcomes
+
+* interp: value 101
+* compile: value 101
+* cranelift: value 101
+* cranelift-unfused: value 101
+
+## HIR facts
+
+* may yield: none
+* coroutine thunks: 0
+* affine releases (after a statement): none
+* affine exit releases: none
+* native representation: structs {materialized 1} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 5, bytes 152, peak live 5 objects/152B, gc cycles 0, peak reachable (GC stress) 4 objects/120B; List 1/32B, Struct 2/80B, MutableVector 2/40B
+* counters mutableVector: shares 1, detaches 1, detachElements 1, growths 6, growthBytes 1016
+* counters copies: listElements 1
+* <program> listnew List x1 32B at p11-context-state.bot:21:63 with/value/field1/arg1
+* <program> mvfromlist MutableVector x1 24B at p11-context-state.bot:21:32 with/value/field1
+* <program> structnew Struct x1 40B at p11-context-state.bot:21:14 with/value
+* <program> mvshare MutableVector x1 16B at p11-context-state.bot:21:1 with
+
+## Native allocations, coroutine fusion off
+
+(no coroutine: as fused)
+
+## C backend
+
+* p11-context-state.bot:21:14: the C backend cannot compile the context struct Journal, whose field "entries" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p11-context-state.bot:10:25: the C backend cannot compile the context struct Journal, whose field "entries" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p11-context-state.bot:13:18: the C backend cannot compile the context struct Journal, whose field "entries" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p11-context-state.bot:16:27: the C backend cannot compile the context struct Journal, whose field "entries" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service

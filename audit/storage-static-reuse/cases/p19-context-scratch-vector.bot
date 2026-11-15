@@ -1,0 +1,19 @@
+# p19 -- reuse an application can already express: a MutableVector owned by
+# an installed context, cleared and refilled by every request. A unique
+# backing keeps its capacity across clear (runtime/mutvec.rs), so after the
+# first request no request grows or allocates it again: explicit, value-
+# semantic buffer reuse, with the bound (32 elements) the program's own.
+import std::mutable_vector
+
+context struct Scratch:
+    cells: MutableVector[int]
+
+fn handle(i: int, context s: Scratch) -> int:
+    s.cells.clear()
+    loop k from 0 to 32:
+        s.cells.push(i + k)
+    std::mutable_vector::length(s.cells)
+
+with context Scratch {cells: std::mutable_vector::from_list([0])}
+fold i from 0 to 1000 with intermediate acc 0:
+    acc + handle(i)

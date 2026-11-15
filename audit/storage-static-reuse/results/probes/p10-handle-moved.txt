@@ -1,0 +1,45 @@
+# p10-handle-moved
+
+## Outcomes
+
+* interp: value [0, 3, false]
+* compile: value [0, 3, false]
+* cranelift: value [0, 3, false]
+* cranelift-unfused: value [0, 3, false]
+
+## HIR facts
+
+* may yield: gen
+* coroutine thunks: 1
+* affine releases (after a statement): after e35: again
+* affine exit releases: none
+* native representation: structs {} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 2, bytes 144, peak live 2 objects/144B, gc cycles 0, peak reachable (GC stress) 2 objects/144B; List 1/48B, Coroutine 1/96B
+* counters coroutines: stacksMapped 1, released 1, releasedSuspended 1
+* counters copies: listElements 3
+* <program> cocreate Coroutine x1 96B at p10-handle-moved.bot:15:1 coroutine
+* <program> listnew List x1 48B at p10-handle-moved.bot:18:1 list
+
+## Native allocations, coroutine fusion off
+
+allocations 2, bytes 144, peak live 2 objects/144B, gc cycles 0, peak reachable (GC stress) 2 objects/144B; List 1/48B, Coroutine 1/96B
+* counters coroutines: stacksMapped 1, released 1, releasedSuspended 1
+* counters copies: listElements 3
+* <program> cocreate Coroutine x1 96B at p10-handle-moved.bot:15:1 coroutine
+* <program> listnew List x1 48B at p10-handle-moved.bot:18:1 list
+
+## C backend
+
+* run: value: [0, 3, false] (agrees)
+* runtime services: int.to_decimal
+* frame: {"type": "p10_handle_moved_coh1", "role": "handle", "holds": []}
+* frame: {"type": "p10_handle_moved_3_gen_frame", "role": "frame", "of": "gen (i3)", "holds": [], "suspension_values": ["hi2", "i3"]}
+* frame: {"type": "p10_handle_moved_2_coroutine_frame", "role": "frame", "of": "the coroutine of gen, constructed at p10-handle-moved.bot:15:1", "holds": ["p10_handle_moved_3_gen_frame"], "suspension_values": []}
+* frame: {"type": "p10_handle_moved_co1", "role": "storage", "of": "the storage of a coroutine of gen, constructed at p10-handle-moved.bot:15:1", "holds": ["p10_handle_moved_2_coroutine_frame", "p10_handle_moved_coh1"]}
+* host sizeof/_Alignof: p10_handle_moved_coh1 24 8
+* host sizeof/_Alignof: p10_handle_moved_3_gen_frame 32 8
+* host sizeof/_Alignof: p10_handle_moved_2_coroutine_frame 40 8
+* host sizeof/_Alignof: p10_handle_moved_co1 64 8

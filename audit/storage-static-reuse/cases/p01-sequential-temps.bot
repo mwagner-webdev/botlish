@@ -1,0 +1,15 @@
+# p01 -- two bounded temporaries, one after the other: `a` is dead before
+# `b` is made. Candidate: one backing slot shared by a and b in every
+# iteration. Each String is at most a few bytes (an Int below 10000 and a
+# suffix), but no analysis states that bound today.
+import std::int
+import std::str
+
+fn label(i: int) -> int:
+    a = std::int::to_string(i).concat("-a")
+    n = std::str::length(a)
+    b = std::int::to_string(i * 2).concat("-b")
+    n + std::str::length(b)
+
+fold i from 0 to 1000 with intermediate acc 0:
+    acc + label(i)

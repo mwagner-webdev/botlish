@@ -1,0 +1,21 @@
+# p08 -- two independently suspended coroutines of one function, resumed
+# interleaved: two frames of the same type live at once, and must not
+# overlap.
+import std::coroutine
+
+struct Tick:
+    by: int
+
+fn counter(start: int, resume Tick) -> int:
+    total = fold i from 0 to 3 with intermediate acc start:
+        t = yield acc
+        acc + t.by
+    total
+
+coroutine {step: a, first: a0} = counter(10)
+coroutine {step: b, first: b0} = counter(100)
+a1 = a(Tick {by: 1})
+b1 = b(Tick {by: 5})
+a2 = a(Tick {by: 1})
+b2 = b(Tick {by: 5})
+[a0, b0, a1, b1, a2, b2]

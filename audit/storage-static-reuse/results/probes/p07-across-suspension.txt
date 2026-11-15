@@ -1,0 +1,44 @@
+# p07-across-suspension
+
+## Outcomes
+
+* interp: value [6, 29, true]
+* compile: value [6, 29, true]
+* cranelift: value [6, 29, true]
+* cranelift-unfused: value [6, 29, true]
+
+## HIR facts
+
+* may yield: worker
+* coroutine thunks: 1
+* affine releases (after a statement): after e45: step
+* affine exit releases: none
+* native representation: structs {materialized 1} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 1, bytes 48, peak live 1 objects/48B, gc cycles 0, peak reachable (GC stress) 1 objects/48B; List 1/48B
+* counters copies: listElements 3
+* <program> listnew List x1 48B at p07-across-suspension.bot:19:1 list
+
+## Native allocations, coroutine fusion off
+
+allocations 3, bytes 184, peak live 3 objects/184B, gc cycles 0, peak reachable (GC stress) 2 objects/144B; List 1/48B, Struct 1/40B, Coroutine 1/96B
+* counters coroutines: stacksMapped 1, released 1
+* counters copies: listElements 3
+* <program> cocreate Coroutine x1 96B at p07-across-suspension.bot:17:1 coroutine
+* <program> structnew Struct x1 40B at p07-across-suspension.bot:18:13 last=/value/arg1
+* <program> listnew List x1 48B at p07-across-suspension.bot:19:1 list
+
+## C backend
+
+* run: value: [6, 29, true] (agrees)
+* runtime services: int.add, int.mul, int.to_decimal
+* frame: {"type": "p07_across_suspension_coh1", "role": "handle", "holds": []}
+* frame: {"type": "p07_across_suspension_2_worker_frame", "role": "frame", "of": "worker (i2)", "holds": [], "suspension_values": ["v_kept_4"]}
+* frame: {"type": "p07_across_suspension_1_coroutine_frame", "role": "frame", "of": "the coroutine of worker, constructed at p07-across-suspension.bot:17:1", "holds": ["p07_across_suspension_2_worker_frame"], "suspension_values": []}
+* frame: {"type": "p07_across_suspension_co1", "role": "storage", "of": "the storage of a coroutine of worker, constructed at p07-across-suspension.bot:17:1", "holds": ["p07_across_suspension_1_coroutine_frame", "p07_across_suspension_coh1"]}
+* host sizeof/_Alignof: p07_across_suspension_coh1 40 8
+* host sizeof/_Alignof: p07_across_suspension_2_worker_frame 24 8
+* host sizeof/_Alignof: p07_across_suspension_1_coroutine_frame 32 8
+* host sizeof/_Alignof: p07_across_suspension_co1 72 8
