@@ -1,0 +1,82 @@
+# FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md, section 15: tools/corpus-compare.py m1-corpus-base.txt m1-corpus.txt
+golden/destructuring.bot: refjoin; structs 1421 -> 1419; slots 0/0
+    census call:1,local:229,materialized(call-param):7,materialized(control):7,materialized(generic):13,materialized(native-call):5,materialized(nested-field):116,materialized(other):88,materialized(return):1,materialized(storage):17,return:15
+        -> call:1,local:229,materialized(call-param):7,materialized(control):7,materialized(generic):13,materialized(native-call):5,materialized(nested-field):116,materialized(other):88,materialized(return):1,materialized(storage):17,return:15
+golden/fold-loops.bot: fold; structs 407 -> 272; slots 4/0
+    census call:1,local:3,materialized(control):10,materialized(generic):3,materialized(native-call):2,materialized(nested-field):19,materialized(other):16,materialized(return):2,materialized(storage):11,return:2
+        -> call:1,local:13,materialized(generic):3,materialized(native-call):2,materialized(nested-field):19,materialized(other):16,materialized(return):2,materialized(storage):11,return:2
+golden/fold-virtual-construction.bot: fold; structs 144 -> 139; slots 1/0
+    census call:1,local:3,materialized(control):3,materialized(generic):3,materialized(native-call):1,materialized(return):2,materialized(storage):1,return:2
+        -> call:1,local:6,materialized(generic):3,materialized(native-call):1,materialized(return):2,materialized(storage):1,return:2
+golden/fold-virtual-struct-state.bot: both; structs 1884 -> 245; slots 69/6
+    census call:1,local:5,materialized(call-param):1,materialized(control):167,materialized(equality):3,materialized(generic):4,materialized(loop):1,materialized(native-call):1,materialized(nested-field):17,materialized(other):2,materialized(return):6,materialized(storage):3,return:1
+        -> call:1,local:157,materialized(call-param):1,materialized(control):16,materialized(equality):3,materialized(generic):4,materialized(loop):1,materialized(native-call):1,materialized(nested-field):19,materialized(other):2,materialized(return):1,materialized(storage):2,return:4
+golden/list-flat.bot: fold; structs 181 -> 159; slots 2/0
+    census call:1,local:1,materialized(call-param):1,materialized(control):8,materialized(generic):2,materialized(native-call):3,materialized(nested-field):9,materialized(other):9,materialized(return):1,materialized(storage):13,return:1
+        -> call:1,local:9,materialized(call-param):1,materialized(generic):2,materialized(native-call):3,materialized(nested-field):9,materialized(other):9,materialized(return):1,materialized(storage):13,return:1
+golden/mutable-vector.bot: refjoin; structs 5453 -> 5451; slots 0/0
+    census call:1,local:6,materialized(capture):1,materialized(generic):2,materialized(mixed-exits):1,materialized(native-call):18,materialized(nested-field):26,materialized(other):26,materialized(return):1,materialized(storage):13,return:2
+        -> call:1,local:6,materialized(capture):1,materialized(generic):2,materialized(mixed-exits):1,materialized(native-call):18,materialized(nested-field):26,materialized(other):26,materialized(return):1,materialized(storage):13,return:2
+golden/recursive-types.bot: refjoin; structs 51 -> 49; slots 0/0
+    census call:1,local:6,materialized(generic):2,materialized(mixed-exits):1,materialized(native-call):5,materialized(nested-field):1,materialized(return):1,materialized(storage):2,return:2
+        -> call:1,local:6,materialized(generic):2,materialized(mixed-exits):1,materialized(native-call):5,materialized(nested-field):1,materialized(return):1,materialized(storage):2,return:2
+workloads/a-scan2-fold.bot: fold; structs 161 -> 0; slots 2/0
+    census materialized(control):7
+        -> local:7
+workloads/a-scan4-fold.bot: fold; structs 161 -> 0; slots 2/0
+    census materialized(control):7
+        -> local:7
+workloads/b-counted-fold.bot: fold; structs 1025 -> 0; slots 1/0
+    census materialized(control):3
+        -> local:3
+workloads/b-wrap-fold.bot: fold; structs 1025 -> 0; slots 1/0
+    census materialized(control):2
+        -> local:2
+workloads/c-mixed.bot: fold; structs 1025 -> 0; slots 1/0
+    census materialized(control):2
+        -> local:2
+workloads/c-two-vecs.bot: fold; structs 1025 -> 0; slots 1/0
+    census materialized(control):2
+        -> local:2
+workloads/c-vec-continue.bot: both; structs 1367 -> 0; slots 1/0
+    census materialized(control):2
+        -> local:2
+workloads/c-vec-literal.bot: fold; structs 1025 -> 0; slots 1/0
+    census materialized(control):2
+        -> local:2
+workloads/c-vec-self.bot: fold; structs 1 -> 0; slots 1/0
+    census materialized(control):1
+        -> local:1
+workloads/chunks-fold.bot: fold; structs 128 -> 0; slots 1/0
+    census materialized(control):4
+        -> local:4
+workloads/d-coroutine.bot: fold; structs 4 -> 0; slots 1/0
+    census materialized(control):2
+        -> local:2
+workloads/d-errors.bot: fold; structs 14 -> 0; slots 3/0
+    census local:2,materialized(control):6,materialized(other):1
+        -> local:8,materialized(other):1
+workloads/d-exits.bot: fold; structs 69 -> 10; slots 10/0
+    census materialized(control):20,materialized(return):1
+        -> local:20,return:1
+workloads/d-identity-materialize.bot: fold; structs 2 -> 0; slots 1/0
+    census materialized(control):3
+        -> local:3
+workloads/d-nested.bot: fold; structs 19 -> 0; slots 5/0
+    census materialized(control):8
+        -> local:8
+workloads/d-observe.bot: fold; structs 57 -> 30; slots 6/2
+    census materialized(control):16,materialized(equality):1,materialized(nested-field):7
+        -> local:12,materialized(control):4,materialized(equality):1,materialized(nested-field):7
+workloads/d-shapes.bot: fold; structs 28 -> 4; slots 6/0
+    census materialized(control):12,materialized(nested-field):2
+        -> local:12,materialized(nested-field):2
+workloads/e-positions.bot: fold; structs 9 -> 0; slots 1/0
+    census call:3,local:3,materialized(control):2,return:1
+        -> call:3,local:5,return:1
+workloads/scanner-fold.bot: fold; structs 161 -> 0; slots 2/0
+    census materialized(control):9
+        -> local:9
+
+163 programs: NIR unchanged 137, changed by fold slots 21, by reference joins 3, by both 2, by neither 0
+Struct allocations over the programs that ran on both: 105061 -> 95992

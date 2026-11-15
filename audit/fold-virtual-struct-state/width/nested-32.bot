@@ -1,0 +1,48 @@
+# nested-32.bot -- 32 fields, one of them a nested struct rebuilt per iteration (tools/gen-width.tcl).
+import std::list
+
+struct P:
+    a: int
+    b: int
+
+struct S:
+    f0: int
+    f1: int
+    f2: int
+    f3: int
+    f4: int
+    f5: int
+    f6: int
+    f7: int
+    f8: int
+    f9: int
+    f10: int
+    f11: int
+    f12: int
+    f13: int
+    f14: int
+    f15: int
+    f16: int
+    f17: int
+    f18: int
+    f19: int
+    f20: int
+    f21: int
+    f22: int
+    f23: int
+    f24: int
+    f25: int
+    f26: int
+    f27: int
+    f28: int
+    f29: int
+    f30: int
+    inner: P
+
+fn f(n: int) -> int:
+    t = fold i from 0 to n with intermediate s S {f0: 0, f1: 0, f2: 0, f3: 0, f4: 0, f5: 0, f6: 0, f7: 0, f8: 0, f9: 0, f10: 0, f11: 0, f12: 0, f13: 0, f14: 0, f15: 0, f16: 0, f17: 0, f18: 0, f19: 0, f20: 0, f21: 0, f22: 0, f23: 0, f24: 0, f25: 0, f26: 0, f27: 0, f28: 0, f29: 0, f30: 0, inner: P {a: 0, b: 0}}:
+        S {f0: (s.f0 + i).mod(1000), f1: (s.f1 + i).mod(1000), f2: (s.f2 + i).mod(1000), f3: (s.f3 + i).mod(1000), f4: (s.f4 + i).mod(1000), f5: (s.f5 + i).mod(1000), f6: (s.f6 + i).mod(1000), f7: (s.f7 + i).mod(1000), f8: (s.f8 + i).mod(1000), f9: (s.f9 + i).mod(1000), f10: (s.f10 + i).mod(1000), f11: (s.f11 + i).mod(1000), f12: (s.f12 + i).mod(1000), f13: (s.f13 + i).mod(1000), f14: (s.f14 + i).mod(1000), f15: (s.f15 + i).mod(1000), f16: (s.f16 + i).mod(1000), f17: (s.f17 + i).mod(1000), f18: (s.f18 + i).mod(1000), f19: (s.f19 + i).mod(1000), f20: (s.f20 + i).mod(1000), f21: (s.f21 + i).mod(1000), f22: (s.f22 + i).mod(1000), f23: (s.f23 + i).mod(1000), f24: (s.f24 + i).mod(1000), f25: (s.f25 + i).mod(1000), f26: (s.f26 + i).mod(1000), f27: (s.f27 + i).mod(1000), f28: (s.f28 + i).mod(1000), f29: (s.f29 + i).mod(1000), f30: (s.f30 + i).mod(1000), inner: P {a: (s.inner.a + i).mod(1000), b: s.inner.b + 1}}
+    t.f0 + t.inner.a + t.inner.b
+
+n = 1000
+f(n)

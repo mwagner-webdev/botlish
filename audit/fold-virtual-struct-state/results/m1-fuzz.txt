@@ -1,0 +1,12 @@
+# FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md, section 15: tools/fuzz.tcl
+# seeds 2-6 (-count 25; -gc-stress 1 for 4 and 6), before the nested template and the definedness check
+seed 2: 25 programs ({history virtual} 5 {scalar dropped} 5 {scalar virtual} 9 {vector virtual} 6), 0 failing
+seed 3: 25 programs ({history virtual} 6 {scalar dropped} 4 {scalar virtual} 13 {vector virtual} 2), 0 failing
+seed 4: 25 programs ({history virtual} 5 {scalar dropped} 2 {scalar virtual} 12 {vector virtual} 6), 0 failing
+seed 5: 25 programs ({history virtual} 8 {scalar dropped} 5 {scalar virtual} 8 {vector virtual} 4), 0 failing
+seed 6: 25 programs ({history virtual} 5 {scalar dropped} 3 {scalar virtual} 12 {vector virtual} 5), 0 failing
+# the final fuzzer (nested template, definedness): seeds 11, 12, 21 and 22 (-gc-stress 1)
+seed 11: 24 programs ({history virtual} 4 {nested virtual} 3 {scalar dropped} 3 {scalar virtual} 10 {vector virtual} 4), 0 failing
+seed 12: 30 programs ({history virtual} 5 {nested virtual} 4 {scalar dropped} 5 {scalar virtual} 13 {vector virtual} 3), 0 failing
+seed 21: 30 programs ({history virtual} 6 {nested virtual} 6 {scalar dropped} 3 {scalar virtual} 8 {vector virtual} 7), 0 failing
+seed 22: 25 programs ({history virtual} 4 {nested virtual} 4 {scalar dropped} 3 {scalar virtual} 11 {vector virtual} 3), 0 failing

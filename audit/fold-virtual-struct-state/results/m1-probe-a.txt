@@ -1,0 +1,64 @@
+# FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md, section 11: the scanners at b0ae98fe (base, one run)
+row                                     n  Struct   List  Plan    copied plans extend   mat shr/det/el   new  get  app plan  code-B lower-ms instr/run
+scan2-fold                              -     161      1     0         1     0      0     0      0/0/0     7    9    0    0    3033     68.1 137698 generated=17.3% allocator=59.9% helpers=13.9% collector=4.8% mem=4.1%
+scan2-recursive                         -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2136     64.7 24926 generated=79.7% allocator=2.4% helpers=6.4% collector=2.6% mem=9.0%
+scan4-fold                              -     161      1     0         3     0      0     0      0/0/0     7   20    0    0    3642     44.9 142421 generated=17.9% allocator=63.0% helpers=13.5% collector=4.6% mem=1.0%
+scan4-recursive                         -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2612     75.3 24480 generated=85.7% allocator=4.0% helpers=6.4% collector=2.7% mem=1.2%
+scan6-fold                              -     161      1     0         4     0      0     0      0/0/0     9   40    0    0    4682     57.6 139066 generated=19.7% allocator=60.0% helpers=13.8% collector=4.8% mem=1.8%
+scan6-recursive                         -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3375     85.6 25835 generated=86.4% allocator=2.7% helpers=6.5% collector=2.5% mem=2.0%
+scan6-cells                             -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    5085     76.2 55741 generated=46.4% allocator=35.3% helpers=14.3% collector=3.6% mem=0.4%
+
+# the milestone, run 1 of 5 (the report's columns are the medians)
+row                                     n  Struct   List  Plan    copied plans extend   mat shr/det/el   new  get  app plan  code-B lower-ms instr/run
+scan2-fold                              -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2482     81.1 25892 generated=84.4% allocator=6.3% helpers=6.1% collector=2.5% mem=0.7%
+scan2-recursive                         -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2136     67.7 23809 generated=83.4% allocator=6.4% helpers=6.8% collector=2.8% mem=0.6%
+scan4-fold                              -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2921     47.0 29898 generated=78.4% allocator=2.5% helpers=5.5% collector=2.2% mem=11.4%
+scan4-recursive                         -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2612     67.2 24209 generated=86.6% allocator=2.1% helpers=6.6% collector=2.7% mem=2.0%
+scan6-fold                              -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3482     60.5 28772 generated=86.1% allocator=2.6% helpers=5.5% collector=2.3% mem=3.5%
+scan6-recursive                         -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3375     90.8 25409 generated=87.8% allocator=2.2% helpers=6.2% collector=2.6% mem=1.2%
+
+# the milestone, run 2 of 5 (the report's columns are the medians)
+row                                     n  Struct   List  Plan    copied plans extend   mat shr/det/el   new  get  app plan  code-B lower-ms instr/run
+scan2-fold                              -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2482     43.9 24767 generated=88.2% allocator=2.2% helpers=6.4% collector=2.7% mem=0.5%
+scan2-recursive                         -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2136     65.4 23515 generated=84.4% allocator=2.9% helpers=6.8% collector=2.8% mem=3.1%
+scan4-fold                              -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2921     46.8 29314 generated=80.0% allocator=1.4% helpers=5.5% collector=2.2% mem=10.9%
+scan4-recursive                         -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2612    120.2 24206 generated=86.6% allocator=2.2% helpers=6.7% collector=2.7% mem=1.8%
+scan6-fold                              -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3482     60.5 28509 generated=86.9% allocator=3.6% helpers=5.6% collector=2.3% mem=1.7%
+scan6-recursive                         -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3375     81.6 25836 generated=86.3% allocator=3.5% helpers=6.2% collector=2.5% mem=1.4%
+
+# the milestone, run 3 of 5 (the report's columns are the medians)
+row                                     n  Struct   List  Plan    copied plans extend   mat shr/det/el   new  get  app plan  code-B lower-ms instr/run
+scan2-fold                              -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2482     43.6 24647 generated=88.6% allocator=2.1% helpers=6.6% collector=2.7% mem=0.0%
+scan2-recursive                         -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2136     63.0 23539 generated=84.4% allocator=4.8% helpers=6.7% collector=2.8% mem=1.4%
+scan4-fold                              -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2921     45.1 27718 generated=84.6% allocator=3.8% helpers=5.7% collector=2.4% mem=3.5%
+scan4-recursive                         -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2612     69.1 24300 generated=86.3% allocator=3.3% helpers=6.7% collector=2.7% mem=1.0%
+scan6-fold                              -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3482     56.3 29163 generated=84.9% allocator=5.2% helpers=5.5% collector=2.2% mem=2.2%
+scan6-recursive                         -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3375     86.3 25585 generated=87.2% allocator=2.3% helpers=6.2% collector=2.6% mem=1.7%
+
+# the milestone, run 4 of 5 (the report's columns are the medians)
+row                                     n  Struct   List  Plan    copied plans extend   mat shr/det/el   new  get  app plan  code-B lower-ms instr/run
+scan2-fold                              -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2482     47.4 28784 generated=75.9% allocator=4.9% helpers=5.6% collector=2.3% mem=11.3%
+scan2-recursive                         -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2136     57.0 28897 generated=68.7% allocator=20.6% helpers=5.5% collector=2.3% mem=2.9%
+scan4-fold                              -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2921     49.9 26405 generated=88.8% allocator=1.9% helpers=6.1% collector=2.5% mem=0.7%
+scan4-recursive                         -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2612     69.7 24428 generated=85.9% allocator=3.1% helpers=6.6% collector=2.7% mem=1.7%
+scan6-fold                              -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3482     53.4 28604 generated=86.6% allocator=4.0% helpers=5.9% collector=2.3% mem=1.2%
+scan6-recursive                         -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3375     81.4 25761 generated=86.6% allocator=2.7% helpers=6.3% collector=2.5% mem=1.8%
+
+# the milestone, run 5 of 5 (the report's columns are the medians)
+row                                     n  Struct   List  Plan    copied plans extend   mat shr/det/el   new  get  app plan  code-B lower-ms instr/run
+scan2-fold                              -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2482     52.9 25877 generated=84.4% allocator=2.2% helpers=6.2% collector=2.5% mem=4.7%
+scan2-recursive                         -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2136     62.6 23852 generated=83.2% allocator=3.0% helpers=6.7% collector=2.8% mem=4.3%
+scan4-fold                              -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2921     45.9 29634 generated=79.1% allocator=1.8% helpers=5.4% collector=2.2% mem=11.5%
+scan4-recursive                         -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2612     65.8 26385 generated=79.5% allocator=3.5% helpers=6.0% collector=2.5% mem=8.5%
+scan6-fold                              -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3482     58.2 28948 generated=85.5% allocator=3.4% helpers=5.5% collector=2.3% mem=3.3%
+scan6-recursive                         -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3375     80.9 25588 generated=87.2% allocator=2.1% helpers=6.3% collector=2.6% mem=1.8%
+
+# the milestone, the run beside Probes B and C (scan6-cells: MutableArray state)
+row                                     n  Struct   List  Plan    copied plans extend   mat shr/det/el   new  get  app plan  code-B lower-ms instr/run
+scan2-fold                              -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2482     43.0 25569 generated=85.4% allocator=1.9% helpers=6.3% collector=2.6% mem=3.8%
+scan2-recursive                         -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2136     61.9 24929 generated=79.7% allocator=3.8% helpers=6.4% collector=2.6% mem=7.5%
+scan4-fold                              -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2921     50.5 30307 generated=77.4% allocator=3.2% helpers=5.3% collector=2.2% mem=12.0%
+scan4-recursive                         -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2612     63.7 24177 generated=86.7% allocator=2.1% helpers=6.6% collector=2.7% mem=1.9%
+scan6-fold                              -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3482     61.0 28142 generated=88.0% allocator=2.3% helpers=5.7% collector=2.3% mem=1.7%
+scan6-recursive                         -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3375     90.7 26025 generated=85.7% allocator=2.1% helpers=6.3% collector=2.5% mem=3.4%
+scan6-cells                             -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    5085     72.4 56603 generated=45.7% allocator=36.4% helpers=14.1% collector=3.5% mem=0.4%

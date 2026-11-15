@@ -1,0 +1,5 @@
+# FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md, section 4: the escape analysis rounds and fold-slot decisions of every corpus program (golden suites, bench, the fold workloads), default options
+rounds 2 audit/fold-virtual-struct-state/workloads/d-observe.bot
+rounds 2 tests/golden/fold-virtual-struct-state.bot
+rounds histogram: 1 161 2 2
+fold slot candidates (instances): 131, virtual 123, dropped by reason: capture 2 no-loss 5 source 1

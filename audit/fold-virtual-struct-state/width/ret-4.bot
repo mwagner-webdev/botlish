@@ -1,0 +1,19 @@
+# ret-4.bot -- a 4-field fold as a function's value, read by its caller (tools/gen-width.tcl).
+import std::list
+
+struct S:
+    f0: int
+    f1: int
+    f2: int
+    f3: int
+
+fn g(n: int) -> S:
+    fold i from 0 to n with intermediate s S {f0: 0, f1: 0, f2: 0, f3: 0}:
+        S {f0: (s.f0 + i + 0).mod(1000), f1: (s.f1 + i + 1).mod(1000), f2: (s.f2 + i + 2).mod(1000), f3: (s.f3 + i + 3).mod(1000)}
+
+fn f(n: int, k: int) -> int:
+    t = g(n + k * 0)
+    t.f0 + t.f3
+
+n = 1000
+f(n, 1)

@@ -675,7 +675,7 @@ proc flAotParity {text} {
     }
 }
 
-test fold-loops-executable {folds carrying an Int past i64, a List of Lists over lockstep domains with continue, and a struct holding a List until a break, in a standalone executable, plain and under GC stress} -constraints executableAot -body {
+test fold-loops-executable {folds carrying an Int past i64, a List of Lists over lockstep domains with continue, a struct holding a List until a break, and a struct carried as an object (an equality before a continue keeps it from field registers: FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md), in a standalone executable, plain and under GC stress} -constraints executableAot -body {
     flAotParity "import std::list
 
 struct St:
@@ -695,10 +695,16 @@ fn f(xs: List\[int\]) -> List\[List\[int\]\]:
         if st.pos >= 4:
             break
         St {pos: st.pos + 1, seen: st.seen.append(st.pos * st.pos)}
-    \[\[a, b, std::list::length(c)\], d.seen\]
+    e = fold with intermediate st St {pos: 0, seen: \[\]}:
+        if st == St {pos: 9, seen: \[\]}:
+            continue
+        if st.pos >= 3:
+            break
+        St {pos: st.pos + 1, seen: \[st.pos\]}
+    \[\[a, b, std::list::length(c)\], d.seen, e.seen\]
 
 f(\[3, 4, 5\])
 "
-} -result {[[12, 1180591620717411303424, 2], [0, 1, 4, 9]]}
+} -result {[[12, 1180591620717411303424, 2], [0, 1, 4, 9], [2]]}
 
 cleanupTests

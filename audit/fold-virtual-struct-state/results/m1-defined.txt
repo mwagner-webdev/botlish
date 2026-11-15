@@ -1,0 +1,5 @@
+# FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md, section 10: tools/defined.tcl over the corpus and the width inputs
+## default options
+209 programs, 18486 functions, 0 undefined reads
+## -struct-fold 0 -struct-ref-joins 0
+209 programs, 18486 functions, 0 undefined reads

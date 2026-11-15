@@ -110,7 +110,10 @@
 ::hir::escape::Classify	native lowering	escape and scalar-replacement plans of nested constructions
 ::hir::escape::ClassifyIf	native lowering	escape and scalar-replacement plans of nested constructions
 ::hir::escape::CutFields	native lowering	escape and scalar-replacement plans of nested constructions
+::hir::escape::FoldShape	native lowering	escape and scalar-replacement plans of nested constructions
 ::hir::escape::LiteralTree	native lowering	escape and scalar-replacement plans of nested constructions
+::hir::escape::NoLossSequence	native lowering	escape and scalar-replacement plans of nested constructions
+::hir::escape::NoLossWalk	native lowering	escape and scalar-replacement plans of nested constructions
 ::hir::escape::WriteBackPaths	native lowering	escape and scalar-replacement plans of nested constructions
 ::native::lower::Call	native lowering	HIR to NIR, one call per nested expression
 ::native::lower::Bind	native lowering	HIR to NIR, one call per nested expression
