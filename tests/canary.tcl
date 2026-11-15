@@ -413,7 +413,7 @@ proc canary::Main {argv} {
         # First, and as an annotation of the run where there is one.
         lappend lines "TOOLCHAIN CHANGED on $host: $why. The toolchain-sensitive items run first."
         if {[info exists ::env(GITHUB_ACTIONS)] && $::env(GITHUB_ACTIONS) eq "true"} {
-            puts "::warning title=Toolchain changed on $host::[string map {\n { } % %25} $why]"
+            puts "::warning title=Toolchain changed on ${host}::[string map {\n { } % %25} $why]"
         }
     } elseif {$current eq ""} {
         lappend lines "toolchain on $host: unknown (rustc did not answer)"

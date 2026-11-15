@@ -313,14 +313,22 @@ test canary-cli-list {-list 1 prints the selection and runs nothing} -body {
     list [string match "*\ncanary on linux-x86_64: * items, about * s of a 0 s budget*" $out] [string match *######## $out]
 } -result {1 0}
 
-test canary-cli-toolchain-changed {-toolchain-changed 1 says so first and selects the toolchain-sensitive items; -history 0 leaves the history out} -body {
-    set out [exec [info nameofexecutable] [file join $::projectRoot tests canary.tcl] -list 1 -base HEAD -host linux-x86_64 -budget 0 \
-        -toolchain rustc-9.9.9-0123456789ab -toolchain-changed 1 -history 0]
+test canary-cli-toolchain-changed {-toolchain-changed 1 says so first, in GitHub Actions as an annotation too, and selects the toolchain-sensitive items; -history 0 leaves the history out} -body {
+    set saved [array get ::env GITHUB_ACTIONS]
+    set ::env(GITHUB_ACTIONS) true
+    try {
+        set out [exec [info nameofexecutable] [file join $::projectRoot tests canary.tcl] -list 1 -base HEAD -host linux-x86_64 -budget 0 \
+            -toolchain rustc-9.9.9-0123456789ab -toolchain-changed 1 -history 0]
+    } finally {
+        unset ::env(GITHUB_ACTIONS)
+        array set ::env $saved
+    }
     set lines [split $out \n]
-    list [string match "TOOLCHAIN CHANGED on linux-x86_64: * The toolchain-sensitive items run first." [lindex $lines 0]] \
+    list [string match "::warning title=Toolchain changed on linux-x86_64::*rustc-9.9.9-0123456789ab*" [lindex $lines 0]] \
+        [string match "TOOLCHAIN CHANGED on linux-x86_64: * The toolchain-sensitive items run first." [lindex $lines 1]] \
         [expr {[lsearch -glob $lines "*tests/native-tcl-unicode.test*toolchain-sensitive: *"] >= 0}] \
         [lsearch -glob $lines "*failed in *"]
-} -result {1 1 -1}
+} -result {1 1 1 -1}
 
 foreach scratch [glob -nocomplain -directory [temporaryDirectory] canary-[pid]-*] {
     file delete -force $scratch
