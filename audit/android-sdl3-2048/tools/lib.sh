@@ -84,6 +84,19 @@ screenshot() { # NAME
     adb exec-out screencap -p >"$OUT/$1.png" 2>/dev/null || true
 }
 
+# Whether Android's low-memory killer ended the application's process PID
+# (lmkd's own log line, "Kill 'PKG' (PID)"): a background process Android
+# may end whenever it needs the memory -- the emulator images with 16 KiB
+# pages run under steady memory pressure. Prints lmkd's line.
+lmkdKilled() { # PID (read from the continuous capture: a phase may clear logcat)
+    { cat "$OUT/logcat-all.txt" 2>/dev/null; adb logcat -d -v threadtime; } | tr -d '\r' | grep -m1 "lowmemorykiller: Kill '$PKG' ($1)"
+}
+
+# The thread id of the application process PID's SDLThread ("" if none).
+sdlThread() { # PID
+    shellp sh -c "for t in /proc/$1/task/*; do [ \"\$(cat \$t/comm)\" = SDLThread ] && echo \${t##*/}; done" | head -1
+}
+
 # Whether the process PID maps the library NAME (lib/arm64-v8a/NAME) of the
 # APK: a mapping of the file NAME, or -- a library stored uncompressed and
 # loaded from the APK itself, as the generated project packages it -- a

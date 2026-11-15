@@ -138,11 +138,28 @@ sleep 3
 threads "$pid" >"$OUT/bg-threads-0.txt"
 t0=$(cpuTicks "$pid"); sleep 5; t1=$(cpuTicks "$pid")
 threads "$pid" >"$OUT/bg-threads-1.txt"
-note "  background: $((t1 - t0)) clock ticks of CPU in 5 s; threads: $(busiest "$OUT/bg-threads-0.txt" "$OUT/bg-threads-1.txt")"
-(( t1 - t0 <= 25 )) && pass "the hidden app is idle ($((t1 - t0)) ticks in 5 s)" || fail "the hidden app used $((t1 - t0)) ticks in 5 s"
+if [[ $(appPid) == "$pid" ]]; then
+    note "  background: $((t1 - t0)) clock ticks of CPU in 5 s; threads: $(busiest "$OUT/bg-threads-0.txt" "$OUT/bg-threads-1.txt")"
+    (( t1 - t0 <= 25 )) && pass "the hidden app is idle ($((t1 - t0)) ticks in 5 s)" || fail "the hidden app used $((t1 - t0)) ticks in 5 s"
+fi
 shellp am start -W -n "$activity" >"$OUT/resume.txt"
-waitFor foreground "2048: foreground" 1 20 && pass "foreground: the program saw DidEnterForeground"
-[[ $(appPid) == "$pid" ]] && pass "the same process, the same game" || fail "the process changed in the background"
+if [[ $(appPid) == "$pid" ]]; then
+    waitFor foreground "2048: foreground" 1 20 && pass "foreground: the program saw DidEnterForeground"
+    pass "the same process, the same game"
+elif lmkd=$(lmkdKilled "$pid"); then
+    # Android may end a hidden process: the game saved when it was hidden
+    # (WillEnterBackground) is what a new process starts from.
+    note "  the system's low-memory killer ended the hidden process: ${lmkd#*lowmemorykiller: }"
+    if waitFor restored "2048: restored" 1 60; then
+        r=$(last "$OUT/restored.log" restored)
+        [[ $r == "$(sed -n 21p "$oracle")" ]] && pass "a new process restored the game saved when it was hidden (the 20th state)" ||
+            fail "the new process restored \"$r\", not the 20th state"
+    fi
+    pid=$(appPid)
+    tid=$(sdlThread "$pid")
+else
+    fail "the process changed in the background (not by the low-memory killer)"
+fi
 sleep 2
 for i in $(seq 20 23); do
     swipe "${plays:$i:1}"

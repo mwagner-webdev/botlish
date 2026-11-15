@@ -314,6 +314,26 @@ exported c fn internal() -> int:
     r
 }
 
+# RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md, "A compiler defect":
+# a library's link searched no directory of the program's target package
+# tree, so one linking a package's bundled shared library needed -L.
+test nl-package-native-dir {a library linking a shared library its program's target package tree bundles (.bot_modules/.targets/HOST/.lib, where the package manager places it) finds it there, as an executable's link does, with no -L of its own} -constraints elfLibraries -body {
+    set dir [nlDir]
+    set lib [file join $dir .bot_modules .targets [core::cabi::hostTarget] .lib]
+    file mkdir $lib
+    nlWrite [file join $dir nlpkg.c] "int nlpkg_answer(void) \{ return 42; \}\n"
+    exec cc -shared -fPIC -o [file join $lib libnlpkg.so] [file join $dir nlpkg.c]
+    set built [nlLibrary $dir pkguser {import std::ffi::c
+
+extern c library "nlpkg"
+extern c fn nlpkg_answer() -> std::ffi::c::Int
+
+exported c fn answer() -> int:
+    nlpkg_answer()
+}]
+    list [file exists [dict get $built shared]] [regexp {\[libnlpkg\.so\]} [exec readelf -d [dict get $built shared]]]
+} -result {1 1}
+
 test nl-export-root-checked {checked(-5) fails with its declared error though its only Botlish caller passes 1} -constraints nativeLibraries -body {
     set dir [nlDir]
     set built [nlLibrary $dir chk $::nlChecked]

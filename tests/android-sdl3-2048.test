@@ -390,7 +390,7 @@ proc asRun {dir script data args} {
     asWrite [file join $dir script.txt] $script
     set env [list env SDL_VIDEO_DRIVER=dummy SCRIPT=[file join $dir script.txt] XDG_DATA_HOME=$data HOME=$data]
     foreach e [array names ::env BOTLISH_NATIVE_GC_STRESS] { lappend env $e=$::env($e) }
-    return [asExec {*}$env timeout 60 [file join $dir lib host] app {*}$args]
+    return [asExec {*}$env timeout -k 5 60 [file join $dir lib host] app {*}$args]
 }
 
 # A swipe script line toward D (0 left, 1 right, 2 up, 3 down) across the
@@ -485,7 +485,7 @@ test as-2048-frames {what the 2048 game draws is the game it holds: every frame 
     cd $frames
     try {
         lassign [asExec env SDL_VIDEO_DRIVER=offscreen SDL_VIDEO_OFFSCREEN_SAVE_FRAMES=1 SCRIPT=[file join $dir script.txt] \
-            XDG_DATA_HOME=$frames HOME=$frames timeout 60 [file join $dir lib host] app --seed 42 --fresh] status out
+            XDG_DATA_HOME=$frames HOME=$frames timeout -k 5 60 [file join $dir lib host] app --seed 42 --fresh] status out
     } finally {
         cd $old
     }
@@ -837,6 +837,39 @@ test as-tool-reads {the generator reads only its inputs: the request, the applic
     }
     list $status [lsort -unique $outside]
 } -result {0 {}}
+
+test as-android-io {android_io on its own: an application whose only platform package is android_io builds for android-aarch64 with liblog as its one native dependency -- the manifest states it, the shared object needs liblog.so (and no SDL), and imports __android_log_write -- and the context needs no direct module of its importer} -constraints {androidTool} -body {
+    set dir [asDir io]
+    asWrite $dir/botlish.json "\{\"schema\": 1, \"dependencies\": \{\}\}\n"
+    foreach p {android_io botlish_target_android_aarch64} {
+        lassign [asExec [info nameofexecutable] $::asMain add $p -project $dir -repository $::asPackages -target android-aarch64] status out
+        if {$status != 0} { error "add $p:\n$out" }
+    }
+    asWrite $dir/main.bot {import android_io
+import std::io
+
+with context android_io::create_tagged("as-io")
+std::io::print_line("hello from android_io"):
+    on std::io::WriteFailed:
+        unit
+std::io::write_error_line("an error line"):
+    on std::io::WriteFailed:
+        unit
+}
+    set old [pwd]
+    cd $dir
+    try {
+        lassign [asExec [info nameofexecutable] $::asMain -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 \
+            -emit-native-library hello -application -out lib main.bot] status out
+    } finally {
+        cd $old
+    }
+    set readelf [file join $::env(ANDROID_NDK_ROOT) toolchains llvm prebuilt linux-x86_64 bin llvm-readelf]
+    set needed [lsort [regexp -all -inline {\[[^\]]+\.so[^\]]*\]} [exec $readelf -d $dir/lib/libhello.so]]]
+    set manifest [asRead $dir/lib/hello.manifest.json]
+    list $status [regexp {"name":\s*"log"} $manifest] [regexp {SDL3} $manifest] [expr {"\[liblog.so\]" in $needed}] [regexp {libSDL3} $needed] \
+        [regexp -line {UND __android_log_write} [exec $readelf --dyn-syms $dir/lib/libhello.so]]
+} -result {0 1 0 1 0 1}
 
 test as-tool-not-run-by-install {installing botlish_android runs nothing: its program is an installed file without an execute bit, and `botlish tools` lists the tool without running it} -constraints {androidTool} -body {
     set dir [asDir install]

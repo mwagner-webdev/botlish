@@ -46,7 +46,9 @@
  *                      an idle application's thread waits, it never spins
  *
  * It reports, on standard error, the thread SDL_main ran on, the
- * application's status and, for a failure, its error. */
+ * application's status and, for a failure, its error; with HOST_MARKS set,
+ * also a line when a swipe's last event is pushed (measure.py times the
+ * application's answer from it). */
 #define _GNU_SOURCE
 #include <pthread.h>
 #include <stdio.h>
@@ -176,6 +178,7 @@ static void run_script(const char *path) {
             push_finger(SDL_EVENT_FINGER_DOWN, a, x1, y1);
             for (int i = 1; i <= 4; i++) push_finger(SDL_EVENT_FINGER_MOTION, a, x1 + (x2 - x1) * i / 5, y1 + (y2 - y1) * i / 5);
             push_finger(SDL_EVENT_FINGER_UP, a, x2, y2);
+            if (getenv("HOST_MARKS")) fprintf(stderr, "host: swipe pushed\n");
         } else if (!strcmp(word, "tap") && sscanf(line, "%*s %ld %f %f", &a, &x1, &y1) == 3) {
             push_finger(SDL_EVENT_FINGER_DOWN, a, x1, y1);
             push_finger(SDL_EVENT_FINGER_UP, a, x1, y1);

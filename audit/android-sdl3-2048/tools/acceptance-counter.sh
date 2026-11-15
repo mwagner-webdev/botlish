@@ -63,7 +63,12 @@ cx=$((w / 2)) cy=$((h / 2))
 note "  screen ${w}x${h}"
 shellp input tap $cx $cy
 waitFor tap1 "$TAG.*counter: taps 1" 1 20 && pass "a tap counted once (taps 1)"
-screenshot after-tap
+# The frame follows the log line: a few looks until it is on the screen.
+for _ in 1 2 3 4 5 6; do
+    sleep 0.5
+    screenshot after-tap
+    cmp -s "$OUT/first.png" "$OUT/after-tap.png" || break
+done
 cmp -s "$OUT/first.png" "$OUT/after-tap.png" && fail "the screen did not change after the tap" || pass "the screen changed after the tap"
 shellp input swipe $((cx - w / 4)) $cy $((cx + w / 4)) $cy 200
 sleep 2
@@ -77,13 +82,30 @@ sleep 3
 t0=$(cpuTicks "$pid")
 sleep 5
 t1=$(cpuTicks "$pid")
-note "  background: $((t1 - t0)) clock ticks of CPU in 5 s"
-(( t1 - t0 <= 25 )) && pass "the hidden app is idle ($((t1 - t0)) ticks in 5 s)" || fail "the hidden app used $((t1 - t0)) ticks in 5 s"
-[[ $(appPid) == "$pid" ]] && pass "the process survives the background" || fail "the process changed in the background"
+killed=0
+if [[ $(appPid) == "$pid" ]]; then
+    note "  background: $((t1 - t0)) clock ticks of CPU in 5 s"
+    (( t1 - t0 <= 25 )) && pass "the hidden app is idle ($((t1 - t0)) ticks in 5 s)" || fail "the hidden app used $((t1 - t0)) ticks in 5 s"
+    pass "the process survives the background"
+elif lmkd=$(lmkdKilled "$pid"); then
+    # Android may end a hidden process; the counter keeps no state, so its
+    # count starts again in the new process (the 2048 game's save is what
+    # survives this: acceptance-2048.sh).
+    killed=1
+    note "  the system's low-memory killer ended the hidden process: ${lmkd#*lowmemorykiller: }"
+else
+    fail "the process changed in the background (not by the low-memory killer)"
+fi
 shellp am start -W -n "$PKG/.MainActivity" >"$OUT/resume.txt"
 sleep 3
 shellp input tap $cx $cy
-waitFor tap2 "$TAG.*counter: taps 2" 1 20 && pass "back in the foreground: the count kept (taps 2)"
+if (( killed )); then
+    waitFor tap2 "$TAG.*counter: taps 1" 1 30 && pass "a new process after the kill: a tap counted (taps 1)"
+    pid=$(appPid)
+    tid=$(sdlThread "$pid")
+else
+    waitFor tap2 "$TAG.*counter: taps 2" 1 20 && pass "back in the foreground: the count kept (taps 2)"
+fi
 screenshot resumed
 # Idle in the foreground: the program waits in SDL_WaitEventTimeout, no
 # busy loop (its thread, SDLThread, is measured; the process's other
