@@ -1,0 +1,21 @@
+# FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md, section 15: tools/mutate.tcl on the final tree
+back-edge-sequential               killed by fvs-exits, fvs-rotate-three, fvs-swap-parallel, fvs-swap-parallel-nir
+continue-commits                   killed by fvs-break-candidate, fvs-errors, fvs-exits
+break-not-current                  killed by fvs-bare-fold, fvs-break-candidate, fvs-exits
+carried-untraced                   killed by fvs-exits, fvs-gc-stress, fvs-scanner
+exit-not-materialized              killed by fvs-exit-materialized, fvs-wide
+shape-unrecognized-leaf            killed by fvs-unrecognized-completion
+ref-shape-any-binding              killed by fvs-param-initial
+identity-leaf-unchecked            killed by fvs-source-falls
+sources-unchecked                  killed by fvs-source-falls
+capture-admitted                   killed by fvs-observe
+no-loss-off                        killed by fvs-no-loss-continue, fvs-no-loss-open-call, fvs-no-loss-return, fvs-observe
+no-loss-keep-ignored               killed by fvs-no-loss-open-call, fvs-no-loss-return, fvs-observe
+result-outside-slot-class          killed by fvs-exact-call-nested-result
+fold-not-construction              killed by fvs-fold-argument, fvs-scanner, fvs-scanner-result-transport
+fold-slots-off                     killed by fvs-consumed-vector, fvs-exits, fvs-scanner
+identity-branch-off                killed by fvs-ref-join-local
+share-declined                     killed by fvs-copying-share
+share-fieldwise-skipped            killed by fvs-copying-share
+consumed-shared                    killed by fvs-consumed-vector, fvs-two-vectors
+19 mutants, 19 killed

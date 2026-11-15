@@ -36,6 +36,23 @@ namespace eval hir::transport {
     # Option defaults. policy: "transport" (this model) or "legacy" (the
     # struct-scalar-replacement milestone's width-only caps, kept as the
     # comparison oracle: local 16, return 8, argument 4, no distance).
+    #
+    # foldSlots and refJoins (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md, under
+    # the transport policy only): a fold's struct intermediate carried as
+    # field registers (hir/escape.tcl's fold slots), and a struct join or a
+    # whole-struct share taking a reference to a struct binding a slot
+    # carries; with both off the lowering is the one before the milestone,
+    # byte for byte. foldWidth is a fold slot's ceiling: a fold slot crosses
+    # no call boundary, so no transport score applies; its cost is register
+    # pressure, code and backend time inside one function. Measured (the
+    # report's width section): faster at run time at every width up to 256
+    # fields; code smaller up to 8 fields and up to 15% larger beyond;
+    # Cranelift's compile time neutral up to 16 fields, +12-23% at 32 and
+    # +28-47% at 64 where most fields change, and 1.6-2.6 times at 128-256
+    # for a gain per iteration that stays near 1.2x. The
+    # ceiling (64) is that compile-time bound -- not the local ceiling (16),
+    # which would decline 17-64-field folds that run 1.2-1.5x faster (over
+    # 20x when one field changes per iteration).
     variable defaults {
         policy transport
         localWidth 16
@@ -58,6 +75,10 @@ namespace eval hir::transport {
         densityWeight 0.5
         allocUnits 13.0
         nesting 1
+        foldSlots 1
+        refJoins 1
+        foldWidth 64
+        legacyFoldWidth 0
     }
 }
 

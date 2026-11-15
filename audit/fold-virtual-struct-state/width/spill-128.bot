@@ -1,0 +1,147 @@
+# spill-128.bot -- a 128-field fold whose fields are live across a call every iteration (tools/gen-width.tcl).
+import std::list
+
+struct S:
+    f0: int
+    f1: int
+    f2: int
+    f3: int
+    f4: int
+    f5: int
+    f6: int
+    f7: int
+    f8: int
+    f9: int
+    f10: int
+    f11: int
+    f12: int
+    f13: int
+    f14: int
+    f15: int
+    f16: int
+    f17: int
+    f18: int
+    f19: int
+    f20: int
+    f21: int
+    f22: int
+    f23: int
+    f24: int
+    f25: int
+    f26: int
+    f27: int
+    f28: int
+    f29: int
+    f30: int
+    f31: int
+    f32: int
+    f33: int
+    f34: int
+    f35: int
+    f36: int
+    f37: int
+    f38: int
+    f39: int
+    f40: int
+    f41: int
+    f42: int
+    f43: int
+    f44: int
+    f45: int
+    f46: int
+    f47: int
+    f48: int
+    f49: int
+    f50: int
+    f51: int
+    f52: int
+    f53: int
+    f54: int
+    f55: int
+    f56: int
+    f57: int
+    f58: int
+    f59: int
+    f60: int
+    f61: int
+    f62: int
+    f63: int
+    f64: int
+    f65: int
+    f66: int
+    f67: int
+    f68: int
+    f69: int
+    f70: int
+    f71: int
+    f72: int
+    f73: int
+    f74: int
+    f75: int
+    f76: int
+    f77: int
+    f78: int
+    f79: int
+    f80: int
+    f81: int
+    f82: int
+    f83: int
+    f84: int
+    f85: int
+    f86: int
+    f87: int
+    f88: int
+    f89: int
+    f90: int
+    f91: int
+    f92: int
+    f93: int
+    f94: int
+    f95: int
+    f96: int
+    f97: int
+    f98: int
+    f99: int
+    f100: int
+    f101: int
+    f102: int
+    f103: int
+    f104: int
+    f105: int
+    f106: int
+    f107: int
+    f108: int
+    f109: int
+    f110: int
+    f111: int
+    f112: int
+    f113: int
+    f114: int
+    f115: int
+    f116: int
+    f117: int
+    f118: int
+    f119: int
+    f120: int
+    f121: int
+    f122: int
+    f123: int
+    f124: int
+    f125: int
+    f126: int
+    f127: int
+
+# Recursive, so native lowering keeps it a call.
+fn step(x: int) -> int:
+    if x < 7:
+        return x + 1
+    step(x - 7)
+
+fn f(n: int) -> int:
+    t = fold i from 0 to n with intermediate s S {f0: 0, f1: 0, f2: 0, f3: 0, f4: 0, f5: 0, f6: 0, f7: 0, f8: 0, f9: 0, f10: 0, f11: 0, f12: 0, f13: 0, f14: 0, f15: 0, f16: 0, f17: 0, f18: 0, f19: 0, f20: 0, f21: 0, f22: 0, f23: 0, f24: 0, f25: 0, f26: 0, f27: 0, f28: 0, f29: 0, f30: 0, f31: 0, f32: 0, f33: 0, f34: 0, f35: 0, f36: 0, f37: 0, f38: 0, f39: 0, f40: 0, f41: 0, f42: 0, f43: 0, f44: 0, f45: 0, f46: 0, f47: 0, f48: 0, f49: 0, f50: 0, f51: 0, f52: 0, f53: 0, f54: 0, f55: 0, f56: 0, f57: 0, f58: 0, f59: 0, f60: 0, f61: 0, f62: 0, f63: 0, f64: 0, f65: 0, f66: 0, f67: 0, f68: 0, f69: 0, f70: 0, f71: 0, f72: 0, f73: 0, f74: 0, f75: 0, f76: 0, f77: 0, f78: 0, f79: 0, f80: 0, f81: 0, f82: 0, f83: 0, f84: 0, f85: 0, f86: 0, f87: 0, f88: 0, f89: 0, f90: 0, f91: 0, f92: 0, f93: 0, f94: 0, f95: 0, f96: 0, f97: 0, f98: 0, f99: 0, f100: 0, f101: 0, f102: 0, f103: 0, f104: 0, f105: 0, f106: 0, f107: 0, f108: 0, f109: 0, f110: 0, f111: 0, f112: 0, f113: 0, f114: 0, f115: 0, f116: 0, f117: 0, f118: 0, f119: 0, f120: 0, f121: 0, f122: 0, f123: 0, f124: 0, f125: 0, f126: 0, f127: 0}:
+        k = step(i.mod(14))
+        S {f0: (s.f0 + k * 0).mod(1000), f1: (s.f1 + k * 1).mod(1000), f2: (s.f2 + k * 2).mod(1000), f3: (s.f3 + k * 3).mod(1000), f4: (s.f4 + k * 4).mod(1000), f5: (s.f5 + k * 5).mod(1000), f6: (s.f6 + k * 6).mod(1000), f7: (s.f7 + k * 7).mod(1000), f8: (s.f8 + k * 8).mod(1000), f9: (s.f9 + k * 9).mod(1000), f10: (s.f10 + k * 10).mod(1000), f11: (s.f11 + k * 11).mod(1000), f12: (s.f12 + k * 12).mod(1000), f13: (s.f13 + k * 13).mod(1000), f14: (s.f14 + k * 14).mod(1000), f15: (s.f15 + k * 15).mod(1000), f16: (s.f16 + k * 16).mod(1000), f17: (s.f17 + k * 17).mod(1000), f18: (s.f18 + k * 18).mod(1000), f19: (s.f19 + k * 19).mod(1000), f20: (s.f20 + k * 20).mod(1000), f21: (s.f21 + k * 21).mod(1000), f22: (s.f22 + k * 22).mod(1000), f23: (s.f23 + k * 23).mod(1000), f24: (s.f24 + k * 24).mod(1000), f25: (s.f25 + k * 25).mod(1000), f26: (s.f26 + k * 26).mod(1000), f27: (s.f27 + k * 27).mod(1000), f28: (s.f28 + k * 28).mod(1000), f29: (s.f29 + k * 29).mod(1000), f30: (s.f30 + k * 30).mod(1000), f31: (s.f31 + k * 31).mod(1000), f32: (s.f32 + k * 32).mod(1000), f33: (s.f33 + k * 33).mod(1000), f34: (s.f34 + k * 34).mod(1000), f35: (s.f35 + k * 35).mod(1000), f36: (s.f36 + k * 36).mod(1000), f37: (s.f37 + k * 37).mod(1000), f38: (s.f38 + k * 38).mod(1000), f39: (s.f39 + k * 39).mod(1000), f40: (s.f40 + k * 40).mod(1000), f41: (s.f41 + k * 41).mod(1000), f42: (s.f42 + k * 42).mod(1000), f43: (s.f43 + k * 43).mod(1000), f44: (s.f44 + k * 44).mod(1000), f45: (s.f45 + k * 45).mod(1000), f46: (s.f46 + k * 46).mod(1000), f47: (s.f47 + k * 47).mod(1000), f48: (s.f48 + k * 48).mod(1000), f49: (s.f49 + k * 49).mod(1000), f50: (s.f50 + k * 50).mod(1000), f51: (s.f51 + k * 51).mod(1000), f52: (s.f52 + k * 52).mod(1000), f53: (s.f53 + k * 53).mod(1000), f54: (s.f54 + k * 54).mod(1000), f55: (s.f55 + k * 55).mod(1000), f56: (s.f56 + k * 56).mod(1000), f57: (s.f57 + k * 57).mod(1000), f58: (s.f58 + k * 58).mod(1000), f59: (s.f59 + k * 59).mod(1000), f60: (s.f60 + k * 60).mod(1000), f61: (s.f61 + k * 61).mod(1000), f62: (s.f62 + k * 62).mod(1000), f63: (s.f63 + k * 63).mod(1000), f64: (s.f64 + k * 64).mod(1000), f65: (s.f65 + k * 65).mod(1000), f66: (s.f66 + k * 66).mod(1000), f67: (s.f67 + k * 67).mod(1000), f68: (s.f68 + k * 68).mod(1000), f69: (s.f69 + k * 69).mod(1000), f70: (s.f70 + k * 70).mod(1000), f71: (s.f71 + k * 71).mod(1000), f72: (s.f72 + k * 72).mod(1000), f73: (s.f73 + k * 73).mod(1000), f74: (s.f74 + k * 74).mod(1000), f75: (s.f75 + k * 75).mod(1000), f76: (s.f76 + k * 76).mod(1000), f77: (s.f77 + k * 77).mod(1000), f78: (s.f78 + k * 78).mod(1000), f79: (s.f79 + k * 79).mod(1000), f80: (s.f80 + k * 80).mod(1000), f81: (s.f81 + k * 81).mod(1000), f82: (s.f82 + k * 82).mod(1000), f83: (s.f83 + k * 83).mod(1000), f84: (s.f84 + k * 84).mod(1000), f85: (s.f85 + k * 85).mod(1000), f86: (s.f86 + k * 86).mod(1000), f87: (s.f87 + k * 87).mod(1000), f88: (s.f88 + k * 88).mod(1000), f89: (s.f89 + k * 89).mod(1000), f90: (s.f90 + k * 90).mod(1000), f91: (s.f91 + k * 91).mod(1000), f92: (s.f92 + k * 92).mod(1000), f93: (s.f93 + k * 93).mod(1000), f94: (s.f94 + k * 94).mod(1000), f95: (s.f95 + k * 95).mod(1000), f96: (s.f96 + k * 96).mod(1000), f97: (s.f97 + k * 97).mod(1000), f98: (s.f98 + k * 98).mod(1000), f99: (s.f99 + k * 99).mod(1000), f100: (s.f100 + k * 100).mod(1000), f101: (s.f101 + k * 101).mod(1000), f102: (s.f102 + k * 102).mod(1000), f103: (s.f103 + k * 103).mod(1000), f104: (s.f104 + k * 104).mod(1000), f105: (s.f105 + k * 105).mod(1000), f106: (s.f106 + k * 106).mod(1000), f107: (s.f107 + k * 107).mod(1000), f108: (s.f108 + k * 108).mod(1000), f109: (s.f109 + k * 109).mod(1000), f110: (s.f110 + k * 110).mod(1000), f111: (s.f111 + k * 111).mod(1000), f112: (s.f112 + k * 112).mod(1000), f113: (s.f113 + k * 113).mod(1000), f114: (s.f114 + k * 114).mod(1000), f115: (s.f115 + k * 115).mod(1000), f116: (s.f116 + k * 116).mod(1000), f117: (s.f117 + k * 117).mod(1000), f118: (s.f118 + k * 118).mod(1000), f119: (s.f119 + k * 119).mod(1000), f120: (s.f120 + k * 120).mod(1000), f121: (s.f121 + k * 121).mod(1000), f122: (s.f122 + k * 122).mod(1000), f123: (s.f123 + k * 123).mod(1000), f124: (s.f124 + k * 124).mod(1000), f125: (s.f125 + k * 125).mod(1000), f126: (s.f126 + k * 126).mod(1000), f127: (s.f127 + k * 127).mod(1000)}
+    t.f0 + t.f127
+
+n = 1000
+f(n)
