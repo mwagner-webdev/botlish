@@ -15,11 +15,12 @@
 # SDL's queue only.
 #
 # Lifecycle (SDL_ANDROID_BLOCK_ON_PAUSE is 0, so the loop sees the events
-# when they happen):
+# when they happen; SDL 3.4.18 queues a pause and a resume as the window's
+# Minimized and Restored, its application events reach watchers only):
 #
-#   WillEnterBackground  the gesture in progress dropped, the game saved,
+#   Minimized            the gesture in progress dropped, the game saved,
 #                        drawing stopped (the surface may go)
-#   DidEnterForeground   drawing resumed, the layout measured again
+#   Restored             drawing resumed, the layout measured again
 #   Resized, RenderReset the layout measured again, a redraw
 #   LowMemory            the game saved
 #   Quit, Terminating    the game saved, the loop ends; SDL is closed and
@@ -166,16 +167,20 @@ fn react(s: State, e: sdlscreen::Event, context io: std::io::IO, screen: sdlscre
             next(s.stepped(s.tracker.up(finger, x, y, input::threshold(s.layout))))
         case sdlscreen::Event::FingerCanceled {finger}:
             next(s.stepped(s.tracker.cancel(finger)))
-        case sdlscreen::Event::WillEnterBackground:
+        case sdlscreen::Event::Minimized:
             say("background")
             next(s.saving("background").shown(false))
+        case sdlscreen::Event::Restored:
+            say("foreground")
+            next(s.shown(true).with_layout(measured()))
+        case sdlscreen::Event::WillEnterBackground:
+            next(s)
         case sdlscreen::Event::DidEnterBackground:
             next(s)
         case sdlscreen::Event::WillEnterForeground:
             next(s)
         case sdlscreen::Event::DidEnterForeground:
-            say("foreground")
-            next(s.shown(true).with_layout(measured()))
+            next(s)
         case sdlscreen::Event::LowMemory:
             next(s.saving("low memory"))
         case sdlscreen::Event::Resized:
@@ -253,14 +258,16 @@ fn initial(args: List[str], path: str, context io: std::io::IO, screen: sdlscree
     say("new ".concat(game2048_play::snapshot(game)))
     game
 
-# The application: SDL opened (fullscreen, vertical sync, Android's
-# lifecycle events delivered to the loop), the game restored or started,
-# the loop, the game saved, SDL closed. Whether it ran to its end.
+# The application: SDL opened (vertical sync, Android's lifecycle events
+# delivered to the loop; not fullscreen -- the system bars stay, so a touch
+# near the top edge is the window's, not Android's, and Android shows no
+# immersive-mode notice over the board), the game restored or started, the
+# loop, the game saved, SDL closed. Whether it ran to its end.
 fn main(context io: std::io::IO, screen: sdlscreen::Screen) -> bool:
     args = argv():
         on InvalidArgumentEncoding:
             []
-    sdlscreen::open("Botlish 2048", 480, 800, [sdlscreen::nonblocking_pause()], :sync, :fullscreen):
+    sdlscreen::open("Botlish 2048", 480, 800, [sdlscreen::nonblocking_pause()], :sync):
         on sdlscreen::ScreenFailed {call, reason}:
             say("failed ".concat(call).concat(": ").concat(reason))
             return false

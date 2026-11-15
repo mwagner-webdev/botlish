@@ -138,6 +138,17 @@ struct Area:
 # released (Android's back button or gesture: SDLK_AC_BACK, which SDL3
 # leaves to the application -- returning from the entry program finishes
 # the Activity), or a desktop's Escape.
+#
+# Lifecycle. Minimized and Restored are the window's: on Android SDL sends
+# them when the Activity pauses and when it resumes
+# (SDL_OnApplicationWillEnterBackground, ..DidEnterForeground), and they
+# are what a program reading the queue learns of either -- SDL 3.4.18
+# hands Terminating, LowMemory and the four application events
+# (Will/DidEnterBackground, Will/DidEnterForeground) to event watchers
+# only and never queues them (SDL_SendAppEvent), and a watcher is no
+# Botlish function (no C callback may be retained). They are decoded all
+# the same, for whatever pushes them. The Activity's destruction reaches
+# the queue as Quit.
 enum Event:
     Idle,
     Quit,
@@ -147,6 +158,8 @@ enum Event:
     DidEnterBackground,
     WillEnterForeground,
     DidEnterForeground,
+    Minimized,
+    Restored,
     FingerDown {finger: int, x: int, y: int},
     FingerMotion {finger: int, x: int, y: int},
     FingerUp {finger: int, x: int, y: int},
@@ -528,6 +541,10 @@ private fn decoded(context screen: Screen) -> Event errors NativeViewNull, Index
         return Event::WillEnterForeground
     if t == sdl3::events::SDL_EVENT_DID_ENTER_FOREGROUND:
         return Event::DidEnterForeground
+    if t == sdl3::events::SDL_EVENT_WINDOW_MINIMIZED:
+        return Event::Minimized
+    if t == sdl3::events::SDL_EVENT_WINDOW_RESTORED:
+        return Event::Restored
     if t == sdl3::events::SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED or t == sdl3::events::SDL_EVENT_WINDOW_RESIZED:
         return Event::Resized
     if t == sdl3::events::SDL_EVENT_RENDER_DEVICE_RESET or t == sdl3::events::SDL_EVENT_RENDER_TARGETS_RESET:

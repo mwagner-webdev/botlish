@@ -30,16 +30,26 @@
  *   cancel F           SDL_EVENT_FINGER_CANCELED
  *   swipe F X1 Y1 X2 Y2   down at X1,Y1, four motions, up at X2,Y2
  *   tap F X Y          down and up at X, Y
- *   background         SDL_EVENT_WILL_ENTER_BACKGROUND, _DID_ENTER_BACKGROUND
- *   foreground         SDL_EVENT_WILL_ENTER_FOREGROUND, _DID_ENTER_FOREGROUND
- *   lowmemory          SDL_EVENT_LOW_MEMORY
+ *   background         what Android's onPause makes SDL do: SDL's own
+ *                      SDL_OnApplicationWillEnterBackground and
+ *                      ..DidEnterBackground (SDL_androidevents.c's
+ *                      Android_OnPause), so SDL decides what the queue gets
+ *                      -- in SDL 3.4.18 the window's SDL_EVENT_WINDOW_MINIMIZED
+ *                      (and a focus loss); its application events go to
+ *                      watchers only
+ *   foreground         onResume's: ..WillEnterForeground and
+ *                      ..DidEnterForeground (SDL_EVENT_WINDOW_RESTORED)
+ *   lowmemory          SDL_EVENT_LOW_MEMORY, pushed (SDL 3.4.18 never queues
+ *                      it: this exercises the program's handler)
  *   resize             SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
  *   reset              SDL_EVENT_RENDER_DEVICE_RESET
  *   back               SDL_EVENT_KEY_DOWN and _KEY_UP of SDL_SCANCODE_AC_BACK
  *                      (Android's back key, which SDL3 leaves to the program)
  *   quit               SDL_EVENT_QUIT
- *   terminate          SDL_EVENT_QUIT then SDL_EVENT_TERMINATING (Android's
- *                      Activity destruction)
+ *   terminate          SDL_EVENT_QUIT then SDL_EVENT_TERMINATING, pushed
+ *                      (Android's Activity destruction queues the QUIT;
+ *                      SDL 3.4.18 hands TERMINATING to watchers only, so the
+ *                      push exercises the program's handler)
  *   mark               note SDLThread's CPU time and the time now
  *   cpu                report SDLThread's CPU time and the wall time since
  *                      the last mark ("host: SDLThread cpu C ms in W ms"):
@@ -183,11 +193,11 @@ static void run_script(const char *path) {
             push_finger(SDL_EVENT_FINGER_DOWN, a, x1, y1);
             push_finger(SDL_EVENT_FINGER_UP, a, x1, y1);
         } else if (!strcmp(word, "background")) {
-            push_type(SDL_EVENT_WILL_ENTER_BACKGROUND);
-            push_type(SDL_EVENT_DID_ENTER_BACKGROUND);
+            SDL_OnApplicationWillEnterBackground();
+            SDL_OnApplicationDidEnterBackground();
         } else if (!strcmp(word, "foreground")) {
-            push_type(SDL_EVENT_WILL_ENTER_FOREGROUND);
-            push_type(SDL_EVENT_DID_ENTER_FOREGROUND);
+            SDL_OnApplicationWillEnterForeground();
+            SDL_OnApplicationDidEnterForeground();
         } else if (!strcmp(word, "lowmemory")) {
             push_type(SDL_EVENT_LOW_MEMORY);
         } else if (!strcmp(word, "resize")) {

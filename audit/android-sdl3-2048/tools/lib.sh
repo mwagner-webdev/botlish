@@ -127,3 +127,35 @@ PY
     fi
     return 1
 }
+
+# Waits until the device has settled after its boot: boot completed and the
+# SIM's state final (READY, LOADED or ABSENT; at most a minute), then ten
+# quiet seconds. An emulator's SIM comes up well after the boot, and its
+# carrier configuration changes the configuration's mcc and mnc, which
+# SDLActivity's manifest does not handle: Android recreates the Activity,
+# and SDL 3.4.18's default (recreation not allowed,
+# SDL_HINT_ANDROID_ALLOW_RECREATE_ACTIVITY) ends the process ("activity
+# finished", System.exit(0)) -- run 4 of the workflow lost its counter's
+# start that way.
+settle() {
+    local s
+    for _ in $(seq 1 120); do
+        [[ $(shellp getprop sys.boot_completed) == 1 ]] && break
+        sleep 1
+    done
+    for _ in $(seq 1 60); do
+        s=$(shellp getprop gsm.sim.state)
+        case $s in *READY*|*LOADED*|*ABSENT*) break ;; esac
+        sleep 1
+    done
+    note "  settled: boot completed, SIM \"$(shellp getprop gsm.sim.state)\""
+    sleep 10
+}
+
+# Whether SDL ended the process because the Activity was recreated while
+# SDL_main had finished or was running (SDLActivity's onCreate: "activity
+# finished"; the recreation's cause is the configuration change Android
+# logs). Prints SDL's line.
+recreationEnded() {
+    appLog | grep -m1 -E " SDL +: activity finished"
+}

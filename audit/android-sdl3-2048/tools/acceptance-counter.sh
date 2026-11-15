@@ -28,15 +28,24 @@ if adb root >/dev/null 2>&1; then
     [[ $(shellp id -u) == 0 ]] && rooted=1
 fi
 note "  adb root: $rooted"
+settle
 startCapture
 adb uninstall "$PKG" >/dev/null 2>&1 || true
 adb install -r "$apk" >"$OUT/install.txt" 2>&1 && pass "install" || { fail "install: $(cat "$OUT/install.txt")"; exit 1; }
-adb logcat -c
-shellp am start -W -n "$PKG/.MainActivity" >"$OUT/start.txt"
-note "  launch: $(grep -E "TotalTime|WaitTime" "$OUT/start.txt" | tr -s ' \n' ' ')"
-if waitFor start "$TAG.*counter: ready" 1 60; then
-    pass "start: $(grep -o 'counter: ready.*' "$OUT/start.log" | head -1)"
-fi
+# A start, and -- when a configuration change recreated the Activity just
+# after it and SDL ended the process (see settle) -- one more, the first
+# one's end recorded.
+for attempt in 1 2; do
+    adb logcat -c
+    shellp am start -W -n "$PKG/.MainActivity" >"$OUT/start.txt"
+    note "  launch: $(grep -E "TotalTime|WaitTime" "$OUT/start.txt" | tr -s ' \n' ' ')"
+    waitFor start "$TAG.*counter: ready" 1 60 || break
+    sleep 3
+    ended=$(recreationEnded) || break
+    note "  the Activity was recreated just after the start and SDL ended the process (${ended##*: }, SDL's default); started again"
+    appLog >"$OUT/start-recreated-$attempt.log"
+done
+grep -q "counter: ready" "$OUT/start.log" && pass "start: $(grep -o 'counter: ready.*' "$OUT/start.log" | head -1)"
 grep -o "environment api.*" "$OUT/start.log" | head -1 | sed 's/^/  /' | tee -a "$SUMMARY"
 grep -o "entering counter_main.*" "$OUT/start.log" | head -1 | sed 's/^/  /' | tee -a "$SUMMARY"
 grep -q "lib.*pinned yes" "$OUT/start.log" && note "  libcounter.so pinned (RTLD_NODELETE)"

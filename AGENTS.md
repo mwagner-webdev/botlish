@@ -7510,6 +7510,79 @@ native bridge, one with 4 KiB and one with 16 KiB pages. After
 (`audit/react-native-2048/cleanroom/cleanroom.sh single/out/botlish REPO
 RESULTS`).
 
+## The Android SDL3 application (botlish_android, sdlscreen, android_io)
+
+A standalone Android application is an ordinary Botlish entry program
+built as an application library (`NAME_main`) and started by SDL3's own
+Android bootstrap (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md):
+`integrations/android/` is the external tool package `botlish_android`
+(protocol 1: `android generate` writes an SDLActivity Gradle project from
+a schema 3 manifest, `android build` runs its Gradle wrapper);
+`packages/sdl3` carries SDL's Android view (the binding, libSDL3.so, SDL's
+Java classes and a descriptor of their digests); `packages/sdlscreen` is
+an SDL3 airlock for touch applications; `packages/android_io` is
+std::io::IO over liblog; `examples/games/2048/game2048_play.bot` holds the
+played game's rules, which the React Native facade and the SDL3 game
+(`examples/android-sdl3/2048`) both call. Keep it so:
+
+* Nothing of Android, SDL or Gradle enters the compiler, the runtime or the
+  standard library: the tool is a package, run only by `botlish tool`,
+  its templates compiled in. It reads its request, the manifest and its
+  files, and the installed packages' views (of Botlish modules only the
+  SDL3 binding's version module, which must agree with its library), and
+  refuses under a stable `AN-*` code before writing a byte. It knows no
+  application: no name, ID or rule of a game in it (`as-tool-generate`,
+  the counter beside the game).
+* The generated `SDL_main` (templates/main.c.in) only calls `NAME_main`
+  once, on SDLThread, and reports: no application logic, no context, no
+  thread, no `exit`, no SDL call (every event is the Botlish program's),
+  no change to a pointer's bits; the application library stays loaded
+  (pinned with RTLD_NODELETE, never closed). Never turn Android's heap
+  pointer tagging off (`allowNativeHeapPointerTagging`, `mallopt`) in a
+  template, a manifest or a test (`as-tool-shim`).
+* SDL's objects stay inside sdlscreen's context, as Icy Tower's airlock
+  keeps them: an application gets values (events, sizes, a file's text)
+  and draws with integers. The poll sentinel stays disabled
+  (`sdlscreen::open`): SDL 3.4.18's Android wait posts itself a wakeup per
+  sentinel and spins a core until its timeout. Teardown is renderer, then
+  window, then SDL_Quit (`as-sdlscreen-teardown`).
+* A program learns of Android's lifecycle from SDL's queue only: a pause
+  and a resume as the window's `Minimized` and `Restored`, the Activity's
+  destruction as `Quit`. SDL 3.4.18 hands its application events
+  (Terminating, LowMemory, Will/DidEnterBackground, Will/DidEnterForeground)
+  to event watchers only, and a watcher would be a retained C callback:
+  never react to those alone, and never fake a watcher. The Linux touch
+  host's `background` and `foreground` call SDL's own
+  SDL_OnApplicationWillEnterBackground .. DidEnterForeground, so SDL
+  decides what the queue gets there too. A recreated Activity ends the
+  process (SDL's default; the 2048 game restores from its save at the
+  next launch): keep that default unless a milestone designs recreation.
+* The played game's rules have one source: neither the facade nor the SDL3
+  game names an engine operation of game2048's (`as-play-single-source`);
+  the seed-42 oracle stays digest fbee79e6 (`as-play-oracle`). The SDL3
+  game's lifecycle policy, persistence (one versioned snapshot written
+  whole: a temporary file renamed over the old) and input are Botlish's.
+* One sdl3 release offers one set of modules on every target (the binding
+  profile's `modules always`): a module that exists on one target only
+  fails the package audit.
+
+If you change `integrations/android/`, `packages/sdlscreen`,
+`packages/android_io`, the sdl3 package's Android view or recipe,
+`game2048_play` or the applications, run `tests/android-sdl3-2048.test`
+(its host half needs the package-owned libSDL3.so, `tests/cffi/sdl3.tcl`,
+and SDL's pinned headers; its tool half BOTLISH_SDL3_2048_PACKAGES -- build.sh's
+OUT/repo -- and ANDROID_NDK_ROOT) and `audit/android-sdl3-2048/tools/mutate.tcl`
+with the same environment (every mutant in its `mutants.txt` must still
+apply and be killed by a test its `!!` line names: update a mutant's text
+when you change the code it mutates, keeping it a mutant of the same rule),
+plus `tests/react-native-package.test` for a change to the facade or
+game2048_play. Then push and read the `android sdl3 2048` workflow:
+`audit/android-sdl3-2048/tools/build.sh` from checkout to APKs, the clean
+room from the single-file compiler, and both applications' acceptance on
+Android emulators of 4 KiB and 16 KiB pages (x86_64 images running the
+arm64-v8a code through the native bridge: report it as translated, never as
+native ARM).
+
 ## Diagnostic recovery
 
 A rejected compilation reports every independent diagnostic it finds and

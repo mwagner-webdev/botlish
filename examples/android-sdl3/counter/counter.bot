@@ -100,10 +100,14 @@ fn react(state: State, e: sdlscreen::Event, context io: std::io::IO, screen: sdl
             next(state.stepped(state.tracker.up(finger, x, y, threshold())))
         case sdlscreen::Event::FingerCanceled {finger}:
             next(state.stepped(state.tracker.cancel(finger)))
-        case sdlscreen::Event::WillEnterBackground:
+        case sdlscreen::Event::Minimized:
             State {taps: state.taps, frames: state.frames, tracker: state.tracker.reset(), dirty: false, visible: false}.shown(false)
-        case sdlscreen::Event::DidEnterForeground:
+        case sdlscreen::Event::Restored:
             state.shown(true)
+        case sdlscreen::Event::WillEnterBackground:
+            state.next()
+        case sdlscreen::Event::DidEnterForeground:
+            state.next()
         case sdlscreen::Event::Resized:
             state.redraw()
         case sdlscreen::Event::RenderReset:

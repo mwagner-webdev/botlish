@@ -22,9 +22,10 @@
 #   6. win, over  a saved board one move from 2048 and one from the end
 #                 (written into the app's storage: adb root), played: the
 #                 interpreter's snapshots, the screen showing them
-#   7. recreate   the Activity destroyed while the process lives ("don't
-#                 keep activities"): the program saves and returns, a new
-#                 Activity starts it again and it restores the game
+#   7. recreate   the Activity destroyed and created again while the
+#                 process lives (a density change, which SDLActivity does
+#                 not handle): the program saves and returns, SDL ends the
+#                 process (its default), the next launch restores the game
 #   8. exit       the back key: the program returns, game_main returns 0;
 #                 no native crash anywhere in the run
 #
@@ -57,15 +58,26 @@ if adb root >/dev/null 2>&1; then
     [[ $(shellp id -u) == 0 ]] && rooted=1
 fi
 note "  adb root: $rooted"
+settle
 startCapture
 
 # ----------------------------------------------------------------- 1. start
 adb uninstall "$PKG" >/dev/null 2>&1 || true
 adb install -r "$apk" >"$OUT/install.txt" 2>&1 && pass "install $(basename "$apk")" || { fail "install: $(cat "$OUT/install.txt")"; exit 1; }
 adb logcat -c
-shellp am start -W -n "$activity" --esa org.botlish.android.ARGUMENTS --seed,42,--fresh >"$OUT/start.txt"
-note "  launch: $(grep -E "TotalTime|WaitTime" "$OUT/start.txt" | tr -s ' \n' ' ')"
-waitFor start "$TAG.*2048: ready" 1 90 && pass "start: $(grep -o '2048: ready.*' "$OUT/start.log" | head -1)"
+# A start, and one more when a configuration change recreated the Activity
+# just after it and SDL ended the process (lib.sh's settle).
+for attempt in 1 2; do
+    adb logcat -c
+    shellp am start -W -n "$activity" --esa org.botlish.android.ARGUMENTS --seed,42,--fresh >"$OUT/start.txt"
+    note "  launch: $(grep -E "TotalTime|WaitTime" "$OUT/start.txt" | tr -s ' \n' ' ')"
+    waitFor start "$TAG.*2048: ready" 1 90 || break
+    sleep 3
+    ended=$(recreationEnded) || break
+    note "  the Activity was recreated just after the start and SDL ended the process (${ended##*: }, SDL's default); started again"
+    appLog >"$OUT/start-recreated-$attempt.log"
+done
+grep -q "2048: ready" "$OUT/start.log" && pass "start: $(grep -o '2048: ready.*' "$OUT/start.log" | head -1)"
 grep -o "environment api.*" "$OUT/start.log" | head -1 | sed 's/^/  /' | tee -a "$SUMMARY"
 grep -o "entering game_main.*" "$OUT/start.log" | head -1 | sed 's/^/  /' | tee -a "$SUMMARY"
 grep -o "libgame.so pinned.*" "$OUT/start.log" | head -1 | sed 's/^/  /' | tee -a "$SUMMARY"
@@ -133,7 +145,7 @@ appLog >"$OUT/short.log"
 
 # ------------------------------------------------------------- 3. lifecycle
 shellp input keyevent KEYCODE_HOME
-waitFor background "2048: background" 1 20 && pass "background: the program saw WillEnterBackground (SDL_ANDROID_BLOCK_ON_PAUSE 0)"
+waitFor background "2048: background" 1 20 && pass "background: the program saw the pause (SDL's queued SDL_EVENT_WINDOW_MINIMIZED; SDL_ANDROID_BLOCK_ON_PAUSE 0)"
 sleep 3
 threads "$pid" >"$OUT/bg-threads-0.txt"
 t0=$(cpuTicks "$pid"); sleep 5; t1=$(cpuTicks "$pid")
@@ -144,11 +156,11 @@ if [[ $(appPid) == "$pid" ]]; then
 fi
 shellp am start -W -n "$activity" >"$OUT/resume.txt"
 if [[ $(appPid) == "$pid" ]]; then
-    waitFor foreground "2048: foreground" 1 20 && pass "foreground: the program saw DidEnterForeground"
+    waitFor foreground "2048: foreground" 1 20 && pass "foreground: the program saw the resume (SDL_EVENT_WINDOW_RESTORED)"
     pass "the same process, the same game"
 elif lmkd=$(lmkdKilled "$pid"); then
     # Android may end a hidden process: the game saved when it was hidden
-    # (WillEnterBackground) is what a new process starts from.
+    # (the pause) is what a new process starts from.
     note "  the system's low-memory killer ended the hidden process: ${lmkd#*lowmemorykiller: }"
     if waitFor restored "2048: restored" 1 60; then
         r=$(last "$OUT/restored.log" restored)
@@ -228,15 +240,52 @@ else
 fi
 
 # --------------------------------------------------------------- 7. recreate
-shellp settings put global always_finish_activities 1
-adb logcat -c
+# The Activity destroyed and created again while the process lives: a
+# configuration change SDLActivity's manifest does not handle, the
+# display's density. SDL 3.4.18's contract, by default: the old Activity's
+# onDestroy queues SDL_EVENT_QUIT and waits for SDL_main; the new
+# Activity's onCreate finds SDL's main finished and, recreation not
+# allowed (SDL_HINT_ANDROID_ALLOW_RECREATE_ACTIVITY), ends the process
+# ("activity finished", System.exit(0)). So the program saves and returns,
+# the process ends, and the next launch restores the game.
+if (( rooted )) && [[ -n $storage ]]; then
+    current=$(sed -n 2p "$build/over-oracle.txt")
+else
+    current=$restarted
+fi
+density=$(shellp wm density | awk -F': ' '/Physical density/ {print $2}')
 pid=$(appPid)
-shellp input keyevent KEYCODE_HOME
-waitFor destroy "game_main returned 0" 1 30 && pass "the Activity destroyed: the program saved and returned ($(grep -o '2048: \(quit\|terminating\)' "$OUT/destroy.log" | head -1))"
+adb logcat -c
+shellp wm density $(( density + 40 ))
+if waitFor destroy "game_main returned 0" 1 30; then
+    pass "the Activity destroyed by a configuration change (density $density -> $(( density + 40 ))): the program saw $(grep -o '2048: \(quit\|terminating\)' "$OUT/destroy.log" | head -1 | cut -d' ' -f2), saved and returned"
+fi
+for _ in $(seq 1 20); do
+    [[ $(appPid) == "$pid" ]] || break
+    sleep 1
+done
+appLog >"$OUT/destroy.log"
+if ended=$(grep -m1 -E " SDL +: activity finished" "$OUT/destroy.log"); then
+    [[ $(appPid) != "$pid" ]] && pass "SDL ended the process when the new Activity was created (\"${ended##*: }\": recreation not allowed, SDL's default)" ||
+        fail "SDL said \"activity finished\" but process $pid lives"
+elif [[ $(appPid) == "$pid" ]]; then
+    note "  the process lives on (no recreation refused)"
+else
+    fail "the process ended without SDL's \"activity finished\""
+fi
+if (( rooted )) && [[ -n $storage ]]; then
+    shellp cat "$storage" >"$OUT/recreate-saved.txt"
+    [[ $(cat "$OUT/recreate-saved.txt") == "$current" ]] && pass "the saved game is the one played last" || fail "the save holds \"$(cat "$OUT/recreate-saved.txt")\", not \"$current\""
+fi
+shellp wm density reset
+sleep 3
+adb logcat -c
 shellp am start -W -n "$activity" >"$OUT/recreate.txt"
-waitFor recreate "2048: ready" 1 60 && pass "a new Activity: $(grep -c 'entering game_main' "$OUT/recreate.log") new entry, $( [[ $(appPid) == "$pid" ]] && echo "the same process" || echo "a new process"), $(grep -o '2048: restored' "$OUT/recreate.log" | head -1 || echo 'no restore')"
-grep -q "2048: restored" "$OUT/recreate.log" || fail "recreate: the game was not restored"
-shellp settings put global always_finish_activities 0
+if waitFor recreate "2048: ready" 1 60; then
+    r=$(last "$OUT/recreate.log" restored)
+    [[ $r == "$current" ]] && pass "the next launch ($( [[ $(appPid) == "$pid" ]] && echo "the same process" || echo "a new process")) restored the game played last" ||
+        fail "the next launch restored \"$r\", not \"$current\""
+fi
 
 # ------------------------------------------------------------------ 8. exit
 sleep 1
