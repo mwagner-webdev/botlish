@@ -1,0 +1,27 @@
+# case: errors -- the same with a handler value of -1: the bound value is an int, and passing it to a Byte parameter is rejected
+# class: intended
+# expect: rejected TYPE
+import std::coroutine
+import std::byte
+
+error Broke
+
+fn source(b: std::byte::Byte) -> std::byte::Byte errors Broke:
+    yield b
+    if b > 100:
+        fail Broke
+    b
+
+fn take(b: std::byte::Byte) -> int:
+    b
+
+fn run(b: std::byte::Byte) -> int:
+    coroutine {step, first} = source(b):
+        on Broke:
+            0
+    second = step():
+        on Broke:
+            -1
+    take(second)
+
+run(65)
