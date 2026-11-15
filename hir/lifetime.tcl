@@ -97,8 +97,9 @@
 # fixpoint (summaries only grow, over finite sets). No budget decides a
 # fact: an internal guard against non-termination raises, never answers.
 #
-# The walks that build the CFG follow the program's nesting and carry the
-# depth guard (core/deep.tcl; audit/depth-safe-nesting/census.tsv).
+# The walks that build the CFG follow the program's nesting (Eval, Seq, and
+# Call, Loop and Handle between them) and carry the depth guard
+# (core/deep.tcl; audit/depth-safe-nesting/census.tsv).
 
 namespace eval hir::lifetime {
     # Natives that keep an argument somewhere no result or place shows, by
@@ -694,6 +695,7 @@ proc hir::lifetime::Seq {hir gVar list cur used} {
 # A call (Eval's case): its callee when its value is needed, its arguments
 # in order, then its node; the containment its target implies.
 proc hir::lifetime::Call {hir gVar e node cur used} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $gVar g
     set target [Target $hir $g $e]
     lassign $target tkind tid
@@ -958,6 +960,7 @@ proc hir::lifetime::UnknownCall {hir gVar e n calleeVal vals res err holds type}
 # A handle (Eval's case): its call, whose exceptional edge reaches each
 # handler, and the join of the call's value and every handler's.
 proc hir::lifetime::Handle {hir gVar e node cur used} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $gVar g
     set call [dict get $node call]
     set outer [dict get $g handled]
@@ -1014,6 +1017,7 @@ proc hir::lifetime::Handle {hir gVar e node cur used} {
 
 # A loop of any kind (Eval's case).
 proc hir::lifetime::Loop {hir gVar e node cur used} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $gVar g
     set kind [dict get $node kind]
     switch -- $kind {

@@ -25,6 +25,8 @@
 #     reachability under GC stress (reachability.tcl), each in a small run.
 #
 # audit/storage-lifetime/tools/mutate.tcl's mutants must be killed here.
+#
+# canary: covers hir/lifetime.tcl audit/storage-lifetime/tools/oracle.py audit/storage-lifetime/tools/fuzz.tcl audit/storage-lifetime/tools/persist.tcl audit/storage-lifetime/tools/reachability.tcl
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -32,6 +34,8 @@ source [file join $::projectRoot surface surface.tcl]
 set ::slCases [file join $::projectRoot audit storage-static-reuse cases]
 set ::slTools [file join $::projectRoot audit storage-lifetime tools]
 testConstraint slNative [file exists [file join $::projectRoot native target release botlish-native]]
+# The oracle is Python's (python3 on PATH, as the other audits' oracles).
+testConstraint slPython [expr {[auto_execok python3] ne ""}]
 
 # The HIR and the facts of the program TEXT (or of the census case NAME
 # with -case).
@@ -1088,12 +1092,12 @@ test sl-segment-invariance {segments change where frames live, nothing else: eve
 # ---------------------------------------------------------------------------
 # The independent evidence, in small runs
 
-test sl-oracle {the analysis agrees with the independent oracle's model on generated programs: no unsound result} -body {
+test sl-oracle {the analysis agrees with the independent oracle's model on generated programs: no unsound result} -constraints slPython -body {
     set out [exec [info nameofexecutable] [file join $::slTools fuzz.tcl] -seeds 1-2 -count 12]
     lindex [split $out \n] end
 } -match regexp -result {programs 24, invalid 0, suspensions \d+, unsound 0, .*}
 
-test sl-oracle-c {Int-only generated programs: the oracle agrees, and C's frame persistence keeps every value the analysis says survives a suspension} -body {
+test sl-oracle-c {Int-only generated programs: the oracle agrees, and C's frame persistence keeps every value the analysis says survives a suspension} -constraints slPython -body {
     set out [exec [info nameofexecutable] [file join $::slTools fuzz.tcl] -seeds 3 -count 12 -strings 0]
     list [regexp {C differential: frames \d+, violations 0} $out] [regexp {unsound 0} $out]
 } -result {1 1}

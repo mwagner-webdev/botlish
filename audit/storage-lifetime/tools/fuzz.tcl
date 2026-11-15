@@ -206,7 +206,7 @@ foreach seed [Seeds [dict get $options -seeds]] {
 set cviolations 0
 if {![dict get $options -strings]} {
     set files [glob -directory $dir *.bot]
-    if {[catch {exec tclsh9.0 [file join $here persist.tcl] -quiet 1 {*}$files} out]} {
+    if {[catch {exec [info nameofexecutable] [file join $here persist.tcl] -quiet 1 {*}$files} out]} {
         set cviolations 1
         lappend failures "C differential: [lindex [split $out \n] end]"
         foreach line [split $out \n] {

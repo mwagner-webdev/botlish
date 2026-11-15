@@ -1990,9 +1990,9 @@ and what every suspension point keeps. Keep it so:
   message's objects stand for everything they hold (they contain
   themselves). Containment is flow-insensitive; the may-have-been-made
   filter only removes objects that cannot exist yet.
-* The walks over the program's nesting (`Eval`, `Seq`) carry the depth
-  guard and are in audit/depth-safe-nesting/census.tsv; every other walk
-  is iterative.
+* The walks over the program's nesting (`Eval`, `Seq`, `Call`, `Loop`,
+  `Handle`) carry the depth guard and are in
+  audit/depth-safe-nesting/census.tsv; every other walk is iterative.
 
 If you change hir/lifetime.tcl, or what it reads (the HIR node kinds, the
 specialization analysis's instances, error edges, places, the coroutine

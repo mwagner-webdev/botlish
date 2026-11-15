@@ -230,8 +230,9 @@ flow-insensitive (a String pushed into a vector later is in the vector's
 contents everywhere), liveness is not, and the filter keeps the
 combination sound while removing objects that cannot exist yet.
 
-Every walk that follows the program's nesting -- `Eval` and `Seq` -- carries
-the depth guard of `core/deep.tcl` and is listed in
+Every walk that follows the program's nesting -- `Eval` and `Seq`, and
+`Call`, `Loop` and `Handle` between them -- carries the depth guard of
+`core/deep.tcl` and is listed in
 `audit/depth-safe-nesting/census.tsv`; every other walk (the call graph's
 components, the CFG's DFS order) is iterative. `audit/depth-safe-nesting/
 tools/scenarios.tcl` gained a `lifetime` scenario, so the depth-safe probe
@@ -822,7 +823,24 @@ Observations [measurement, inference]:
 
 ## 22. Existing regression and CI results
 
-REGRESSION-RESULTS
+Run on the branch (Linux x86-64, the pinned toolchain) [test]:
+
+| check | result |
+|---|---|
+| `tests/storage-lifetime.test` | 63 tests, 63 passed (the native one needs the built driver; the oracle ones `python3`) |
+| `tests/depth-safe-nesting.test` | DSN-RESULT |
+| `tests/hir-interchange.test` | 11 passed (the front end's fingerprint covers the new file; nothing else changes) |
+| `tests/compilation-isolation.test` | 19 passed |
+| `tests/canary.test` | 20 passed (the new file's `# canary: covers` line) |
+| `tools/compilerpedia.tcl check` | 1306 topics, 787 examples, 0 problems |
+| `tools/mutant-catalogs.tcl` | 114 catalogs, 3866 mutants, 0 problems (this milestone's included) |
+| `audit/depth-safe-nesting/tools/census.tcl -scenarios lifetime` (kinds call, ifnest, handler, loops, mixed, fnnest; 12 deep, fraction 3) | the five guarded walks of `hir/lifetime.tcl` found and listed; one MISSING, `hir::types::IsAffine` (5 activations on the loops specimen), which the existing `lowerings` scenario shows the same way at that threshold: not this milestone's |
+| `audit/golden/migration/merge.tcl -check 1` | the new file's 63 tests have census rows (KEEP-INTERNAL) and names; the 9 problems it reports were there before (Android and c-bindgen tests the names file lacks) |
+
+Nothing in `core/`, `surface/`, `compiler/`, `native/`, `ccompile/`,
+`stdlib/` or any backend changed; `hir/hir.tcl` only loads the new file.
+
+CI: CI-RESULT
 
 ## 23. Known limitations and conservative cases
 
