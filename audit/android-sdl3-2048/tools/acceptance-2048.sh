@@ -85,7 +85,11 @@ grep -o "libgame.so pinned.*" "$OUT/start.log" | head -1 | sed 's/^/  /' | tee -
 [[ $(last "$OUT/start.log" new) == "$(sed -n 1p "$oracle")" ]] && pass "seed 42's new game is the interpreter's" || fail "new game $(last "$OUT/start.log" new), the interpreter's $(sed -n 1p "$oracle")"
 layout=$(grep -o "2048: layout.*" "$OUT/start.log" | tail -1)
 note "  $layout"
-read -r lw lh bx by bs gap rx ry rw rh <<<"$(echo "$layout" | sed -E 's/.*layout ([0-9]+)x([0-9]+) board (-?[0-9]+) (-?[0-9]+) ([0-9]+) gap ([0-9]+) restart (-?[0-9]+) (-?[0-9]+) ([0-9]+) ([0-9]+).*/\1 \2 \3 \4 \5 \6 \7 \8 \9 \10/')"
+# "2048: layout WxH board X Y SIDE gap G restart X Y W H", read by words
+# (sed numbers its groups \1 to \9 only: \10 is group 1 and a 0, which
+# runs 4, 6 and 7 tapped at -- the restart button's height read as 3200).
+read -r _ _ size _ bx by bs _ gap _ rx ry rw rh _ <<<"$layout"
+lw=${size%x*} lh=${size#*x}
 read -r sw sh <<<"$(screenSize | tr x ' ')"
 offset=$(( sh - lh ))
 (( offset < 0 )) && offset=0

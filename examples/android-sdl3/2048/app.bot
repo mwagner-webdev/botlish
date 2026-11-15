@@ -259,9 +259,9 @@ fn initial(args: List[str], path: str, context io: std::io::IO, screen: sdlscree
     game
 
 # The application: SDL opened (vertical sync, Android's lifecycle events
-# delivered to the loop; not fullscreen -- the system bars stay, so a touch
-# near the top edge is the window's, not Android's, and Android shows no
-# immersive-mode notice over the board), the game restored or started, the
+# delivered to the loop; not fullscreen: Android shows its immersive-mode
+# notice over a fullscreen window until it is dismissed, which covered the
+# board on the 16 KiB emulator image), the game restored or started, the
 # loop, the game saved, SDL closed. Whether it ran to its end.
 fn main(context io: std::io::IO, screen: sdlscreen::Screen) -> bool:
     args = argv():
