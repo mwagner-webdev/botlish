@@ -39,13 +39,14 @@ for attempt in 1 2; do
     adb logcat -c
     shellp am start -W -n "$PKG/.MainActivity" >"$OUT/start.txt"
     note "  launch: $(grep -E "TotalTime|WaitTime" "$OUT/start.txt" | tr -s ' \n' ' ')"
-    waitFor start "$TAG.*counter: ready" 1 60 || break
-    sleep 3
+    if waitLines start "$TAG.*counter: ready" 1 60; then
+        sleep 3
+    fi
     ended=$(recreationEnded) || break
     note "  the Activity was recreated just after the start and SDL ended the process (${ended##*: }, SDL's default); started again"
     appLog >"$OUT/start-recreated-$attempt.log"
 done
-grep -q "counter: ready" "$OUT/start.log" && pass "start: $(grep -o 'counter: ready.*' "$OUT/start.log" | head -1)"
+grep -q "counter: ready" "$OUT/start.log" && pass "start: $(grep -o 'counter: ready.*' "$OUT/start.log" | head -1)" || fail "start: no ready line (start.log)"
 grep -o "environment api.*" "$OUT/start.log" | head -1 | sed 's/^/  /' | tee -a "$SUMMARY"
 grep -o "entering counter_main.*" "$OUT/start.log" | head -1 | sed 's/^/  /' | tee -a "$SUMMARY"
 grep -q "lib.*pinned yes" "$OUT/start.log" && note "  libcounter.so pinned (RTLD_NODELETE)"

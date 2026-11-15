@@ -71,13 +71,14 @@ for attempt in 1 2; do
     adb logcat -c
     shellp am start -W -n "$activity" --esa org.botlish.android.ARGUMENTS --seed,42,--fresh >"$OUT/start.txt"
     note "  launch: $(grep -E "TotalTime|WaitTime" "$OUT/start.txt" | tr -s ' \n' ' ')"
-    waitFor start "$TAG.*2048: ready" 1 90 || break
-    sleep 3
+    if waitLines start "$TAG.*2048: ready" 1 90; then
+        sleep 3
+    fi
     ended=$(recreationEnded) || break
     note "  the Activity was recreated just after the start and SDL ended the process (${ended##*: }, SDL's default); started again"
     appLog >"$OUT/start-recreated-$attempt.log"
 done
-grep -q "2048: ready" "$OUT/start.log" && pass "start: $(grep -o '2048: ready.*' "$OUT/start.log" | head -1)"
+grep -q "2048: ready" "$OUT/start.log" && pass "start: $(grep -o '2048: ready.*' "$OUT/start.log" | head -1)" || fail "start: no ready line (start.log)"
 grep -o "environment api.*" "$OUT/start.log" | head -1 | sed 's/^/  /' | tee -a "$SUMMARY"
 grep -o "entering game_main.*" "$OUT/start.log" | head -1 | sed 's/^/  /' | tee -a "$SUMMARY"
 grep -o "libgame.so pinned.*" "$OUT/start.log" | head -1 | sed 's/^/  /' | tee -a "$SUMMARY"

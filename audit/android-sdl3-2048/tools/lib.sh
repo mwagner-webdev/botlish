@@ -23,17 +23,24 @@ otherCrashes() { # [LOG]
 }
 
 # Waits up to LIMIT seconds until COUNT lines match PATTERN in the app's
-# log (a crash ends the wait); the log is kept as OUT/NAME.log.
-waitFor() { # NAME PATTERN COUNT LIMIT
-    local name=$1 pattern=$2 count=$3 limit=$4 seen=0
+# log (a crash, or SDL ending the process for a recreated Activity, ends
+# the wait); the log is kept as OUT/NAME.log. Status 1 on a timeout, the
+# lines seen in `seen`. waitFor is the same, reporting a timeout as a FAIL.
+waitLines() { # NAME PATTERN COUNT LIMIT
+    local name=$1 pattern=$2 count=$3 limit=$4
+    seen=0
     for _ in $(seq 1 "$limit"); do
         seen=$(appLog | grep -c -E "$pattern" || true)
         (( seen >= count )) && break
         [[ -n $(appLog | crashes) ]] && break
+        appLog | grep -q -E " SDL +: activity finished" && break
         sleep 1
     done
     appLog >"$OUT/$name.log"
-    (( seen >= count )) || { fail "$name: $seen of $count lines matching \"$pattern\" within $limit s"; return 1; }
+    (( seen >= count ))
+}
+waitFor() { # NAME PATTERN COUNT LIMIT
+    waitLines "$@" || { fail "$1: $seen of $3 lines matching \"$2\" within $4 s"; return 1; }
     return 0
 }
 
