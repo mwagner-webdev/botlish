@@ -1,0 +1,12 @@
+# case: matrix -- two unrelated yield types (int and str), one terminal int: rejected
+# class: rejected-correct
+# expect: rejected COROUTINE-RESULT-MISMATCH
+import std::coroutine
+
+fn source(n: int) -> int:
+    yield n
+    yield "text"
+    n
+
+coroutine {step, first} = source(1)
+first

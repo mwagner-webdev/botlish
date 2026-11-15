@@ -1704,7 +1704,7 @@ summary: `enum Color:` declares a nominal type whose cases are values `Color::Re
 index: concepts
 alias: enum; enumeration; enum case; enumerated type; tagged union; sum type; variant; enum payload; payload-bearing case
 keywords: enum, case, nominal, closed, payload, ==, hash, import type, ordinal, match, switch, UNKNOWN-ENUM-CASE, ENUM-PAYLOAD-REQUIRED, ENUM-PAYLOAD-UNEXPECTED
-related: concept.structs concept.imports concept.types rule.import-type capability.match error.unknown-enum-case error.enum-payload-required error.enum-payload-unexpected
+related: concept.structs concept.imports concept.types rule.import-type capability.match error.unknown-enum-case error.enum-payload-required error.enum-payload-unexpected error.match-not-exhaustive
 
 == WHAT IT IS
     enum Light:
@@ -1745,19 +1745,21 @@ Every case's value has the enum's type (`Shape`): a function declared
   * A payload holding an affine value (a coroutine handle) makes the enum
     affine: its values move, have no equality, and are released by their
     owner.
-  * No ordinal, Int or String conversion, no ordering, no case list or
-    count, and no way yet to read a payload back out of a value: there is
-    no `match` or `switch` (capability.match). Comparisons are `==` and
-    `!=`.
+  * A value's case is selected, and its payload read back by name, with
+    an exhaustive `match` (capability.match): one `case Enum::Case:` arm
+    per case, which the compiler checks names every case exactly once.
+  * No ordinal, Int or String conversion, no ordering, and no case list or
+    count. Comparisons are `==` and `!=`.
   * A payload-bearing enum is not Sendable, not a C type, and not a
     context struct's member (each is refused with a reason).
 
 == WHY
 An enum is a closed set of names, not a disguised integer: code cannot
 depend on case order or numbering, so cases can be added or reordered
-without silent changes, and the compiler keeps the full case set and every
-case's payload fields for future exhaustive matching. A payload is part of
-a value, never of its case's identity, and has no visible layout.
+without silent changes, and the compiler keeps the full case set and
+every case's payload fields, which every match is checked against. A
+payload is part of a value, never of its case's identity, and has no
+visible layout.
 
 == EXAMPLES
 @example accept

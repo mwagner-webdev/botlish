@@ -1,0 +1,24 @@
+# nested-8.bot -- 8 fields, one of them a nested struct rebuilt per iteration (tools/gen-width.tcl).
+import std::list
+
+struct P:
+    a: int
+    b: int
+
+struct S:
+    f0: int
+    f1: int
+    f2: int
+    f3: int
+    f4: int
+    f5: int
+    f6: int
+    inner: P
+
+fn f(n: int) -> int:
+    t = fold i from 0 to n with intermediate s S {f0: 0, f1: 0, f2: 0, f3: 0, f4: 0, f5: 0, f6: 0, inner: P {a: 0, b: 0}}:
+        S {f0: (s.f0 + i).mod(1000), f1: (s.f1 + i).mod(1000), f2: (s.f2 + i).mod(1000), f3: (s.f3 + i).mod(1000), f4: (s.f4 + i).mod(1000), f5: (s.f5 + i).mod(1000), f6: (s.f6 + i).mod(1000), inner: P {a: (s.inner.a + i).mod(1000), b: s.inner.b + 1}}
+    t.f0 + t.inner.a + t.inner.b
+
+n = 1000
+f(n)

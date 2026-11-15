@@ -259,6 +259,14 @@
 #              (RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md): the block runs
 #              with exactly the listed contexts' authority. A statement or
 #              the value of a binding, return or destructuring (like an if)
+#   match      matchSpan (the word "match"), subject (the scrutinee), arms
+#              ({span caseSpan case binding bindingSpan pattern body} dicts
+#              in written order: CASE a qualname node, the case's qualified
+#              name; BINDING/PATTERN what the arm receives of its payload,
+#              as an "on" handler; BODY a suite) -- "match VALUE:" and its
+#              "case Enum::Case:" arms (PORTABILITY-EXHAUSTIVE-MATCH-
+#              MILESTONE-1.md). A statement or the value of a binding,
+#              return or destructuring (like an if)
 #   fail       name, nameSpan, payload -- "fail NAME": produces the named
 #              error's completion (EXPLICIT-ERROR-COMPLETIONS.md). PAYLOAD is
 #              "" or, for "fail NAME {field: value, ...}", the anonstruct
@@ -573,6 +581,21 @@ proc surface::ast::Ids {node id} {
         static - inject {
             dict set node body [Suite [dict get $node body] $id]
         }
+        match {
+            dict set node subject [Ids [dict get $node subject] $id/subject]
+            set arms {}
+            set index 1
+            foreach arm [dict get $node arms] {
+                dict set arm case [Ids [dict get $arm case] $id/case$index/case]
+                dict set arm body [Suite [dict get $arm body] $id/case$index]
+                if {[dict get $arm pattern] ne ""} {
+                    dict set arm pattern [PatternIds [dict get $arm pattern] $id/case$index/payload]
+                }
+                lappend arms $arm
+                incr index
+            }
+            dict set node arms $arms
+        }
     }
     return $node
 }
@@ -668,6 +691,16 @@ proc surface::ast::Children {node} {
             }
             return $children
         }
+        match {
+            # The scrutinee, then each arm's case name (a qualname node: the
+            # loader's one walk checks and rewrites it, surface/modules.tcl)
+            # and body, in written order.
+            set children [list [dict get $node subject]]
+            foreach arm [dict get $node arms] {
+                lappend children [dict get $arm case] [dict get $arm body]
+            }
+            return $children
+        }
         fail {
             if {[dict exists $node payload] && [dict get $node payload] ne ""} {
                 return [list [dict get $node payload]]
@@ -757,6 +790,13 @@ proc surface::ast::MapChildren {node cmd} {
             dict set node call [{*}$cmd [dict get $node call]]
             dict set node handlers [lmap handler [dict get $node handlers] {
                 dict set handler body [{*}$cmd [dict get $handler body]]
+            }]
+        }
+        match {
+            dict set node subject [{*}$cmd [dict get $node subject]]
+            dict set node arms [lmap arm [dict get $node arms] {
+                dict set arm case [{*}$cmd [dict get $arm case]]
+                dict set arm body [{*}$cmd [dict get $arm body]]
             }]
         }
         fail {
@@ -1306,6 +1346,10 @@ proc surface::ast::StatementLines {node indent show linesVar} {
             Injection $node "" $indent $show lines
             return
         }
+        match {
+            Match $node "" $indent $show lines
+            return
+        }
         bind - return - break - destructure - coroutinebind {
             set value [dict get $node value]
             set prefix [switch -- [dict get $node kind] {
@@ -1332,6 +1376,10 @@ proc surface::ast::StatementLines {node indent show linesVar} {
             }
             if {$value ne "" && [dict get $value kind] eq "inject"} {
                 Injection $value $prefix $indent $show lines
+                return
+            }
+            if {$value ne "" && [dict get $value kind] eq "match"} {
+                Match $value $prefix $indent $show lines
                 return
             }
         }
@@ -1406,6 +1454,27 @@ proc surface::ast::Injection {node prefix indent show linesVar} {
     }
     lappend lines "$pad${prefix}inject $what[At $node $show]"
     Body [dict get $node body] [expr {$indent + 1}] $show lines
+}
+
+# Lines of the match NODE ("match VALUE" and its "case" arms;
+# PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md), its first line starting with
+# PREFIX.
+proc surface::ast::Match {node prefix indent show linesVar} {
+    upvar 1 $linesVar lines
+    set pad [string repeat {    } $indent]
+    lappend lines "$pad${prefix}match [Expr [dict get $node subject] $show][At $node $show]"
+    foreach arm [dict get $node arms] {
+        set receive ""
+        if {[dict get $arm binding] ne ""} {
+            set receive " [dict get $arm binding]"
+        } elseif {[dict get $arm pattern] ne ""} {
+            set receive " [PatternText [dict get $arm pattern] $show]"
+        }
+        set case [dict get $arm case]
+        set root [expr {[dict get $case rooted] ? "::" : ""}]
+        lappend lines "[string repeat {    } [expr {$indent + 1}]]case $root[dict get $case namespace]::[dict get $case name]$receive:"
+        Body [dict get $arm body] [expr {$indent + 2}] $show lines
+    }
 }
 
 # Source text of the destructuring PATTERN, as written: "{a, b: c, d: {e}}"

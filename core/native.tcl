@@ -1066,6 +1066,24 @@ proc core::native::ValidShape {shape count} {
         return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
             && ($count eq "" || [lindex $shape 1] < $count)}]
     }
+    if {[lindex $shape 0] eq {enum-test}} {
+        # {enum-test I}: enum#is (core/enums.tcl): a Bool -- whether
+        # argument I, a match's scrutinee, is of the case its constants name
+        # (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md); the shape names the
+        # scrutinee's position for the analyses that read where it flows.
+        return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
+            && ($count eq "" || [lindex $shape 1] < $count)}]
+    }
+    if {[lindex $shape 0] eq {enum-payload}} {
+        # {enum-payload I}: enum#payload (core/enums.tcl): the result is the
+        # payload of the case named by the String constants arguments I
+        # (the enum's declaration identity) and I + 1 (the case): its
+        # declared payload's anonymous struct type, unit for a payload-free
+        # case (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md), resolved by
+        # hir::types::ShapeResult against the program's enum registry.
+        return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
+            && ($count eq "" || [lindex $shape 1] + 1 < $count)}]
+    }
     if {[lindex $shape 0] eq {enum-case}} {
         # {enum-case I}: enum#case (core/enums.tcl): the result is the enum
         # whose declaration identity is the String constant argument I

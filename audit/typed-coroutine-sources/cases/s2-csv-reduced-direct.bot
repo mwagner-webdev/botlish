@@ -1,0 +1,40 @@
+# case: the same consumer without the narrowing comparison: pushing the resume's value into a MutableVector[Byte] is rejected, because the value is an int with no facts
+# class: narrowing
+# expect: rejected TYPE
+import std::coroutine
+import std::byte
+import std::str
+import std::char
+import std::mutable_vector
+import std::mutable_array
+
+error Unsupported
+
+fn field_source(value: str) -> int errors Unsupported:
+    yield 34
+    loop i from 0 to value.length():
+        c = value.char_at(i).scalar_value()
+        if c < 32 or c > 126:
+            fail Unsupported
+        if c == 34:
+            yield 34
+        yield c
+        continue
+    yield 34
+    value.length()
+
+fn bytes_of(value: str) -> List[std::byte::Byte] errors Unsupported:
+    coroutine {step, first} = field_source(value)
+    out = std::mutable_vector::from_list("".encode_utf8())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+bytes_of("ab"):
+    on Unsupported:
+        []

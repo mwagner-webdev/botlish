@@ -1359,6 +1359,91 @@ it a mutant of the same rule; its native mutant rebuilds a private copy).
 `audit/fold-virtual-construction/tools/measure.tcl` regenerates the
 report's tables (`-root DIR` measures another checkout).
 
+## Fold slots (struct intermediates as field registers)
+
+A fold whose every incoming value -- its initial value and every normal
+completion -- is one struct descriptor carries its intermediate as N
+loop-carried field registers instead of one object
+(FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md): hir/escape.tcl's *fold slot*,
+the fourth slot kind beside bound locals, instance parameters and instance
+results, lowered by native/lower.tcl's `vfold` accumulator mode
+(`LoopResultStart` .. `LoopResultFinish`, `FoldBackEdge`, `FoldObject`).
+Keep it so:
+
+* One representation: the existing virtual struct machinery (descriptors,
+  `VirtualValue`, the virtual local entry, `MaterializeVirtual`, `If`'s
+  field joins, `retmulti`/`callmulti`). Never a fold-specific struct
+  representation, HIR node, NIR instruction, runtime object or helper, and
+  never a NIR-level rewrite deciding representation (the census's
+  `nir-sra.tcl` is an oracle, never production).
+* The back edge is a parallel move (`FoldBackEdge`: every source that is a
+  carried register another move writes is copied first), written in exactly
+  one place, a normal completion's end: `continue` skips it, a bare `break`
+  and exhaustion read the carried registers, never a candidate. Never move
+  fields sequentially or commit anything before the completion.
+* A fold is a recognized construction (`Classify`) exactly when its slot is
+  virtual: `analyze` runs in rounds, denying the construction of every fold
+  whose slot fell (STRUCTOPTS' `foldDeny`); never recognize a fold whose slot
+  is one register, and never let a shape fact depend on eligibility.
+* A reference entering a slot (an identity completion, a candidate local, an
+  outer intermediate, a join's reference branch, a share's argument) is free
+  only while the binding it names is virtual, and the slot stands only while
+  every such source does (`Eligible`'s `sources`). A parameter is never a
+  source (it is virtual only in its instance's `fields` variant); its
+  descriptor comes from its static type only for a local or an intermediate
+  (`RefShape`, `TypeShape`: nominal named structs, anonymous ones by field
+  set).
+* No loss: a slot is declined when a materializing use may run in an
+  iteration that then keeps the intermediate unchanged (an identity
+  completion or a `continue`; `FoldNoLoss`, a path walk with a dead state for
+  `return`, `fail` and the fold's own `break`). Never drop it: the object
+  would be rebuilt every iteration where today it is passed on.
+* A whole-struct share of a carried binding (a copying fold's entry copy) is
+  lowered field-wise (`ShareFields`: one `mvshare` per header the descriptor
+  lists, exactly runtime/mutvec.rs's `share_by`'s copies, and no struct).
+  Ownership stays hir/mutvec.tcl's, decided before representation: never add
+  or drop a share, and never share an unlisted field.
+* A fold slot's representation class is opaque (`NestingPlan`'s `opq`): no
+  cut is chosen for it or for any class it touches -- an exact call's result
+  entering it included, so its class is unioned after the result members
+  exist (`fvs-exact-call-nested-result`) -- and an inner struct stays one
+  carried field.
+* Every register the lowering reads is defined on every path to the read:
+  `audit/fold-virtual-struct-state/tools/defined.tcl` checks NIR text for
+  it, independently of the driver's validator (which does not); the tests
+  (`fvs-nir-defined`) and the fuzzer run it. Keep a new lowering path under
+  it.
+* Options: `-struct-fold 0` and `-struct-ref-joins 0` (or
+  `BOTLISH_NATIVE_STRUCT_FOLD`, `BOTLISH_NATIVE_STRUCT_REF_JOINS`) turn the
+  two features off; with both off the NIR is the lowering before the
+  milestone, byte for byte (`audit/fold-virtual-struct-state/tools/
+  corpus.tcl`). `-struct-fold-width` is the fold ceiling (a resource bound,
+  not a tuned threshold: the report's width section). The legacy policy has
+  no fold slots and no reference joins.
+
+If you change any of that, or what the loop lowering does with a fold's
+result, or what hir/escape.tcl's slot analysis reads, run
+`tests/fold-virtual-struct-state.test` (also under
+`BOTLISH_NATIVE_GC_STRESS=1`), its golden suite (`tclsh9.0 tests/local.tcl
+tests/golden/fold-virtual-struct-state.bot`; generated with its fragment
+and census by `tclsh9.0 audit/fold-virtual-struct-state/tools/golden-port.tcl`
+from the Tcl tests' own programs), `tests/fold-loops.test`,
+`tests/struct-scalar-replacement.test`, `tests/value-transport.test`,
+`tests/consumed-fold-intermediates.test`,
+`tests/fold-virtual-construction.test`, `tests/coroutines.test`,
+`audit/fold-virtual-struct-state/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`: values on eight configurations, decisions against the
+fuzzer's own model, no program building more structs than without fold
+slots, every NIR register defined), `audit/fold-virtual-struct-state/tools/mutate.tcl` (every mutant in
+its `mutants.txt` must still apply and be killed by a test its `!!` line
+names: update a mutant's text when you change the code it mutates, keeping
+it a mutant of the same rule) and the census's probes
+(`audit/fold-virtual-struct-state/tools/probes.tcl`). `corpus.tcl` with
+`corpus-compare.py` compares a corpus's NIR, census and Struct allocations
+with another checkout (`-root DIR`); `measure.tcl`, `gen-width.tcl` and
+`width-facts.tcl` (registers, roots, frame, stack traffic and Cranelift's
+compile time per width) regenerate the report's tables.
+
 ## Flattening Lists (std::list::flat)
 
 `std::list::flat[T](lists: List[List[T]]) -> List[T]`
@@ -3780,6 +3865,76 @@ mutant's text when you change the code it mutates, keeping it a mutant of
 the same rule), `cargo test --release --manifest-path native/Cargo.toml --lib
 enum`, the enum, affine and declaration-summary harnesses for code they
 share, and `tclsh9.0 tests/local.tcl tests/golden/structs-and-enums.bot`.
+
+### Exhaustive match
+
+`match VALUE:` with one `case Enum::Case:` arm per case
+(PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md) selects the arm of the
+value's case; the arm receives the payload whole (`case E::C p:`),
+destructured (`case E::C {a, b: c}:`, struct destructuring's pattern) or
+not at all. It is no node kind: surface/lower.tcl's Match writes an `if
+true:` block (carrying `match`) binding the scrutinee once to a hygienic
+`match#N`, then an `if` per arm testing the internal root native
+`enum#is(match#N, "ID", "CASE")`, whose then-branch first binds
+`enum#payload(match#N, "ID", "CASE")`, ending in `enum#unmatched()`;
+hir/resolve.tcl's MatchSyntax resolves each arm's written case name as a
+case expression's qualifier is. Keep it so:
+
+* Exhaustiveness is proven, never tested at run time: hir/match.tcl holds
+  every match to the scrutinee's statically known enum (TYPE for `any`, a
+  non-enum, another enum's case), each case named exactly once
+  (MATCH-DUPLICATE-CASE) and every declared case named
+  (MATCH-NOT-EXHAUSTIVE, against EnumCases(E), never what an analysis
+  knows of the value). Never add a wildcard, default, guard, alternative,
+  literal, positional or nested-enum pattern, a dynamic type test or a
+  fallback arm, and never let an exact-case fact excuse an arm.
+* Selection reads the case's identity (enum, case) only: never `==`, a
+  hash, a payload or a position (a payload holding a function, a mutable
+  collection or an affine value is matched the same). enum#is observes the
+  scrutinee; enum#payload moves it -- every arm takes the payload, so an
+  affine scrutinee is moved on every path (a resource's included) and what
+  an arm does not bind is released by its owner. Never make a selection
+  consume, or an arm skip its payload.
+* A payload is taken only under its own selection: the chain's shape
+  (hir::match::chain) is checked in every compilation (MATCH-INVALID, the
+  compiler's own failure) and again by every reader of HIR it did not
+  build (hir/read.tcl, hir::interchange::decode: HIR PARSE, HIR
+  INTERCHANGE MATCH), and enum#payload checks the identity at run time on
+  every backend (UNMATCHED, never another case's payload). Never trust a
+  match's exhaustiveness from text, and never add a public payload or
+  discriminant accessor.
+* The ownership analysis treats a branch of a constant condition (the root
+  `true`/`false` a front end writes for a block) as never taken
+  (hir::affine::ConstantCondition): a match's block always runs. Never
+  widen that to a value an analysis decided.
+* `match` and `case` are contextual words (surface/parser.tcl's AtMatch;
+  `case` only as an arm's first word): `match = 1` and `case(name, check)`
+  stay ordinary code. A match is a statement or the value of a binding,
+  return or destructuring, like an if.
+* Representation is the backends': natively `enumeq` with the case's word
+  for an enum without payload-bearing cases (no payload operation: unit),
+  `op enumis`/`op enumpayload` otherwise; the C backend compiles payload-
+  free matches only, as it compiles payload-free enums only.
+
+If you change any of that (the parser's Match, AtMatch, MatchCaseName,
+surface/lower.tcl's Match, MatchSyntax and MatchSelection, hir/match.tcl,
+the `enum-test`/`enum-payload` cases of hir/types.tcl and hir/callables.tcl,
+core/enums.tcl's selections, `ConstantCondition`, native/lower.tcl's
+EnumSelection, nir.rs's EnumIs/EnumPayload/EnumUnmatched, ops.rs's
+rt_enum_is/rt_enum_payload, ccompile's selections, the HIR text's `if
+match`), run `tests/exhaustive-match.test` (also with
+`BOTLISH_SEMANTIC_ROLLBACK_AUDIT=1`), its golden suite (`tclsh9.0
+tests/local.tcl tests/golden/exhaustive-match.bot`), `tests/payload-enums.test`,
+`tests/enums.test`, `audit/exhaustive-match/tools/fuzz.tcl` (several seeds,
+once with `-gc-stress 1`), `audit/exhaustive-match/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), `cargo test --release --manifest-path native/Cargo.toml
+--lib enum`, plus the affine and coroutine harnesses for a change to
+hir/affine.tcl and `tools/compilerpedia.tcl check` for a diagnostic.
+`audit/mid-end-port/tools/kernel.tcl` compares the payload-enum kernel
+(kernel/ranges-enums.bot) with the other five; `bench/exhaustive-match.tcl`
+is the performance report.
 
 ## Error payloads
 
@@ -7002,6 +7157,69 @@ installs or links (`audit/http-client/cleanroom/cleanroom.sh image`, then
 `repository.sh OUT` and `cleanroom.sh run single/out/botlish OUT RESULTS`
 after `single/build.sh`: the report's "Clean room").
 `audit/http-client/tools/measure.tcl` regenerates the measurements.
+
+## Rust native units (tools/rust-unit.tcl)
+
+A package's native unit written in Rust (`packages/http/native`,
+`audit/rust-archive-link/unit`) is linked into executables that also hold
+the Botlish runtime, which is Rust too
+(HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md).
+`tools/rust-unit.tcl` localizes the archive cargo made into one object
+whose only global definitions are the unit's C ABI: on ELF GNU `ld -r`,
+`objcopy --keep-global-symbols` and Rust's COMDAT group renamed (B3), on
+Mach-O Apple's `ld -r -S -force_load` with an exported-symbols list and
+a platform load command (`-platform_version`), archived by `libtool
+-static -D`. Keep it so:
+
+* Never ship or link a raw cargo static library beside the runtime: on
+  Linux it fails to link (duplicate allocator shim, or
+  `rust_eh_personality` when the toolchains differ) or, with the system
+  linker, links and silently binds the runtime's own allocations to the
+  unit's allocator; on macOS Apple's ld reports no duplicate at all, and
+  it links silently with either toolchain (the report's section 5.2;
+  `ral-raw-*`). A new Rust unit goes through `rustunit::localize`, never a
+  recipe of its own.
+* Mach-O symbols are read with `nm --no-llvm-bc`: the Rust standard
+  library's objects embed LLVM bitcode, which Apple's nm otherwise reads
+  instead of the symbol table and cannot parse when rustc's LLVM is newer
+  than Xcode's (`ral-nm-bitcode-reader-off`). A private external is a
+  global definition for the link (`ral-macho-private-extern`), and an nm
+  that fails after printing is accepted only when all it said is that a
+  member has no symbols (`ral-nm-partial-refused`): never a partial list.
+* Every `ld -r` output on Mach-O records its platform and deployment
+  target (`ral-localized-build-version`); Apple's ld -r writes none
+  unless told, and every final link would warn.
+* Visibility is the platform linker's decision, read back with nm
+  (`rustunit::check`): never compute a binding, a visibility or a symbol
+  list in Tcl beyond the keep globs, and never weaken the check to make an
+  archive pass.
+* A weak *definition* the final link must be able to override (a fallback
+  of an optional integration point) is kept global (`-keep`): localized,
+  every program calls the fallback, provider or not
+  (`ral-weakdef-localized-away-*`).
+* tools/http-package.tcl's ELF unit is this procedure's output, byte for
+  byte what its own sequence made before: a change to the ELF steps is a
+  change to http's released bytes (a new http version).
+* The package manager reads an archive's symbol index from its bytes --
+  GNU's and Apple's BSD forms (`__.SYMDEF`, `__.SYMDEF SORTED`,
+  `__.SYMDEF_64`), every entry checked against the archive, a Mach-O
+  member's names without their leading underscore (pm/binary.tcl): never
+  trust a declared symbol because of its target, and never read a
+  malformed index as fewer names.
+
+If you change `tools/rust-unit.tcl`, `pm/binary.tcl`'s archive index or
+`audit/rust-archive-link/`, run `tests/rust-archive-link.test`,
+`tests/package-native.test` (its `pn-index-*`),
+`audit/rust-archive-link/tools/experiments.tcl OUT` (the matrix; read it)
+and `audit/rust-archive-link/tools/mutate.tcl` (every mutant in its
+`mutants.txt` for the host must still apply and be killed by a test its
+`!!` line names: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule), and push to read
+`.github/workflows/rust-archive-link.yml` (the Mach-O half, the real http
+unit on macOS, the reproducibility comparison and the toolchain-free
+consumers run only there). A change to `tools/http-package.tcl`'s Unit
+also rebuilds the unit before and after (`tclsh9.0 tools/http-package.tcl
+unit`) and compares the archives' SHA-256.
 
 ## The process_linux package (supervised child processes)
 

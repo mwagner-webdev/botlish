@@ -573,6 +573,115 @@ proc surface::lower::Handlers {node} {
     }]
 }
 
+# A match (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md): `match SUBJECT:`
+# and its `case Q::C ...:` arms are
+#
+#     if ^true:                          the match's own scope; the node
+#                                        carries `match`
+#         match#N = SUBJECT              the scrutinee, evaluated here, once
+#         if ^enum#is(match#N, "Q", "C1"):          arm 1's selection
+#             P1 = ^enum#payload(match#N, "Q", "C1")   its payload
+#             ...projections of a pattern...
+#             BODY1...
+#         else:
+#             if ^enum#is(match#N, "Q", "C2"):      arm 2's, and so on
+#                 ...
+#             else:
+#                 ^enum#unmatched()      no arm: never reached once the
+#                                        match is proven exhaustive
+#
+# N is the match's start offset and `#` makes the temporary hygienic. P is
+# what the arm receives of the case's payload: the name it binds the whole
+# payload to (`case Q::C p:`), the hygienic temporary of its destructuring
+# pattern (`case Q::C {a, b: c}:`, whose ordinary projection binds -- a
+# destructuring statement's, Projections -- open the body), or, for an arm
+# that binds nothing, the hygienic match#N#K: every arm takes the payload
+# out of the scrutinee, so an affine scrutinee is moved on every path and
+# what the arm does not bind is released by its owner (AFFINE-VALUES.md).
+# The case names are written as they were spelled ("Q", "C") on each call,
+# whose `matchCase` field tells resolution to resolve them -- Q as an enum
+# type visible from the code, as a case expression's qualifier is
+# (hir/resolve.tcl's MatchSyntax) -- and the String constants then hold
+# the enum's declaration identity and the case. Selection compares that
+# identity only: never the payload, never equality (enum#is is no `==`),
+# and declaration order plays no part. Whether every case is named exactly
+# once, and the scrutinee is of the arms' enum, is hir/match.tcl's check;
+# that the chain has this shape too (every payload taken under its own
+# selection). The value of the match is the selected arm's, through the
+# ordinary `if` rules: no node kind is added.
+proc surface::lower::Match {node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+    variable dependentRefs
+    set origin [OriginOf $node]
+    set id [dict get $node id]
+    foreach arm [dict get $node arms] {
+        if {[dict exists $dependentRefs [dict get $arm case span start]]} {
+            # A case name whose loader error depends on syntax recovery:
+            # what the arm selects is not known.
+            return [hir::syntax::holeNode $origin 0]
+        }
+    }
+    set subject "match#[dict get $node span start]"
+    set subjectOrigin [OriginOf [dict get $node subject]]
+    set chain [hir::syntax::callNode [OriginOf $node unmatched] \
+        [hir::syntax::rootRef [OriginOf $node unmatched] enum#unmatched]]
+    set arms [dict get $node arms]
+    set index [llength $arms]
+    while {$index > 0} {
+        incr index -1
+        set arm [lindex $arms $index]
+        set case [dict get $arm case]
+        set caseOrigin [OriginOf $case]
+        set armId "$id/case[expr {$index + 1}]"
+        set armOrigin [Origin [dict get $arm span] $armId]
+        set suite [dict get $arm body]
+        set body [Sequence [dict get $suite body]]
+        set marker [dict create qualifier [dict get $case namespace] case [dict get $case name] \
+            origin $caseOrigin rooted [dict get $case rooted]]
+        set bound 1
+        if {[dict get $arm binding] ne ""} {
+            set payloadName [dict get $arm binding]
+            set payloadOrigin [Origin [dict get $arm bindingSpan] $armId/payload]
+        } elseif {[dict get $arm pattern] ne ""} {
+            set pattern [dict get $arm pattern]
+            set payloadName [TempName $pattern]
+            set payloadOrigin [Origin [dict get $pattern span] $armId/payload]
+            set body [list {*}[Projections $pattern $payloadName] {*}$body]
+        } else {
+            set payloadName "$subject#[expr {$index + 1}]"
+            set payloadOrigin $caseOrigin
+            set bound 0
+        }
+        set test [MatchCall $caseOrigin enum#is $subject $marker]
+        dict set test matchCase role test
+        set take [MatchCall $payloadOrigin enum#payload $subject $marker]
+        dict set take matchCase role payload
+        dict set take matchCase bound $bound
+        set body [list [hir::syntax::bindNode $payloadOrigin $payloadName $take] {*}$body]
+        set chain [hir::syntax::ifNode $armOrigin $test [OriginOf $suite] $body \
+            [Origin [dict get $arm span] $armId/else] [list $chain]]
+    }
+    set scrutinee [hir::syntax::bindNode $subjectOrigin $subject [Node [dict get $node subject]]]
+    set block [hir::syntax::ifNode $origin [hir::syntax::rootRef [OriginOf $node match] true] \
+        $origin [list $scrutinee $chain] [OriginOf $node else] {}]
+    dict set block match 1
+    return $block
+}
+
+# A call of the selection native NATIVE (enum#is or enum#payload) on the
+# scrutinee SUBJECT and the case MARKER names as written, at ORIGIN, marked
+# `matchCase` for resolution (Match).
+proc surface::lower::MatchCall {origin native subject marker} {
+    set q [hir::syntax::constNode $origin str [dict get $marker qualifier]]
+    dict set q synthesized 1
+    set c [hir::syntax::constNode $origin str [dict get $marker case]]
+    dict set c synthesized 1
+    set call [hir::syntax::callNode $origin [hir::syntax::rootRef $origin $native] \
+        [hir::syntax::refNode $origin $subject] $q $c]
+    dict set call matchCase $marker
+    return $call
+}
+
 # The hygienic temporary of the pattern PATTERN: unique per pattern in a file.
 proc surface::lower::TempName {pattern} {
     return "destructure#[dict get $pattern span start]"
@@ -1097,6 +1206,9 @@ proc surface::lower::Node {node} {
                 [OriginOf $node else] {}]
             dict set block inject $injected
             return $block
+        }
+        match {
+            return [Match $node]
         }
     }
     error "surface::lowerToHir: cannot lower a \"[dict get $node kind]\" node"

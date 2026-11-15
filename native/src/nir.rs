@@ -244,6 +244,22 @@ pub enum OpCode {
     /// numbers as `int` constants -- the value of a payload-bearing case,
     /// one EnumCaseObj (runtime::ops's rt_enum_case). Never fails.
     EnumCase,
+    /// enum#is (core/enums.tcl; PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md):
+    /// `op enumis V E C`, E and C the program's enum and case numbers as
+    /// `int` constants -- whether V (an immediate case word or an
+    /// EnumCaseObj) is a value of that case: its identity only, never its
+    /// payload (runtime::ops's rt_enum_is). Never fails.
+    EnumIs,
+    /// enum#payload: `op enumpayload V E C` -- the payload of V, a value of
+    /// that case (its EnumCaseObj's payload struct; unit for a payload-free
+    /// case). A match takes it only under its own enum#is (hir/match.tcl);
+    /// the identity is checked again, failing (UNMATCHED) on another case's
+    /// value, never reading it (runtime::ops's rt_enum_payload).
+    EnumPayload,
+    /// enum#unmatched: `op enumunmatched` -- the end of a match no arm
+    /// selected, which an exhaustive match never reaches: always fails
+    /// (UNMATCHED; runtime::ops's rt_enum_unmatched).
+    EnumUnmatched,
     /// Structural hash (core/hashing.tcl's hash): consistent with VEq,
     /// masked to 61 bits so the result never needs a BigInt. Bootstrap
     /// native, candidate for stdlib replacement: see core/hashing.tcl's
@@ -1026,6 +1042,9 @@ op_spellings! {
     "mkok" => MkOk,
     "mkerror" => MkError,
     "enumcase" => EnumCase,
+    "enumis" => EnumIs,
+    "enumpayload" => EnumPayload,
+    "enumunmatched" => EnumUnmatched,
     "hash" => Hash,
     "hashtotal" => HashTotal,
     "tablehash" => TableHash,
@@ -1222,7 +1241,7 @@ impl OpCode {
         use OpCode::*;
         match self {
             ListNew | CleanupTable => None,
-            Argv | CPtrNull | CoFailed => Some(0),
+            Argv | CPtrNull | CoFailed | EnumUnmatched => Some(0),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
             StrLen | StrLower | ListLen | ListFlat | TreeChildren | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
@@ -1234,7 +1253,7 @@ impl OpCode {
             | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone
             | CoRelease | CoAbandon | CPtrIsNull | CPtrSame | CPtrFixture | CPtrFixtureAddress | CPtrFixtureMemory | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot
             | MutArrayFromList | MutArrayToList | MutArrayEmpty | MutArrayTakeFront => Some(1),
-            D64Lt | D64Le | D64Gt | D64Ge | D64Eq | EnumCase => Some(3),
+            D64Lt | D64Le | D64Gt | D64Ge | D64Eq | EnumCase | EnumIs | EnumPayload => Some(3),
             Substr | SubstrProven | BytesSlice | BytesUtf16LeNul | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
             | MvSwap | MutArraySwap | MutArrayGenerateDrop | FfiFixtureFill | FfiFixtureFillChecked | FfiFixtureCopy
             | TransferEncode | TransferDecode => Some(3),

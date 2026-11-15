@@ -1,0 +1,11 @@
+# kiosk_bench -- the meter on a test bench: a simulated clock, a terminal
+# that declines anything above 100.
+# (the evening payment of 198 is declined, and its coroutine answers Declined
+# again on the next resume)
+# expect: meter::Day {morning: meter::Summary {zone: 42, minutes: 30, price: 60, outcome: meter::Stage::Paid, again: meter::Stage::Paid, paid_at: 30600, beats: 4, keypad_done: true, repeat: meter::Prompt::Done}, evening: meter::Summary {zone: 17, minutes: 99, price: 198, outcome: meter::Stage::Declined, again: meter::Stage::Declined, paid_at: 30600, beats: 4, keypad_done: true, repeat: meter::Prompt::Done}}
+import bench
+import meter
+
+with context bench::SimClock {start: 30600}
+with context bench::BenchTerminal {limit: 100}
+meter::day()

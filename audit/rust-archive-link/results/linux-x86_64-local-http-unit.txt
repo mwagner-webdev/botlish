@@ -1,0 +1,13 @@
+source-exports	20	bh_cancel bh_client bh_close bh_close_fd bh_drain bh_failure bh_finish bh_head bh_io_ready bh_open bh_provider bh_read bh_release bh_request bh_set_notify bh_state bh_stats bh_step bh_token bh_write
+path	production	tools/http-package.tcl (Linux)
+localized-unit	17045636	6f1f0649f21cb8edd7fbda6e5592185a2046f107ee32e7e9163c18cf0e0f8784	20 global definitions
+surface-equals-abi	1	
+undefined-count	760
+undefined-botlish_event_post2	1
+undefined-rust_eh_personality	0
+undefined-___gxx_personality_v0	0
+undefined-__gxx_personality_v0	0
+undefined-SSL_CTX_new	1
+undefined-provider-identity	1
+link-rustc	ok	status	0	value	0 -90003 1 1 168 0 0	verdict	pass	personality	1 global 1 local	bytes	15508632
+link-system	ok	status	0	value	0 -90003 1 1 168 0 0	verdict	pass	personality	1 global 1 local	bytes	15256976

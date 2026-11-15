@@ -1,0 +1,21 @@
+elf-unlocalized        killed by ral-localized-surface, ral-localized-with_provider-rustc, ral-localized-with_provider-system, ral-localized-without_provider-rustc, ral-localized-without_provider-system
+elf-comdat-kept        killed by ral-localized-comdat
+macho-unlocalized      not run (not for this host, linux-x86_64: its edit applies)
+keep-everything        killed by ral-localized-surface, ral-localized-with_provider-rustc, ral-localized-with_provider-system, ral-localized-without_provider-rustc, ral-localized-without_provider-system
+require-ignored        killed by ral-require-missing-export
+check-lenient          killed by ral-check-refuses-raw
+fallback-localized     killed by ral-localized-surface, ral-localized-with_provider-rustc, ral-localized-with_provider-system
+bsd-index-ignored      killed by pn-index-bsd-forms, pn-index-bsd-symbols-checked, pn-index-llvm-darwin
+underscore-kept        killed by pn-index-bsd-forms, pn-index-bsd-symbols-checked, pn-index-llvm-darwin
+underscore-always      killed by pn-index-bsd-forms
+offset-unchecked       killed by pn-index-bsd-malformed
+pairs-unchecked        killed by pn-index-bsd-malformed
+strtab-unchecked       killed by pn-index-bsd-malformed
+block-freed-by-libc    killed by ral-localized-with_provider-rustc, ral-localized-with_provider-system, ral-localized-without_provider-rustc, ral-localized-without_provider-system
+weak-elf-unread        killed by pn-index-weak-definitions
+weak-macho-unread      killed by pn-index-weak-definitions
+weak-any-member        killed by pn-index-weak-definitions   (rerun with -only after the test gained an archive mixing weak and strong members; it SURVIVED the first run)
+install-weak-counted   killed by pn-index-weak-definitions
+install-all-weak       killed by pn-index-weak-definitions
+audit-weak-counted     killed by ral-pack-weak-beside-strong
+exit 0 (after the rerun)

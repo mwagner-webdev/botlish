@@ -1,0 +1,21 @@
+# branch-6.bot -- a 6-field fold, a third of its iterations an identity completion (tools/gen-width.tcl).
+import std::list
+
+struct S:
+    f0: int
+    f1: int
+    f2: int
+    f3: int
+    f4: int
+    f5: int
+
+fn f(n: int) -> int:
+    t = fold i from 0 to n with intermediate s S {f0: 0, f1: 0, f2: 0, f3: 0, f4: 0, f5: 0}:
+        if i.mod(3) == 0:
+            s
+        else:
+            S {f0: (s.f0 + i + 0).mod(1000), f1: (s.f1 + i + 1).mod(1000), f2: (s.f2 + i + 2).mod(1000), f3: (s.f3 + i + 3).mod(1000), f4: (s.f4 + i + 4).mod(1000), f5: (s.f5 + i + 5).mod(1000)}
+    t.f0 + t.f5
+
+n = 1000
+f(n)

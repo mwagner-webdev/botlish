@@ -53,6 +53,20 @@
 #                   selected implementation directly; an inject block is an
 #                   `if true:`), so nothing of them reaches C: no registry,
 #                   no lookup, no global context, no dispatch.
+#   coroutines      (C-COROUTINE-FRAMES-MILESTONE-1.md) a function that may
+#                   yield is a stackless state machine: its C function takes
+#                   a pointer to its *frame* (a struct of what survives its
+#                   suspensions: a resume point, its parameters, the values
+#                   live across a yield, the frame of the yielding call in
+#                   progress), dispatches on the resume point and returns
+#                   the internal status PREFIX_SUSPEND to suspend. A
+#                   construction is storage in the constructing function's
+#                   own frame (its C frame, or its persistent frame when it
+#                   may yield itself): a C struct holding the coroutine's
+#                   state, its cached result or error, the context pointers
+#                   its construction selected and its thunk's frame; the
+#                   handle is a pointer to it. No allocation, no stack per
+#                   coroutine, no scheduler, no runtime service.
 #
 # What the backend cannot translate correctly yet it reports as the
 # compile-time error C UNSUPPORTED, located at the construct: never a
@@ -126,6 +140,18 @@ namespace eval ccompile {
     # the program function) and of the pointer parameter carrying it (in
     # every function that requires it): ContextName.
     variable contextNames {}
+    # Coroutines (the Coroutines section): the coroutine kinds (one per
+    # construction's thunk block), the handle types (one per C
+    # representation of a handle: outward value and message), the handle
+    # type each yielding instance's yields reach, and the frame types
+    # (yielding functions' frames and kinds' storage structs) with what each
+    # holds by value.
+    variable coKinds {}
+    variable coHandles {}
+    variable yieldH {}
+    variable frames {}
+    # Thunk block -> its captured values (ThunkCaptures).
+    variable thunkCaptures {}
 }
 
 # ---------------------------------------------------------------------------
@@ -236,6 +262,16 @@ proc ccompile::Program {hirProgram name source} {
     variable fixedResults
     set active {}
     set fixedResults [dict create]
+    variable coKinds
+    variable coHandles
+    variable yieldH
+    variable frames
+    set coKinds [dict create]
+    set coHandles [dict create]
+    set yieldH [dict create]
+    set frames [dict create]
+    variable thunkCaptures
+    set thunkCaptures [dict create]
     # A program that failed context verification (a lenient HIR) has
     # context loads nothing proved are preceded by their installation: the C
     # of it is never generated (native lowering refuses to run it too). Its
@@ -272,6 +308,9 @@ proc ccompile::Program {hirProgram name source} {
                 catch {Signature $id}
             }
         }
+        # A frame that holds itself by value (a yielding call or a
+        # construction that recurses) has no C representation.
+        FrameCycles
     } finally {
         hir::specialize::forgetViews
         set hir $baseHir
@@ -339,7 +378,7 @@ proc ccompile::BlockResultType {e} {
     return [hir::type $baseHir $t]
 }
 proc ccompile::Precise {viewType baseType} {
-    if {[llength $viewType] == 1 && $viewType in {enum struct nstruct list} && [llength $baseType] > 1} {
+    if {[llength $viewType] == 1 && $viewType in {enum struct nstruct list coroutine} && [llength $baseType] > 1} {
         return $baseType
     }
     return $viewType
@@ -417,9 +456,15 @@ proc ccompile::StaticBindings {hir} {
     set result [dict create]
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] ne "block"} continue
+        set thunk [dict exists $hir coroutines thunks $e]
         foreach b [concat [dict get $node captures] [dict getdef $node staticRefs {}]] {
             set binding [dict get $hir bindings $b]
             if {[dict get $binding kind] ni {local}} continue
+            # A construction's thunk captures the construction's argument
+            # temporaries, which the construction copies into the
+            # coroutine's frame (Create): they are locals of the
+            # constructing code, top-level code included.
+            if {$thunk && [dict get $binding scope] eq [dict get $node scope]} continue
             if {[hir::aot::BoundBlock $hir $b] ne ""} continue
             if {[dict get $binding scope] eq $top || [hir::isModuleBinding $hir $b]} {
                 dict set result $b 1
@@ -484,6 +529,13 @@ proc ccompile::ReprOf {type r e} {
         struct {
             return [list agg [StructAggregate $type $e]]
         }
+        coroutine {
+            # A handle: a pointer to its coroutine's storage (Coroutines).
+            if {![hir::types::IsCoroutine $type]} {
+                Unsupported $e "a coroutine handle whose type is not known statically"
+            }
+            return [list co [HandleKey $type $e]]
+        }
     }
     Unsupported $e "a value of type [hir::types::show $type]"
 }
@@ -491,6 +543,12 @@ proc ccompile::ReprOf {type r e} {
 # The representation of a field or element of static TYPE: its own Range
 # is the type's (no expression narrows a stored field).
 proc ccompile::StorageRepr {type e} {
+    if {[hir::types::IsAffine $type]} {
+        # A handle inside a struct or a List would need the aggregate's drop
+        # and move discipline in C; a handle is a local, a parameter or a
+        # result here.
+        Unsupported $e "a coroutine handle held in a struct or a List ([hir::types::show $type])"
+    }
     return [ReprOf $type [hir::range::unknown] $e]
 }
 
@@ -506,8 +564,21 @@ proc ccompile::CType {repr} {
         unit { return ${prefix}_unit }
         enum { return [dict get $enums [lindex $repr 1]] }
         agg  { return [dict get $aggregates [lindex $repr 1] cname] }
+        co   {
+            variable coHandles
+            return "[dict get $coHandles [lindex $repr 1] cname] *"
+        }
     }
     error "ccompile: no C type for representation $repr"
+}
+
+# The C declarator of NAME with C type CTYPE: `int64_t n`, and for a
+# pointer type `T *` the conventional `T *n`.
+proc ccompile::Declarator {ctype name} {
+    if {[string index $ctype end] eq "*"} {
+        return "$ctype$name"
+    }
+    return "$ctype $name"
 }
 
 # A C expression of representation REPR with no meaning: what a join
@@ -526,6 +597,7 @@ proc ccompile::ZeroOf {repr} {
             Helper zero:$key
             return "[dict get $aggregates $key cname]_zero"
         }
+        co   { return "NULL" }
     }
 }
 
@@ -1121,6 +1193,887 @@ proc ccompile::ContextValue {fnVar e id} {
 }
 
 # ---------------------------------------------------------------------------
+# Coroutines (COROUTINES.md; C-COROUTINE-FRAMES-MILESTONE-1.md)
+#
+# A Botlish coroutine is an eagerly started, affine resumable computation
+# whose yields may happen at any depth of its synchronous call stack. The
+# front end proved everything static about it (hir/coroutines.tcl): which
+# functions may yield (mayYield), the one protocol of each coroutine, that
+# every yielding call graph is entered through a construction, that every
+# handle has one owner (hir/affine.tcl), and that a segment hands out only
+# unrestricted values (AffineProtocol). What is left is said in C as
+# stackless state machines over explicit frames:
+#
+#   yielding function  an instance whose block may yield (or a thunk) is a C
+#                 function over its *frame* (PREFIX_N_name_frame): a resume
+#                 point, its parameters (the caller writes them into the
+#                 frame), every value that lives across one of its
+#                 suspensions (Persist), and a union of the frames of its
+#                 yielding calls (one is in progress at a time). It starts
+#                 with a dispatch on the resume point, takes its context
+#                 pointers as every function does, a pointer to the
+#                 coroutine's outward slot (yslot) and, for a struct
+#                 protocol, to its message slot (mslot), and returns
+#                 PREFIX_SUSPEND to suspend: never an error, never a
+#                 handler's, never a run's.
+#   yield V       writes V to *yslot, records its resume point and returns
+#                 PREFIX_SUSPEND; resumed, it continues at its label, the
+#                 message (*mslot) its value.
+#   yielding call writes the arguments into the callee's frame in the
+#                 union, resets its resume point, then calls it at a resume
+#                 label of its own: suspended, the caller records that label
+#                 and suspends too; resumed, it calls the callee again,
+#                 which continues where it stopped.
+#   kind          each construction's thunk is a kind: its storage struct
+#                 PREFIX_coK holds the handle's target (PREFIX_cohH: state,
+#                 cached failure, the outward value, the message), the
+#                 context pointers the construction's requirement names --
+#                 its providers are the construction's, never a resumer's --
+#                 and the thunk's frame (its captured arguments, the root's
+#                 frame).
+#   construction  storage in the constructing function's own frame (its C
+#                 frame, or its persistent frame when it may yield), zeroed
+#                 and filled in; the handle is a pointer to its target. A
+#                 function that constructs a coroutine never returns a
+#                 handle (Function), so no handle outlives its storage.
+#   resume        PREFIX_cohH_resume: a terminal coroutine answers its
+#                 cached result or error again and runs nothing; a
+#                 suspended one runs its next segment (a switch on its kind
+#                 when several kinds share the handle type: a direct call
+#                 of each).
+#   release       nothing: no frame of the supported subset owns anything
+#                 to clean up (affine state other than handles, and
+#                 resources, are C UNSUPPORTED), and the affine analysis
+#                 guarantees nothing reaches a released handle.
+#
+# No allocation, no stack per coroutine, no thread, no scheduler, no
+# runtime service: a coroutine program needs nothing a coroutine-free one
+# does not.
+
+# 1 if block BLOCK is a coroutine construction's thunk.
+proc ccompile::IsThunk {block} {
+    variable baseHir
+    return [dict exists $baseHir coroutines thunks $block]
+}
+
+# 1 if instance ID is compiled as a state machine: its block may yield, or
+# it is a thunk (a coroutine's entry, always resumable).
+proc ccompile::IsYieldingInstance {id} {
+    variable spec
+    variable baseHir
+    set block [dict get [hir::specialize::instance $spec $id] block]
+    if {$block eq "program"} {
+        return 0
+    }
+    return [expr {[IsThunk $block] || [hir::coroutines::MayYield $baseHir $block]}]
+}
+
+# The C name of parameter binding B (a C variable, or a frame member).
+proc ccompile::ParamName {b} {
+    variable baseHir
+    return p_[Sanitize [dict get [hir::binding $baseHir $b] name]]_[string range $b 1 end]
+}
+
+# The frame type of yielding instance ID.
+proc ccompile::FrameName {id} {
+    return [lindex [Params $id] 0]_frame
+}
+
+# The instance of thunk THUNK (its generic one: a thunk is a value).
+proc ccompile::ThunkInstance {thunk} {
+    variable spec
+    variable baseHir
+    set id [hir::specialize::genericInstance $baseHir $spec $thunk]
+    if {$id eq ""} {
+        Unsupported $thunk "a coroutine construction the specialization did not analyze"
+    }
+    return $id
+}
+
+# What thunk THUNK says in a comment: its root's name and where it is.
+proc ccompile::ThunkTitle {thunk} {
+    variable baseHir
+    set root [dict get $baseHir coroutines thunks $thunk root]
+    set name [if {$root eq ""} {string cat "a coroutine"} else {hir::aot::BlockName $baseHir $root}]
+    if {$name eq ""} {
+        set name "a function"
+    }
+    # (The file's name only: no host path in generated C.)
+    set where [hir::originLocation $baseHir [hir::get $baseHir $thunk origin]]
+    regsub {^.*[/\\]} $where "" where
+    return "$name, constructed at $where"
+}
+
+# Thunk THUNK's captured values (functions it captures are called
+# directly): {BINDING MEMBER REPR} each, the frame member a construction
+# copies the value into. An Int is carried as an int64_t when the range
+# analysis proved every use in the thunk fits (the uses' Ranges join every
+# construction's value).
+proc ccompile::ThunkCaptures {thunk} {
+    variable thunkCaptures
+    variable baseHir
+    variable ranges
+    if {[dict exists $thunkCaptures $thunk]} {
+        return [dict get $thunkCaptures $thunk]
+    }
+    set tid [ThunkInstance $thunk]
+    # Every reference of each captured binding in the thunk, and its Range.
+    set rangesOf [dict create]
+    set work [hir::get $baseHir $thunk body]
+    while {$work ne ""} {
+        set work [lassign $work e]
+        set node [dict get $baseHir exprs $e]
+        if {[dict get $node kind] eq "ref" && [dict get $node binding] ne ""} {
+            dict lappend rangesOf [dict get $node binding] [hir::range::of $ranges $tid $e]
+        }
+        if {[dict get $node kind] ne "block"} {
+            lappend work {*}[hir::children $baseHir $e]
+        }
+    }
+    set result {}
+    foreach b [hir::get $baseHir $thunk captures] {
+        if {[hir::aot::BoundBlock $baseHir $b] ne ""} continue
+        set range [hir::range::unknown]
+        if {[dict exists $rangesOf $b]} {
+            set range never
+            foreach r [dict get $rangesOf $b] {
+                set range [hir::range::join $range $r]
+            }
+        }
+        set member c_[Sanitize [dict get [hir::binding $baseHir $b] name]]_[string range $b 1 end]
+        lappend result [list $b $member [ReprOf [hir::bindingType $baseHir $b] $range $thunk]]
+    }
+    dict set thunkCaptures $thunk $result
+    return $result
+}
+
+# The handle type key of coroutine type TYPE: {OUTWARD-REPR MESSAGE-REPR}
+# (unit for the zero-message protocol), registered with its C struct name.
+proc ccompile::HandleKey {type e} {
+    variable coHandles
+    variable prefix
+    set protocol [hir::types::CoroutineResume $type]
+    if {$protocol eq "any"} {
+        Unsupported $e "a coroutine whose resume protocol is not known statically"
+    }
+    set out [StorageRepr [hir::types::CoroutineOutward $type] $e]
+    set msg [if {$protocol eq "unit"} {string cat unit} else {StorageRepr $protocol $e}]
+    set key [list $out $msg]
+    if {![dict exists $coHandles $key]} {
+        set index [expr {[dict size $coHandles] + 1}]
+        dict set coHandles $key [dict create cname ${prefix}_coh$index out $out msg $msg kinds {}]
+    }
+    return $key
+}
+
+# {OUTWARD-REPR MESSAGE-REPR} of handle type H.
+proc ccompile::HandleSlots {h} {
+    return $h
+}
+
+# Records that the yields of instance ID reach coroutines of handle type H
+# (E: the call or construction that says so). A yielding instance has one
+# outward slot and one message slot type: two coroutines of different C
+# representations reaching it are refused.
+proc ccompile::SetYieldH {id h e} {
+    variable yieldH
+    if {[dict exists $yieldH $id]} {
+        if {[dict get $yieldH $id] ne $h} {
+            Unsupported $e "a function that may yield reached by coroutines whose outward values or messages have different C representations"
+        }
+        return
+    }
+    dict set yieldH $id $h
+}
+
+# The coroutine kind of thunk THUNK, constructed with handle type H at E:
+# registered (its storage struct, its tag among H's kinds) and its thunk
+# compiled. Registered before the thunk is compiled, so a construction
+# reached again while it compiles finds it (FrameCycles judges a frame that
+# would hold itself).
+proc ccompile::CoKind {thunk h e} {
+    variable coKinds
+    variable coHandles
+    variable referenced
+    variable prefix
+    variable frames
+    if {[dict exists $coKinds $thunk]} {
+        return [dict get $coKinds $thunk]
+    }
+    set tid [ThunkInstance $thunk]
+    SetYieldH $tid $h $e
+    set index [expr {[dict size $coKinds] + 1}]
+    set cname ${prefix}_co$index
+    set tag [llength [dict get $coHandles $h kinds]]
+    dict set coHandles $h kinds [concat [dict get $coHandles $h kinds] [list $thunk]]
+    set contexts [ContextRequirement $thunk]
+    set kind [dict create cname $cname thunk $thunk instance $tid h $h tag $tag \
+        contexts $contexts captures [ThunkCaptures $thunk]]
+    dict set coKinds $thunk $kind
+    set fields [list [list [dict get $coHandles $h cname] head]]
+    foreach cid $contexts {
+        lappend fields [list "[CType [ContextRepr $cid $thunk]] *" [ContextName $cid]]
+    }
+    lappend fields [list [FrameName $tid] body]
+    dict set frames $cname [dict create role kind title "the storage of a coroutine of [ThunkTitle $thunk]" \
+        fields $fields union {} deps [list [list [FrameName $tid] $e]] persistent {}]
+    dict set referenced $tid 1
+    Signature $tid
+    return $kind
+}
+
+# `coroutine#create(THUNK)` (call E, NODE): the coroutine's storage, an
+# object of the constructing function's frame, zeroed (a fresh coroutine is
+# suspended before its start, resume point 0) and given the construction's
+# context pointers and captured values. The operand is the handle: a
+# pointer to the storage's target.
+proc ccompile::Create {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable statics
+    set thunk [lindex [dict get $node args] 0]
+    if {[Kind $thunk] ne "block" || ![IsThunk $thunk]} {
+        Unsupported $e "a coroutine construction whose thunk is computed"
+    }
+    set h [HandleKey [TypeOf $e] $e]
+    set kind [CoKind $thunk $h $e]
+    set cname [dict get $kind cname]
+    set co [Temp fn co]
+    Emit fn "@@S@@[Declarator $cname $co];"
+    dict lappend fn constructs [list $co $cname $e]
+    # (A compound literal of the universal zero initializer: no data object,
+    # and the compiler zeroes it in place.)
+    Emit fn "$co = ($cname)\{0\};"
+    variable coHandles
+    Emit fn "@@KIND:[dict get $coHandles $h cname]@@$co.head.kind = [dict get $kind tag];"
+    foreach cid [dict get $kind contexts] pointer [ContextArgs fn $thunk $e] {
+        Emit fn "$co.[ContextName $cid] = $pointer;"
+    }
+    foreach entry [dict get $kind captures] {
+        lassign $entry b member repr
+        if {[dict exists $fn locals $b]} {
+            set op [dict get $fn locals $b]
+        } elseif {[dict exists $statics $b]} {
+            set op [dict get $statics $b]
+        } else {
+            error "ccompile: internal error: construction $e captures [dict get [hir::binding [set ::ccompile::baseHir] $b] name], which the function compiling it has not placed"
+        }
+        Emit fn "$co.body.$member = [Want fn $op $repr];"
+    }
+    return [list [list co $h] "(&$co.head)"]
+}
+
+# `coroutine#start(H)` and `coroutine#resume(H, M...)` (call E, NODE): the
+# message into the handle's slot, then its next segment; the segment's
+# error is the call's, as for any call (its handlers, its function's).
+proc ccompile::Resume {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable coHandles
+    set ops [Operands fn $node]
+    if {$ops eq ""} {
+        return [list never ""]
+    }
+    set handle [lindex $ops 0]
+    if {[lindex $handle 0 0] ne "co"} {
+        error "ccompile: internal error: the resumed value at $e is no coroutine handle"
+    }
+    set h [lindex $handle 0 1]
+    lassign [HandleSlots $h] outRepr msgRepr
+    if {[llength $ops] > 1 && $msgRepr ne "unit"} {
+        Emit fn "[lindex $handle 1]->message = [Want fn [lindex $ops 1] $msgRepr];"
+    }
+    set t [Temp fn r]
+    Decl fn [CType $outRepr] $t
+    Checked fn "[dict get $coHandles $h cname]_resume([lindex $handle 1], &$t)"
+    return [Narrowed fn $e [list $outRepr $t]]
+}
+
+# `coroutine#yield(V)` (call E, NODE) in a yielding function: V to the
+# outward slot, the resume point recorded, PREFIX_SUSPEND returned; resumed
+# at its label, its value is the message (copied: a later yield replaces the
+# slot's).
+proc ccompile::Yield {fnVar e node want} {
+    upvar 1 $fnVar fn
+    variable prefix
+    if {![dict get $fn yielding]} {
+        error "ccompile: internal error: yield $e outside a function that may yield"
+    }
+    set ops [Operands fn $node]
+    if {$ops eq ""} {
+        return [list never ""]
+    }
+    lassign [HandleSlots [dict get $fn h]] outRepr msgRepr
+    dict incr fn resumes
+    set k [dict get $fn resumes]
+    Emit fn "*yslot = [Want fn [lindex $ops 0] $outRepr];"
+    Emit fn "fr->resume = $k;"
+    Emit fn "return ${prefix}_SUSPEND;"
+    Indent fn -1
+    Emit fn "@@R@@resume_$k:;"
+    Indent fn 1
+    if {$msgRepr eq "unit" || $want eq "discard"} {
+        return [list unit 0]
+    }
+    set m [Temp fn msg]
+    Decl fn [CType $msgRepr] $m "*mslot"
+    return [list $msgRepr $m]
+}
+
+# The call E (NODE) of yielding instance CALLEE from a yielding function:
+# the arguments into the callee's frame (a member of the caller's frame's
+# union: one yielding call is in progress at a time), its resume point
+# reset, then the call at a resume label of its own. Suspended, the caller
+# suspends at that label; resumed there, it calls the callee again, which
+# continues where it stopped.
+proc ccompile::YieldingCall {fnVar e node callee} {
+    upvar 1 $fnVar fn
+    variable spec
+    variable baseHir
+    variable prefix
+    variable referenced
+    if {![dict get $fn yielding]} {
+        error "ccompile: internal error: call $e of a function that may yield, outside a coroutine"
+    }
+    set h [dict get $fn h]
+    SetYieldH $callee $h $e
+    lassign [Signature $callee] cname paramReprs resultRepr
+    dict set referenced $callee 1
+    set calleeBlock [dict get [hir::specialize::instance $spec $callee] block]
+    set args {}
+    foreach arg [dict get $node args] repr $paramReprs {
+        set op [Expr fn $arg value]
+        if {[lindex $op 0] eq "never"} {
+            return $op
+        }
+        lappend args [list $op $repr]
+    }
+    dict incr fn resumes
+    set k [dict get $fn resumes]
+    set member c$k
+    dict set fn subs $member [list [FrameName $callee] $e]
+    set sub "fr->sub.$member"
+    foreach b [hir::get $baseHir $calleeBlock params] pair $args {
+        lassign $pair op repr
+        Emit fn "$sub.[ParamName $b] = [Want fn $op $repr];"
+    }
+    Emit fn "$sub.resume = 0;"
+    Indent fn -1
+    Emit fn "@@R@@resume_$k:;"
+    Indent fn 1
+    set t [Temp fn r]
+    Decl fn [CType $resultRepr] $t
+    set words [list "&$sub" {*}[ContextArgs fn $calleeBlock $e] yslot]
+    if {[lindex [HandleSlots $h] 1] ne "unit"} {
+        lappend words mslot
+    }
+    lappend words "&$t"
+    set st [Temp fn st]
+    Decl fn ${prefix}_status $st "$cname\([join $words {, }])"
+    Emit fn "if ($st == ${prefix}_SUSPEND) \{"
+    Emit fn "    fr->resume = $k;"
+    Emit fn "    return ${prefix}_SUSPEND;"
+    Emit fn "\}"
+    if {[dict get [hir::specialize::instance $spec $callee] result] eq "never"} {
+        Fail fn $st
+        return [list never ""]
+    }
+    Emit fn "if ($st != ${prefix}_OK) \{"
+    Indent fn 1
+    Fail fn $st
+    Indent fn -1
+    Emit fn "\}"
+    return [list $resultRepr $t]
+}
+
+# The dispatch a yielding function starts with: to the label of the resume
+# point its frame records (0: the start).
+proc ccompile::Dispatch {n} {
+    if {$n == 0} {
+        return {}
+    }
+    set out [list "    switch (fr->resume) \{"]
+    for {set k 1} {$k <= $n} {incr k} {
+        lappend out "    case $k:" "        goto resume_$k;"
+    }
+    lappend out "    default:" "        break;" "    \}"
+    return $out
+}
+
+# The smallest unsigned C type that holds resume points 0..N.
+proc ccompile::ResumeType {n} {
+    if {$n <= 255} {
+        return "unsigned char"
+    }
+    if {$n <= 65535} {
+        return "unsigned short"
+    }
+    return "unsigned int"
+}
+
+# Registers the frame type of yielding instance ID (C function CNAME, block
+# BLOCK; PARAMS its parameters as PARAMREPRS; FIELDS Persist's persistent
+# variables; FN the compiled function's state: its resume points, its
+# yielding calls' frames, its constructions' storage).
+proc ccompile::FrameType {id cname block paramReprs params fields fnState} {
+    variable frames
+    variable baseHir
+    set out [list [list [ResumeType [dict get $fnState resumes]] resume]]
+    set persistent {}
+    if {[IsThunk $block]} {
+        foreach entry [ThunkCaptures $block] {
+            lassign $entry b member repr
+            lappend out [list [CType $repr] $member]
+        }
+        set title "the coroutine of [ThunkTitle $block]"
+    } else {
+        set title "[hir::aot::BlockName $baseHir $block] ($id)"
+    }
+    foreach b $params repr $paramReprs {
+        lappend out [list [CType $repr] [ParamName $b]]
+    }
+    set deps {}
+    set storage [dict create]
+    foreach entry [dict get $fnState constructs] {
+        lassign $entry var kindName e
+        dict set storage $var [list $kindName $e]
+    }
+    foreach field $fields {
+        lassign $field ctype name
+        lappend out $field
+        if {[dict exists $storage $name]} {
+            lappend deps [dict get $storage $name]
+        } else {
+            lappend persistent $name
+        }
+    }
+    set union {}
+    dict for {member entry} [dict get $fnState subs] {
+        lassign $entry frame e
+        lappend union [list $frame $member]
+        lappend deps [list $frame $e]
+    }
+    dict set frames ${cname}_frame [dict create role frame title $title fields $out union $union \
+        deps $deps persistent $persistent]
+}
+
+# Every frame type that would hold itself by value -- a yielding function
+# that calls itself (directly or through other yielding functions or
+# constructions whose storage its frame holds) -- is C UNSUPPORTED at the
+# call or construction that closes the cycle: its suspended calls need
+# storage no fixed frame has.
+proc ccompile::FrameCycles {} {
+    variable frames
+    variable diagnostics
+    set state [dict create]
+    set reported [dict create]
+    foreach name [lsort [dict keys $frames]] {
+        if {[dict exists $state $name]} continue
+        set stack [list [list $name 0]]
+        dict set state $name open
+        while {$stack ne ""} {
+            lassign [lindex $stack end] node k
+            set deps [dict getdef $frames $node deps {}]
+            if {$k >= [llength $deps]} {
+                dict set state $node done
+                set stack [lrange $stack 0 end-1]
+                continue
+            }
+            lset stack end 1 [expr {$k + 1}]
+            lassign [lindex $deps $k] dep e
+            if {![dict exists $frames $dep]} continue
+            switch -- [dict getdef $state $dep ""] {
+                open {
+                    if {![dict exists $reported $e]} {
+                        dict set reported $e 1
+                        if {[catch {Unsupported $e "a coroutine whose suspended calls recurse (a function that may yield, called or constructed again from its own suspended call chain, needs a frame that holds itself: unbounded storage)"} message]} {
+                            lappend diagnostics [dict create message $message errorcode {C UNSUPPORTED}]
+                        }
+                    }
+                }
+                done {}
+                default {
+                    dict set state $dep open
+                    lappend stack [list $dep 0]
+                }
+            }
+        }
+    }
+}
+
+# The frame types in definition order: each after every type it holds by
+# value.
+proc ccompile::FrameOrder {} {
+    variable frames
+    set order {}
+    set seen [dict create]
+    foreach name [dict keys $frames] {
+        FrameVisit $name seen order
+    }
+    return $order
+}
+proc ccompile::FrameVisit {name seenVar orderVar} {
+    upvar 1 $seenVar seen $orderVar order
+    variable frames
+    if {[dict exists $seen $name] || ![dict exists $frames $name]} {
+        return
+    }
+    dict set seen $name 1
+    foreach dep [dict get $frames $name deps] {
+        FrameVisit [lindex $dep 0] seen order
+    }
+    lappend order $name
+}
+
+# A non-yielding function's LINES with Decl's marks dropped and its
+# constructions' storage (@@S@@) moved to its top: {LINES HOISTED}.
+proc ccompile::Unmark {lines} {
+    set hoisted {}
+    set out {}
+    foreach line $lines {
+        if {[regexp {^\s*@@S@@(.*);$} $line -> decl]} {
+            lappend hoisted $decl
+            continue
+        }
+        if {[string first @@D@@ $line] >= 0} {
+            set line [string map {@@D@@ ""} $line]
+        }
+        lappend out $line
+    }
+    return [list $out $hoisted]
+}
+
+# The frame pass of a yielding function's LINES -- every declaration marked
+# by Decl (@@D@@), every resume label (@@R@@), every construction's storage
+# (@@S@@) -- deciding what survives a suspension:
+#
+# * A variable declared at line D, whose scope (the rest of its C block)
+#   holds a resume label L after D, is *persistent* when a reference to it
+#   is reachable from L: after L in its scope, or anywhere in a loop of its
+#   scope that encloses L (the loop's next iteration runs from its start).
+#   A persistent variable is a frame field: its declaration becomes an
+#   assignment of the field, every use reads the field.
+# * A variable whose scope holds a resume label but no reference reachable
+#   from one is declared at the function's top (an assignment where it was
+#   declared), so the dispatch's jump to the label skips no declaration.
+# * Every other declaration stays where it is.
+# * A construction's storage is always a frame field: the handle that
+#   points to it may live in any C block, and across any suspension.
+#
+# Nothing else is moved: a value's lifetime that ends before a suspension
+# never costs frame space. Returns {LINES FIELDS HOISTED}: FIELDS {CTYPE
+# NAME} in declaration order, HOISTED the top's declarations.
+proc ccompile::Persist {lines} {
+    set n [llength $lines]
+    set blocks {}
+    set stack {}
+    set innermost {}
+    set labels {}
+    set decls {}
+    set refs [dict create]
+    for {set i 0} {$i < $n} {incr i} {
+        set line [lindex $lines $i]
+        set text [string trim $line]
+        if {[string index $text 0] eq "\}"} {
+            set k [lindex $stack end]
+            set stack [lrange $stack 0 end-1]
+            lset blocks $k 1 $i
+        }
+        lappend innermost [if {$stack eq ""} {string cat -1} else {lindex $stack end}]
+        if {[string index $text end] eq "\{"} {
+            lappend stack [llength $blocks]
+            lappend blocks [list $i $n [expr {$text eq "for (;;) \{"}]]
+        }
+        if {[string match @@R@@* $text]} {
+            lappend labels $i
+            continue
+        }
+        if {[regexp {^(\s*)@@([DS])@@(.*);$} $line -> indent mark decl]} {
+            # TYPE NAME, or TYPE NAME = INIT (Declarator's TYPE *NAME for a
+            # pointer): no type holds " = ".
+            set at [string first " = " $decl]
+            if {$at < 0} {
+                set left $decl
+                set init ""
+            } else {
+                set left [string range $decl 0 [expr {$at - 1}]]
+                set init [string range $decl [expr {$at + 3}] end]
+            }
+            if {![regexp {^(.*[^A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)$} $left -> ctype name]} {
+                error "ccompile: internal error: unreadable declaration \"$decl\""
+            }
+            lappend decls [dict create line $i indent $indent ctype [string trimright $ctype] name $name \
+                init $init storage [expr {$mark eq "S"}]]
+            foreach word [lsort -unique [regexp -all -inline {[A-Za-z_][A-Za-z0-9_]*} $init]] {
+                dict lappend refs $word $i
+            }
+            continue
+        }
+        if {[regexp {^\(void\)[A-Za-z_][A-Za-z0-9_]*;$} $text]} continue
+        foreach word [lsort -unique [regexp -all -inline {[A-Za-z_][A-Za-z0-9_]*} $text]] {
+            dict lappend refs $word $i
+        }
+    }
+    set loops [lmap b $blocks {if {[lindex $b 2]} {set b} else continue}]
+    set persistent [dict create]
+    set hoist [dict create]
+    foreach d $decls {
+        set name [dict get $d name]
+        set at [dict get $d line]
+        if {[dict get $d storage]} {
+            dict set persistent $name 1
+            continue
+        }
+        set owner [lindex $innermost $at]
+        set end [if {$owner < 0} {set n} else {lindex $blocks $owner 1}]
+        set within [lmap l $labels {if {$l > $at && $l < $end} {set l} else continue}]
+        if {$within eq ""} continue
+        set uses [dict getdef $refs $name {}]
+        set live 0
+        foreach l $within {
+            foreach r $uses {
+                if {$r > $l && $r < $end} {
+                    set live 1
+                    break
+                }
+            }
+            if {$live} break
+            foreach loop $loops {
+                lassign $loop s e
+                if {$s > $at && $s < $l && $l < $e && $e <= $end} {
+                    foreach r $uses {
+                        if {$r >= $s && $r <= $e} {
+                            set live 1
+                            break
+                        }
+                    }
+                }
+                if {$live} break
+            }
+            if {$live} break
+        }
+        if {$live} {
+            dict set persistent $name 1
+        } else {
+            dict set hoist $name 1
+        }
+    }
+    # Every use of a persistent variable reads the frame's field.
+    set rewrite [dict keys $persistent]
+    set out {}
+    set fields {}
+    set hoisted {}
+    set declAt [dict create]
+    foreach d $decls {
+        dict set declAt [dict get $d line] $d
+    }
+    for {set i 0} {$i < $n} {incr i} {
+        set line [lindex $lines $i]
+        if {[dict exists $declAt $i]} {
+            set d [dict get $declAt $i]
+            set name [dict get $d name]
+            set ctype [dict get $d ctype]
+            set init [Fields [dict get $d init] $rewrite]
+            set indent [dict get $d indent]
+            if {[dict exists $persistent $name]} {
+                lappend fields [list $ctype $name]
+                if {$init ne ""} {
+                    lappend out "${indent}fr->$name = $init;"
+                }
+            } elseif {[dict exists $hoist $name]} {
+                lappend hoisted [Declarator $ctype $name]
+                if {$init ne ""} {
+                    lappend out "${indent}$name = $init;"
+                }
+            } else {
+                set text [Declarator $ctype $name]
+                if {$init ne ""} {
+                    append text " = $init"
+                }
+                lappend out "${indent}$text;"
+            }
+            continue
+        }
+        if {[string first @@R@@ $line] >= 0} {
+            set line [string map {@@R@@ ""} $line]
+        }
+        lappend out [Fields $line $rewrite]
+    }
+    return [list $out $fields $hoisted]
+}
+
+# LINE with every use of a variable of NAMES read from the frame (fr->NAME).
+proc ccompile::Fields {line names} {
+    if {$names eq "" || $line eq ""} {
+        return $line
+    }
+    foreach word [lsort -unique [regexp -all -inline {[A-Za-z_][A-Za-z0-9_]*} $line]] {
+        if {$word in $names} {
+            regsub -all "\\m$word\\M" $line "fr->$word" line
+        }
+    }
+    return $line
+}
+
+# The C text of the coroutine types (PREFIX.h): each handle type's target,
+# then every frame and storage type, each after what it holds.
+proc ccompile::CoroutineTypes {} {
+    variable coHandles
+    variable frames
+    variable prefix
+    set lines {}
+    if {[dict size $coHandles] == 0} {
+        return $lines
+    }
+    lappend lines "" "/* Coroutines (C-COROUTINE-FRAMES-MILESTONE-1.md): each type below is a" \
+        " * fixed-size frame; a coroutine's storage is an object of the function" \
+        " * that constructs it, so a run allocates nothing. */"
+    dict for {key info} $coHandles {
+        lassign $key out msg
+        lappend lines "" "/* The target of a coroutine handle: its state, its cached failure, the" \
+            " * value its last segment ended with[expr {$msg eq "unit" ? "" : " and the message it is resumed with"}]. */" \
+            "typedef struct [dict get $info cname] \{" "    unsigned char state;"
+        if {[llength [dict get $info kinds]] > 1} {
+            lappend lines "    unsigned char kind;"
+        }
+        lappend lines "    ${prefix}_status failure;" "    [Declarator [CType $out] value];"
+        if {$msg ne "unit"} {
+            lappend lines "    [Declarator [CType $msg] message];"
+        }
+        lappend lines "\} [dict get $info cname];"
+    }
+    foreach name [FrameOrder] {
+        set frame [dict get $frames $name]
+        if {[dict get $frame role] eq "kind"} {
+            lappend lines "" "/* [string toupper [dict get $frame title] 0 0]: a fresh one is all zero (suspended before its start). */"
+        } else {
+            lappend lines "" "/* The frame of [dict get $frame title]: what survives its suspensions. */"
+        }
+        lappend lines "typedef struct $name \{"
+        foreach field [dict get $frame fields] {
+            lassign $field ctype member
+            lappend lines "    [Declarator $ctype $member];"
+        }
+        if {[dict get $frame union] ne ""} {
+            lappend lines "    union \{"
+            foreach entry [dict get $frame union] {
+                lassign $entry ctype member
+                lappend lines "        [Declarator $ctype $member];"
+            }
+            lappend lines "    \} sub;"
+        }
+        lappend lines "\} $name;"
+    }
+    return $lines
+}
+
+# The C text of the coroutine operations (PREFIX.c): the states, the
+# suspension status, each kind's zero storage and segment function, each
+# handle type's resume function. {DECLARATIONS PROTOTYPES DEFINITIONS}.
+proc ccompile::CoroutineCode {} {
+    variable coHandles
+    variable coKinds
+    variable signatures
+    variable prefix
+    set p $prefix
+    if {[dict size $coHandles] == 0} {
+        return [list {} {} {}]
+    }
+    set decls [list "" \
+        "/* A coroutine's state (its handle target's), and the status a function" \
+        " * that may yield returns when it suspends: never an error, never a run's. */" \
+        "#define ${p}_CO_SUSPENDED 0" "#define ${p}_CO_COMPLETED 1" "#define ${p}_CO_FAILED 2" \
+        "#define ${p}_SUSPEND (-1)"]
+    set protos {}
+    set defs {}
+    dict for {thunk kind} $coKinds {
+        set cname [dict get $kind cname]
+        set h [dict get $kind h]
+        lassign [HandleSlots $h] outRepr msgRepr
+        lassign [dict get $signatures [dict get $kind instance]] tname tparams tresult
+        set head "static ${p}_status ${cname}_step($cname *co)"
+        lappend protos "$head;"
+        set words [list "&co->body"]
+        foreach cid [dict get $kind contexts] {
+            lappend words "co->[ContextName $cid]"
+        }
+        lappend words "&co->head.value"
+        if {$msgRepr ne "unit"} {
+            lappend words "&co->head.message"
+        }
+        lappend words "&r"
+        set fn [dict create lines {} indent 1]
+        set body [list "/* Runs the next segment of a coroutine of [ThunkTitle $thunk]. */" $head "\{" \
+            "    [Declarator [CType $tresult] r];" \
+            "    ${p}_status st = $tname\([join $words {, }]);"]
+        set root [dict get [hir::specialize::instance [set ::ccompile::spec] [dict get $kind instance]] result]
+        if {$root eq "never"} {
+            lappend body "    (void)r;"
+        } else {
+            lappend body "    if (st == ${p}_OK) \{" \
+                "        co->head.value = [Want fn [list $tresult r] $outRepr];" "    \}"
+        }
+        lappend body "    return st;" "\}"
+        lappend defs "" [join $body \n]
+    }
+    dict for {key info} $coHandles {
+        set cname [dict get $info cname]
+        lassign $key outRepr msgRepr
+        set head "static ${p}_status ${cname}_resume($cname *co, [Declarator [CType $outRepr] *out])"
+        lappend protos "$head;"
+        set kinds [dict get $info kinds]
+        set body [list "/* Runs the next segment of the coroutine CO points to, or answers again" \
+            " * the result or error it ended with, running nothing. */" $head "\{" "    ${p}_status st;" \
+            "    if (co->state == ${p}_CO_COMPLETED) \{" "        *out = co->value;" "        return ${p}_OK;" "    \}" \
+            "    if (co->state == ${p}_CO_FAILED) \{" "        return co->failure;" "    \}"]
+        if {[llength $kinds] == 1} {
+            set kc [dict get $coKinds [lindex $kinds 0] cname]
+            lappend body "    st = ${kc}_step(($kc *)co);"
+        } else {
+            lappend body "    switch (co->kind) \{"
+            set k 0
+            foreach thunk $kinds {
+                set kc [dict get $coKinds $thunk cname]
+                if {$k == [llength $kinds] - 1} {
+                    lappend body "    default:"
+                } else {
+                    lappend body "    case $k:"
+                }
+                lappend body "        st = ${kc}_step(($kc *)co);" "        break;"
+                incr k
+            }
+            lappend body "    \}"
+        }
+        lappend body "    if (st == ${p}_SUSPEND) \{" "        *out = co->value;" "        return ${p}_OK;" "    \}" \
+            "    if (st != ${p}_OK) \{" "        co->state = ${p}_CO_FAILED;" "        co->failure = st;" "        return st;" "    \}" \
+            "    co->state = ${p}_CO_COMPLETED;" "    *out = co->value;" "    return ${p}_OK;" "\}"
+        lappend defs "" [join $body \n]
+    }
+    return [list $decls $protos $defs]
+}
+
+# TEXT (a function's C) with each construction's kind tag (@@KIND:H@@) kept
+# where several kinds share the handle type H (its resume switches on the
+# tag), and dropped where one kind has it alone.
+proc ccompile::KindTags {text} {
+    variable coHandles
+    if {[string first @@KIND: $text] < 0} {
+        return $text
+    }
+    set shared [dict create]
+    dict for {key info} $coHandles {
+        dict set shared [dict get $info cname] [expr {[llength [dict get $info kinds]] > 1}]
+    }
+    set out {}
+    foreach line [split $text \n] {
+        if {[regexp {^(\s*)@@KIND:([A-Za-z0-9_]+)@@(.*)$} $line -> indent h rest]} {
+            if {![dict get $shared $h]} continue
+            set line "$indent$rest"
+        }
+        lappend out $line
+    }
+    return [join $out \n]
+}
+
+# ---------------------------------------------------------------------------
 # Instances and their C signatures
 
 # {NAME PARAM-REPRS} of instance ID's C function: its parameters carried as
@@ -1135,6 +2088,12 @@ proc ccompile::Params {id} {
     set block [dict get $instance block]
     if {$block eq "program"} {
         return [list ${prefix}_program {}]
+    }
+    if {[IsThunk $block]} {
+        # A construction's thunk: the coroutine's entry, run only through
+        # its kind (Coroutines). It has no parameters; what it captures is
+        # its frame's.
+        return [list ${prefix}_[string range $id 1 end]_coroutine {}]
     }
     if {![dict exists [dict get $spec closed] $id]} {
         Unsupported $block "a function whose calls are not all direct (a function used as a value)"
@@ -1213,7 +2172,12 @@ proc ccompile::Signature {id} {
     return [dict get $signatures $id]
 }
 
-# The C function of instance ID (its text), compiling its body.
+# The C function of instance ID (its text), compiling its body. An instance
+# that may yield (its block may yield, or it is a construction's thunk:
+# IsYieldingInstance) is a state machine over its frame (Coroutines): its
+# parameters arrive in the frame, the values that live across a suspension
+# are frame fields (Persist), and its body starts with a dispatch on the
+# frame's resume point.
 proc ccompile::Function {id} {
     variable spec
     variable baseHir
@@ -1223,14 +2187,25 @@ proc ccompile::Function {id} {
     variable active
     variable fixedResults
     variable signatures
+    variable yieldH
     set instance [hir::specialize::instance $spec $id]
     set block [dict get $instance block]
     lassign [Params $id] cname paramReprs
     set hir [hir::specialize::view $baseHir $spec $id]
     lappend active $id
+    set yielding [IsYieldingInstance $id]
+    set thunk [expr {$block ne "program" && [IsThunk $block]}]
+    set h ""
+    if {$yielding} {
+        if {![dict exists $yieldH $id]} {
+            error "ccompile: internal error: the yielding instance $id was reached by no coroutine"
+        }
+        set h [dict get $yieldH $id]
+    }
     set fn [dict create instance $id block $block lines {} indent 1 temps 0 labels 0 \
         locals [dict create] loops [dict create] handlers {} usedLabels [dict create] \
-        result "" completions {} tail 0 joins 0 contexts [dict create]]
+        result "" completions {} tail 0 joins 0 contexts [dict create] \
+        yielding $yielding h $h resumes 0 subs {} constructs {}]
     # The contexts it requires arrive as pointer parameters (ContextArgs
     # passes them on; the program function's are its installations).
     set contextIds [ContextRequirement $block]
@@ -1243,7 +2218,14 @@ proc ccompile::Function {id} {
     } else {
         set params [hir::get $hir $block params]
         set body [hir::get $hir $block body]
-        if {$block ni [dict get $spec context statics]} {
+        if {$thunk} {
+            # Its captures -- the construction's argument temporaries -- are
+            # its frame's, copied in by the construction (Create).
+            foreach entry [ThunkCaptures $block] {
+                lassign $entry b member repr
+                dict set fn locals $b [list $repr "fr->$member"]
+            }
+        } elseif {$block ni [dict get $spec context statics]} {
             # Only a block whose captures are functions or program-level
             # values (StaticBindings) is a C function of its own.
             foreach b [hir::get $hir $block captures] {
@@ -1253,7 +2235,11 @@ proc ccompile::Function {id} {
             }
         }
         foreach b $params repr $paramReprs {
-            set c p_[Sanitize [dict get [hir::binding $hir $b] name]]_[string range $b 1 end]
+            set c [ParamName $b]
+            if {$yielding} {
+                # (The caller writes the arguments into the callee's frame.)
+                set c "fr->$c"
+            }
             dict set fn locals $b [list $repr $c]
         }
     }
@@ -1277,6 +2263,22 @@ proc ccompile::Function {id} {
             set resultRepr i64
         }
     }
+    # A construction's storage is the constructing function's own (its C
+    # frame, or its persistent frame): a handle that could leave the
+    # function would outlive it. Only a value whose type holds a handle can
+    # carry one (affinity is a property of the type), so a function that
+    # constructs a coroutine and may return a handle is refused -- the
+    # handles a coroutine's segments could hand out (its outward values,
+    # its messages, its errors' payloads) are unrestricted already
+    # (hir::coroutines::AffineProtocol).
+    set constructs [dict get $fn constructs]
+    if {$constructs ne "" && [hir::types::IsAffine [dict get $instance result]]} {
+        set where [lindex $constructs 0 2]
+        if {$block eq "program"} {
+            Unsupported $where "a program whose value holds a coroutine handle (the coroutine's frame is storage of the run, which ends with it)"
+        }
+        Unsupported $where "a function that may return a handle of a coroutine it constructs (the coroutine's frame is storage of the function's own frame, which ends when it returns)"
+    }
     set map {}
     set k 0
     foreach op $completions {
@@ -1287,22 +2289,36 @@ proc ccompile::Function {id} {
     # A binding whose C variable nothing but its declaration names is used
     # once, so no C compiler warns of it.
     set text [join $lines \n]
-    dict set fn lines [lmap line $lines {
+    set lines [lmap line $lines {
         if {[regexp {^(\s*)@@UNREAD:([^:]+):(.*)@@$} $line -> indent b c]} {
             if {[regexp -all "\\m$c\\M" $text] > 2} continue
             set line "${indent}(void)$c;"
         }
         set line
     }]
+    # Where each variable lives: a yielding function's frame pass decides
+    # what survives a suspension; every function declares the storage of
+    # its constructions at its top (a handle may outlive the C block of its
+    # construction).
+    if {$yielding} {
+        lassign [Persist $lines] lines fields hoisted
+    } else {
+        lassign [Unmark $lines] lines hoisted
+        set fields {}
+    }
     set active [lrange $active 0 end-1]
     set paramList {}
-    foreach b $params repr $paramReprs {
-        lappend paramList "[CType $repr] [lindex [dict get $fn locals $b] 1]"
+    if {$yielding} {
+        lappend paramList "${cname}_frame *fr"
+    } else {
+        foreach b $params repr $paramReprs {
+            lappend paramList [Declarator [CType $repr] [lindex [dict get $fn locals $b] 1]]
+        }
     }
     # A required context no compiled code of this instance passes on or
     # reads (its uses are in code the instance's facts rule out) is marked
     # used, so no C compiler warns of the parameter.
-    set text [join [dict get $fn lines] \n]
+    set text [join $lines \n]
     set unused {}
     foreach cid $contextIds {
         set c [ContextName $cid]
@@ -1311,18 +2327,44 @@ proc ccompile::Function {id} {
             lappend unused "    (void)$c;"
         }
     }
-    lappend paramList "[CType $resultRepr] *out"
-    set head "static ${prefix}_status $cname\([join $paramList {, }])"
-    set name [if {$block eq "program"} {string cat "the program"} else {hir::aot::BlockName $baseHir $block}]
-    set key [if {[dict get $instance generic]} {string cat generic} else {join [lmap t [dict get $instance args] {hir::specialize::ShowKey $t}] {, }}]
-    set lines [list "/* $name ([string trim "$id $key"]) */" $head "\{" {*}$unused]
-    if {[dict get $fn tail]} {
-        lappend lines "top:;"
+    if {$yielding} {
+        lassign [HandleSlots $h] outRepr msgRepr
+        lappend paramList [Declarator [CType $outRepr] *yslot]
+        if {![regexp {\myslot\M} $text]} {
+            lappend unused "    (void)yslot;"
+        }
+        if {$msgRepr ne "unit"} {
+            lappend paramList [Declarator [CType $msgRepr] *mslot]
+            if {![regexp {\mmslot\M} $text]} {
+                lappend unused "    (void)mslot;"
+            }
+        }
     }
-    lappend lines {*}[dict get $fn lines]
-    lappend lines "\}"
+    lappend paramList [Declarator [CType $resultRepr] *out]
+    if {![regexp {\mout\M} $text]} {
+        # (A function that never completes normally -- an endless
+        # generator -- writes no result.)
+        lappend unused "    (void)out;"
+    }
+    set head "static ${prefix}_status $cname\([join $paramList {, }])"
+    set name [if {$block eq "program"} {string cat "the program"} elseif {$thunk} {
+        string cat "the coroutine of [ThunkTitle $block]"} else {hir::aot::BlockName $baseHir $block}]
+    set key [if {[dict get $instance generic]} {string cat generic} else {join [lmap t [dict get $instance args] {hir::specialize::ShowKey $t}] {, }}]
+    set out [list "/* $name ([string trim "$id $key"]) */" $head "\{" {*}$unused]
+    foreach decl $hoisted {
+        lappend out "    $decl;"
+    }
+    if {$yielding} {
+        lappend out {*}[Dispatch [dict get $fn resumes]]
+        FrameType $id $cname $block $paramReprs $params $fields $fn
+    }
+    if {[dict get $fn tail]} {
+        lappend out "top:;"
+    }
+    lappend out {*}$lines
+    lappend out "\}"
     dict set signatures $id [list $cname $paramReprs $resultRepr]
-    return [list $head [join $lines \n]]
+    return [list $head [join $out \n]]
 }
 
 # A normal completion of the function with operand VALUE: its result is
@@ -1358,11 +2400,25 @@ proc ccompile::Label {fnVar stem} {
     dict incr fn labels
     return ${stem}_[dict get $fn labels]
 }
+# Declares the C variable NAME of C type CTYPE, initialized with INIT (a C
+# expression) unless it is "". The line is marked @@D@@, so that a yielding
+# function's frame pass (Persist) can move the variable into the frame or
+# to the function's top; in any other function the mark is dropped and the
+# line is the plain declaration.
+proc ccompile::Decl {fnVar ctype name {init ""}} {
+    upvar 1 $fnVar fn
+    set text [Declarator $ctype $name]
+    if {$init ne ""} {
+        append text " = $init"
+    }
+    Emit fn "@@D@@$text;"
+}
+
 # Declares a C variable of REPR holding CODE; returns its name.
 proc ccompile::Declare {fnVar repr code {stem t}} {
     upvar 1 $fnVar fn
     set t [Temp fn $stem]
-    Emit fn "[CType $repr] $t = $code;"
+    Decl fn [CType $repr] $t $code
     return $t
 }
 
@@ -1408,7 +2464,7 @@ proc ccompile::Checked {fnVar call {never 0}} {
     upvar 1 $fnVar fn
     variable prefix
     set st [Temp fn st]
-    Emit fn "${prefix}_status $st = $call;"
+    Decl fn ${prefix}_status $st $call
     if {$never} {
         Fail fn $st
         return
@@ -1516,12 +2572,12 @@ proc ccompile::Const {fnVar e node} {
                 return [list i64 "INT64_MIN"]
             }
             set t [Temp fn big]
-            Emit fn "botlish_rt_v1_int $t;"
+            Decl fn botlish_rt_v1_int $t
             set service [Service int.from_decimal]
             Helper rt_status
             set st [Temp fn st]
             variable prefix
-            Emit fn "botlish_rt_v1_status $st = $service\(\"$n\", [string length $n]u, &$t);"
+            Decl fn botlish_rt_v1_status $st "$service\(\"$n\", [string length $n]u, &$t)"
             Emit fn "if ($st != BOTLISH_RT_V1_OK) \{"
             Indent fn 1
             Fail fn "${prefix}_rt_status($st)"
@@ -1628,7 +2684,7 @@ proc ccompile::Bind {fnVar e node} {
         return [list [lindex $value 0] $c]
     }
     set c v_${name}_[string range $b 1 end]
-    Emit fn "[CType [lindex $value 0]] $c = [lindex $value 1];"
+    Decl fn [CType [lindex $value 0]] $c [lindex $value 1]
     # A binding nothing reads is still declared (a branch value may be
     # assigned to it), and marked used: resolved once the body is known.
     Emit fn "@@UNREAD:$b:$c@@"
@@ -1643,7 +2699,7 @@ proc ccompile::Call {fnVar e node want} {
     switch -- $targetKind {
         native {
             set name [dict get [hir::symbol $hir $target] name]
-            return [NativeCall fn $e $node $name]
+            return [NativeCall fn $e $node $name $want]
         }
         block {
             return [BlockCall fn $e $node $target]
@@ -1667,6 +2723,9 @@ proc ccompile::BlockCall {fnVar e node target} {
     }
     set callee [dict get $instance calls $e]
     set selfTail [expr {$callee eq $id && [dict exists $selfTails $e] && [dict get $selfTails $e] eq [dict get $fn block]}]
+    if {!$selfTail && [IsYieldingInstance $callee]} {
+        return [YieldingCall fn $e $node $callee]
+    }
     if {$selfTail} {
         # (Its result is the function's own: no signature is needed.)
         lassign [Params $callee] cname paramReprs
@@ -1705,7 +2764,7 @@ proc ccompile::BlockCall {fnVar e node target} {
     lappend words {*}[ContextArgs fn [dict get [hir::specialize::instance $spec $callee] block] $e]
     set calleeResult [dict get [hir::specialize::instance $spec $callee] result]
     set t [Temp fn r]
-    Emit fn "[CType $resultRepr] $t;"
+    Decl fn [CType $resultRepr] $t
     lappend words "&$t"
     Checked fn "$cname\([join $words {, }])" [expr {$calleeResult eq "never"}]
     if {$calleeResult eq "never"} {
@@ -1729,7 +2788,7 @@ proc ccompile::Operands {fnVar node} {
     return $ops
 }
 
-proc ccompile::NativeCall {fnVar e node name} {
+proc ccompile::NativeCall {fnVar e node name {want value}} {
     upvar 1 $fnVar fn
     set id [dict get $fn instance]
     set argExprs [dict get $node args]
@@ -1764,6 +2823,33 @@ proc ccompile::NativeCall {fnVar e node name} {
         context#install {
             return [Install fn $e $node]
         }
+        coroutine#create {
+            return [Create fn $e $node]
+        }
+        coroutine#start - coroutine#resume {
+            return [Resume fn $e $node]
+        }
+        coroutine#yield {
+            return [Yield fn $e $node $want]
+        }
+        std::coroutine::done? {
+            set ops [Operands fn $node]
+            if {$ops eq ""} {
+                return [list never ""]
+            }
+            return [list bool "([lindex $ops 0 1]->state != ${::ccompile::prefix}_CO_SUSPENDED)"]
+        }
+        coroutine#release {
+            # Nothing to clean up (Coroutines); the handle is dead.
+            set ops [Operands fn $node]
+            if {$ops eq ""} {
+                return [list never ""]
+            }
+            return [list unit 0]
+        }
+        coroutine#abandon {
+            Unsupported $e "the abandonment of a suspended coroutine (resources)"
+        }
         context#load {
             return [ContextValue fn $e [hir::contexts::loadId [set ::ccompile::hir] $e]]
         }
@@ -1780,6 +2866,38 @@ proc ccompile::NativeCall {fnVar e node name} {
             Fail fn [StatusOf {semantic UNREACHABLE context} {CORE SEMANTIC UNREACHABLE} \
                 "context#unreachable: code that no installed context reaches was executed (a compiler bug: static verification proved it never runs)" \
                 UNREACHABLE_CONTEXT]
+            return [list never ""]
+        }
+        enum#is - enum#payload {
+            # A match's selection (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-
+            # 1.md). The C subset has payload-free enums only (a payload
+            # enum's type is C UNSUPPORTED where it is typed), whose value
+            # is its C enumeration constant: the test is one comparison and
+            # a payload-free case's payload is unit.
+            # (The scrutinee only: the two names are constants of the call,
+            # read here, never C values.)
+            set subject [Expr fn [lindex $argExprs 0] value]
+            if {[lindex $subject 0] eq "never"} {
+                return [list never ""]
+            }
+            set hir [set ::ccompile::hir]
+            set id [lindex [hir::get $hir [lindex $argExprs 1] literal] end]
+            set case [lindex [hir::get $hir [lindex $argExprs 2] literal] end]
+            if {[hir::enums::hasPayload $id $case]} {
+                Unsupported $e "the payload of a payload-bearing case ([hir::enums::display $id]::$case)"
+            }
+            if {$name eq "enum#payload"} {
+                return [list unit 0]
+            }
+            return [list bool "([lindex $subject 1] == [EnumConstant $id $case])"]
+        }
+        enum#unmatched {
+            # The end of a match's chain of selections, which an exhaustive
+            # match never reaches (hir/match.tcl): should it run, it is the
+            # Tcl backends' error, as a status -- never a trap or an exit.
+            Fail fn [StatusOf {semantic UNMATCHED match} {CORE SEMANTIC UNMATCHED} \
+                "enum#unmatched: no arm of a match selected the value's case (a compiler bug, or a program run despite its rejected match: a match is proven to name every case)" \
+                UNMATCHED_MATCH]
             return [list never ""]
         }
         list {
@@ -1831,7 +2949,7 @@ proc ccompile::Arith {fnVar e node name} {
     }
     set helper [Helper [dict get {+ int_add - int_sub * int_mul} $name]]
     set t [Temp fn n]
-    Emit fn "botlish_rt_v1_int $t;"
+    Decl fn botlish_rt_v1_int $t
     Checked fn "$helper\([Want fn $a int], [Want fn $b int], &$t)"
     return [Narrowed fn $e [list int $t]]
 }
@@ -1933,7 +3051,7 @@ proc ccompile::Mod {fnVar e node} {
         return [list i64 "[Helper i64_mod]([Want fn $a i64], [Want fn $b i64])"]
     }
     set t [Temp fn n]
-    Emit fn "botlish_rt_v1_int $t;"
+    Decl fn botlish_rt_v1_int $t
     Checked fn "[Helper int_mod]([Want fn $a int], [Want fn $b int], &$t)"
     return [Narrowed fn $e [list int $t]]
 }
@@ -2043,7 +3161,7 @@ proc ccompile::JoinOpen {fnVar e want} {
     dict incr fn joins
     set n [dict get $fn joins]
     set var [Temp fn j]
-    Emit fn "@@JT$n@@ $var = @@JZ$n@@;"
+    Emit fn "@@D@@@@JT$n@@ $var = @@JZ$n@@;"
     return [dict create n $n repr $repr var $var ops {}]
 }
 proc ccompile::JoinAssign {fnVar joinVar op} {
@@ -2073,7 +3191,8 @@ proc ccompile::JoinClose {fnVar join} {
         set repr i64
     }
     set n [dict get $join n]
-    set map [list @@JT$n@@ [CType $repr] @@JZ$n@@ [ZeroOf $repr]]
+    set var [dict get $join var]
+    set map [list "@@JT$n@@ $var" [Declarator [CType $repr] $var] @@JZ$n@@ [ZeroOf $repr]]
     set k 0
     foreach op $ops {
         lappend map @@JV${n}_$k@@ [Want fn $op $repr]
@@ -2336,7 +3455,7 @@ proc ccompile::Handle {fnVar e node want} {
     # The status the dispatch tests: declared here only if some failure of
     # the call reaches the dispatch (an unused variable is a warning).
     set slot [llength [dict get $fn lines]]
-    Emit fn "${prefix}_status $hst = ${prefix}_OK;"
+    Decl fn ${prefix}_status $hst ${prefix}_OK
     dict lappend fn handlers [list $label $hst]
     set value [Expr fn [dict get $node call] [expr {$join eq "" ? "discard" : "value"}]]
     dict set fn handlers [lrange [dict get $fn handlers] 0 end-1]
@@ -2503,6 +3622,7 @@ proc ccompile::Assemble {programId source} {
         }
         lappend h "\} $cname;"
     }
+    lappend h {*}[CoroutineTypes]
     lappend h "" "/* The program's value. */" "typedef [CType $programResult] ${p}_value;" ""
     if {[dict size $statics]} {
         lappend h "/* Runs the program: on ${p}_OK its value is in *value. Not reentrant (the" \
@@ -2544,15 +3664,19 @@ proc ccompile::Assemble {programId source} {
             lappend c "" [string trimright [HelperText $name]]
         }
     }
+    lassign [CoroutineCode] coDecls coProtos coDefs
+    lappend c {*}$coDecls
     lappend c ""
     variable referenced
     set order [concat [list $programId] [lsort -dictionary [lsearch -all -inline -not -exact [dict keys $referenced] $programId]]]
     foreach id $order {
         lappend c "[lindex [dict get $compiled $id] 0];"
     }
+    lappend c {*}$coProtos
     foreach id $order {
-        lappend c "" [lindex [dict get $compiled $id] 1]
+        lappend c "" [KindTags [lindex [dict get $compiled $id] 1]]
     }
+    lappend c {*}$coDefs
     lappend c "" "${p}_status ${p}_run(${p}_value *value)" "\{" "    return ${p}_program(value);" "\}"
     set codes [lmap s $statuses {CString [lindex $s 0]}]
     set messages [lmap s $statuses {CString [lindex $s 1]}]
@@ -2780,11 +3904,48 @@ proc ccompile::Manifest {source} {
         "  \"target_requirements\": \[\"a freestanding C11 implementation\", \"int64_t and uint64_t (exact-width two's complement types)\", \"no hosted library, allocation, I/O or entry point (the embedding calls the entry)\"\]," \
         "  \"runtime_header\": [expr {$usesInt ? {"botlish_rt_v1.h"} : "null"}]," \
         "  \"translation_units\": \[" "[join $unitLines ",\n"]" "  \],"]
+    set frames [CoroutineManifest]
+    set comma [expr {$frames eq "" ? "" : ","}]
     if {[dict size $entries] == 0} {
-        lappend lines "  \"required_services\": \[\]"
+        lappend lines "  \"required_services\": \[\]$comma"
     } else {
-        lappend lines "  \"required_services\": \[" "[join [dict values $entries] ",\n"]" "  \]"
+        lappend lines "  \"required_services\": \[" "[join [dict values $entries] ",\n"]" "  \]$comma"
+    }
+    if {$frames ne ""} {
+        lappend lines {*}$frames
     }
     lappend lines "\}"
     return "[join $lines \n]\n"
+}
+
+# The manifest's coroutine section (a program with coroutines only): every
+# coroutine type PREFIX.h defines, in definition order, with what it holds
+# by value and, for a function's frame, which of its fields are values that
+# survive a suspension -- what an embedding needs to account for a
+# program's storage (sizeof and _Alignof of each type are the target C
+# compiler's).
+proc ccompile::CoroutineManifest {} {
+    variable coHandles
+    variable frames
+    if {[dict size $coHandles] == 0} {
+        return {}
+    }
+    set entries {}
+    dict for {key info} $coHandles {
+        lappend entries "    \{\"type\": [JString [dict get $info cname]], \"role\": \"handle\", \"holds\": \[\]\}"
+    }
+    foreach name [FrameOrder] {
+        set frame [dict get $frames $name]
+        set holds [lsort -unique [concat [lmap d [dict get $frame deps] {lindex $d 0}] \
+            [lmap f [dict get $frame fields] {
+                if {[string match *_coh* [lindex $f 0]] && [lindex $f 1] eq "head"} {lindex $f 0} else continue
+            }]]]
+        set role [expr {[dict get $frame role] eq "kind" ? "storage" : "frame"}]
+        set entry "    \{\"type\": [JString $name], \"role\": [JString $role], \"of\": [JString [dict get $frame title]], \"holds\": \[[join [lmap t $holds {JString $t}] {, }]\]"
+        if {$role eq "frame"} {
+            append entry ", \"suspension_values\": \[[join [lmap f [dict get $frame persistent] {JString $f}] {, }]\]"
+        }
+        lappend entries "$entry\}"
+    }
+    return [list "  \"coroutine_frames\": \[" [join $entries ",\n"] "  \]"]
 }

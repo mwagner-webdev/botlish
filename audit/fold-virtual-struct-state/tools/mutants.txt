@@ -1,0 +1,266 @@
+# Mutants of FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md
+# (audit/fold-virtual-struct-state/tools/mutate.tcl): deliberate breaks of
+# the rules that let a fold's struct intermediate be carried as independent
+# field registers -- the shape fact (hir/escape.tcl's FoldShape, RefShape),
+# the slot's eligibility (its sources, its captures, the no-loss rule), the
+# fold as a recognized construction, the field-wise share of a copying
+# fold's entry copy, and native lowering's one back-edge move, break and
+# materialization. Each must be killed by tests/fold-virtual-struct-state.test,
+# by one of the tests its `!!` line names: a value-changing mutant by an
+# outcome that differs between the eight configurations (or from the pinned
+# value), a lost precision by the fold-slot decisions, the struct census or
+# the allocation and copy counters.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# The back edge, continue and break (soundness)
+
+@@ back-edge-sequential the back edge moves the completion's fields into the carried registers one after another: `P {a: s.b, b: s.a}` overwrites `a` before `b` reads it
+!! fvs-swap-parallel fvs-swap-parallel-nir fvs-rotate-three fvs-exits fvs-nested-permutations
+## native/lower.tcl
+<<<<
+        if {$v ne $r && $v in $carried} {
+====
+        if {0} {
+>>>>
+
+@@ continue-commits a carried fold's back edge runs where `continue` arrives too: an iteration that continues commits the completion's registers, which that path never computed
+!! fvs-break-candidate fvs-exits fvs-errors
+## native/lower.tcl
+<<<<
+    if {$bodyValue ne "never"} {
+        LoopResultAdd fn $e $mode $accReg $bodyValue
+        Emit fn "jump $continueLabel" $e
+    }
+    dict unset fn continued $e
+    dict set fn locals $saved
+    dict set fn rawCache $savedRaw
+    dict unset fn loops $e
+    if {$bodyValue ne "never" || $usedContinue} {
+        EmitLabel fn $continueLabel
+        if {!$consuming} {
+====
+    if {$bodyValue ne "never"} {
+        if {$mode ne "vfold"} {
+            LoopResultAdd fn $e $mode $accReg $bodyValue
+        }
+        Emit fn "jump $continueLabel" $e
+    }
+    dict unset fn continued $e
+    dict set fn locals $saved
+    dict set fn rawCache $savedRaw
+    dict unset fn loops $e
+    if {$bodyValue ne "never" || $usedContinue} {
+        EmitLabel fn $continueLabel
+        if {$bodyValue ne "never" && $mode eq "vfold"} {
+            LoopResultAdd fn $e $mode $accReg $bodyValue
+        }
+        if {!$consuming} {
+>>>>
+
+@@ break-not-current a bare break of a carried fold yields its result registers as they are instead of the carried registers: not the iteration's starting value
+!! fvs-break-candidate fvs-bare-fold fvs-exits
+## native/lower.tcl
+<<<<
+                # computed, which only the back edge would have moved in.
+                foreach r $resultReg c $accReg {
+                    Emit fn "$r = move $c" $e
+                }
+====
+                # computed, which only the back edge would have moved in.
+                foreach r $resultReg c $accReg {
+                    Emit fn "$r = move $r" $e
+                }
+>>>>
+
+@@ carried-untraced the carried registers are declared raw machine words: the collector does not trace a heap-backed field, and a tagged field is read as a raw one
+!! fvs-gc-stress fvs-scanner fvs-exits
+## native/lower.tcl
+<<<<
+            set carried [NewRegs fn $n]
+            foreach r $carried v $initial {
+                Emit fn "$r = move $v" $e
+====
+            set carried [NewRegs fn $n]
+            foreach r $carried v $initial {
+                MarkRaw fn $r
+                Emit fn "$r = move $v" $e
+>>>>
+
+@@ exit-not-materialized a carried fold whose value is used whole hands on its first field register instead of building the struct
+!! fvs-exit-materialized fvs-wide
+## native/lower.tcl
+<<<<
+    return [BuildStruct fn [lindex $desc 1] "" $result $e]
+====
+    return [lindex $result 0]
+>>>>
+
+# ---------------------------------------------------------------------------
+# The shape fact and the slot's sources
+
+@@ shape-unrecognized-leaf a completion no construction recognizes is skipped instead of denying the shape: the fold is carried and its completion has no fields to give
+!! fvs-unrecognized-completion
+## hir/escape.tcl
+<<<<
+            set c [Classify $hir $instance $arity $v $structOpts]
+            if {$c eq ""} {
+                return ""
+            }
+====
+            set c [Classify $hir $instance $arity $v $structOpts]
+            if {$c eq ""} {
+                continue
+            }
+>>>>
+
+@@ ref-shape-any-binding a reference to a parameter enters a slot by its static type's descriptor: a value whose fields exist only in the instance's `fields` variant (a source of no proven representation)
+!! fvs-param-initial
+## hir/escape.tcl
+<<<<
+    if {$kind ne "local" && ![IsFoldBinding $view $b]} {
+        return ""
+    }
+====
+    if {0} {
+        return ""
+    }
+>>>>
+
+@@ identity-leaf-unchecked every reference leaf entering a fold counts as the intermediate itself: a candidate local's reference names no source, and the slot stands though that local is built
+!! fvs-source-falls
+## hir/escape.tcl
+<<<<
+            if {$src eq $b} {
+                continue
+            }
+====
+            if {1} {
+                continue
+            }
+>>>>
+
+@@ sources-unchecked a slot stands whatever its sources: a completion naming a local that falls (built in an inner loop) is read as fields it does not have
+!! fvs-source-falls
+## hir/escape.tcl
+<<<<
+                    if {![dict exists $candidates $skey] || [dict get $candidates $skey] ne $desc} {
+                        set reason source
+====
+                    if {0} {
+                        set reason source
+>>>>
+
+# ---------------------------------------------------------------------------
+# Eligibility: captures and the no-loss rule
+
+@@ capture-admitted an intermediate a nested function captures is carried as fields: the capture rebuilds it every iteration
+!! fvs-observe
+## hir/escape.tcl
+<<<<
+            if {[dict exists $captured $b]} {
+                dict set why $key capture
+====
+            if {0} {
+                dict set why $key capture
+>>>>
+
+@@ no-loss-off the no-loss rule is dropped: a whole use on a path that keeps the intermediate unchanged rebuilds the object every iteration (an open call: 2 structs become hundreds)
+!! fvs-no-loss-open-call fvs-no-loss-continue fvs-no-loss-return fvs-observe
+## hir/escape.tcl
+<<<<
+            if {$reason eq "" && $foldExpr ne "" && $matRefs ne ""} {
+====
+            if {0} {
+>>>>
+
+@@ no-loss-keep-ignored an identity completion is never a path that keeps the intermediate: only a `continue` is (an equality before an identity completion rebuilds the object every iteration)
+!! fvs-no-loss-open-call fvs-no-loss-return fvs-observe
+## hir/escape.tcl
+<<<<
+            if {$state && [dict exists $keep $x]} {
+====
+            if {0} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The fold as a construction, joins with a reference branch, the share
+
+@@ result-outside-slot-class a mismatched descriptor accepted: an exact call entering a slot (its initial value, a completion) is left out of the slot's class, so its callee's result is opened into a cut the slot's descriptor does not carry
+!! fvs-exact-call-nested-result
+## hir/escape.tcl
+<<<<
+                UnionOrigins uf $member [Origins $view [dict get $info instance] $arity $id $v $structOpts]
+====
+                UnionOrigins uf $member [lsearch -all -inline -not -index 0 [Origins $view [dict get $info instance] $arity $id $v $structOpts] res]
+>>>>
+
+@@ fold-not-construction a fold is never a recognized construction: a fold-valued function returns an object (no retmulti), a local bound to a fold takes it whole
+!! fvs-scanner fvs-scanner-result-transport fvs-fold-argument
+## hir/escape.tcl
+<<<<
+        set shape [FoldShape $hir $instance $arity $e $structOpts]
+        if {$shape eq ""} {
+            return ""
+        }
+        return [lrange $shape 0 2]
+====
+        return ""
+>>>>
+
+@@ fold-slots-off no fold slot is ever a candidate: every fold builds one struct per constructing iteration, as before the milestone
+!! fvs-scanner fvs-exits fvs-consumed-vector
+## hir/escape.tcl
+<<<<
+    if {![FoldEnabled $structOpts]} {
+        return [list $rawFold $shaped $sources $why]
+    }
+====
+    if {1} {
+        return [list $rawFold $shaped $sources $why]
+    }
+>>>>
+
+@@ identity-branch-off a join never takes a branch that is a reference to a struct binding: a local bound to `if c: q else: P {...}` is built as before
+!! fvs-ref-join-local
+## hir/escape.tcl
+<<<<
+        if {$refJoin && [hir::kind $hir $last] eq "ref"} {
+====
+        if {0} {
+>>>>
+
+@@ share-declined a whole-struct share is never lowered field by field: a copying fold's entry copy declines its slot (one struct per iteration, as before)
+!! fvs-copying-share
+## hir/escape.tcl
+<<<<
+    if {$targetKind ne "native" || [dict get [hir::symbol $view $target] name] ne [hir::mutvec::ShareNative]} {
+====
+    if {$targetKind ne "native" || [dict get [hir::symbol $view $target] name] ne [hir::mutvec::ShareNative] || 1} {
+>>>>
+
+@@ share-fieldwise-skipped the field-wise share shares no header: a copying fold's iteration that continues keeps the elements it pushed
+!! fvs-copying-share
+## native/lower.tcl
+<<<<
+        set d [Assign fn "str [Quote $sub]" $e]
+        lset fields $slot [Assign fn "op mvshare [lindex $fields $slot] $d" $e]
+====
+>>>>
+
+@@ consumed-shared a fold intermediate is never consumed (hir::mutvec's copying elaboration everywhere): a consumed vector field is shared and detached at every iteration
+!! fvs-consumed-vector fvs-two-vectors
+## hir/mutvec.tcl
+<<<<
+    variable consumedFolds 1
+====
+    variable consumedFolds 0
+>>>>

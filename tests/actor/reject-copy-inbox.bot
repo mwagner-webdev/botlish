@@ -1,4 +1,4 @@
-# A second receiver from one inbox: the Inbox is affine; moved into the first actor it is not live for the second (AFFINE-NOT-DEFINITELY-LIVE).
+# A second receiver from one inbox: the Inbox is affine; moved into the first actor (an inject block, which always runs) it is moved for the second (USE-AFTER-MOVE; AFFINE-NOT-DEFINITELY-LIVE before PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md made the ownership analysis take an `if true:` block as run).
 import std::actor
 import std::event_loop
 import std::event_loop::deterministic

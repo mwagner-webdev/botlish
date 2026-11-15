@@ -1093,6 +1093,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
         # ordinary call of enum#case (CaseConstruction).
         set node [CaseConstruction $node $ctx]
     }
+    if {[dict get $node kind] eq "if" && [dict exists $node match]} {
+        # A match (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md): its arms'
+        # case names, written as spelled, resolved to the enum identities
+        # its selections compare (MatchSyntax).
+        set node [MatchSyntax $node $ctx]
+    }
     set kind [dict get $node kind]
     set origin [dict get $node origin]
     set scope [dict get $ctx scope]
@@ -1637,8 +1643,19 @@ proc hir::resolve::Expr {hirVar node ctx} {
             hir::CheckingCall $e {hir::flags::ResolveCall hir $e $node $ctx}
             SetField hir $e target ""
             SetField hir $e known ""
+            if {[dict exists $node matchCase problem]} {
+                # A match arm's case name that names no case, or a payload
+                # binding of a case that has none (MatchSyntax), reported
+                # where the call's selection is, in source order.
+                set problem [dict get $node matchCase problem]
+                hir::DiagnoseAt hir [dict get $problem kind] [dict get $problem message] $e [dict get $problem origin]
+            }
         }
         if {
+            if {[dict exists $node match]} {
+                # A match (MatchSyntax; hir/match.tcl verifies it).
+                SetField hir $e match 1
+            }
             if {[dict exists $node inject]} {
                 # An inject block (RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md):
                 # the context types it injects, as canonical identities
@@ -2866,6 +2883,107 @@ proc hir::resolve::CaseConstruction {node ctx} {
     set caseConst [hir::syntax::constNode $origin str [dict get $type name]]
     dict set caseConst synthesized 1
     return [hir::syntax::callNode $origin [hir::syntax::rootRef $origin enum#case] $payload $idConst $caseConst]
+}
+
+# NODE, the `if` syntax of a match (surface/lower.tcl's Match: `if ^true`
+# whose then-branch binds the scrutinee and then runs the chain of
+# selections), with each selection's case resolved
+# (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md). Every enum#is and
+# enum#payload call of the chain marked `matchCase` names its case as
+# written: QUALIFIER, resolved here as an enum type visible from the code
+# (hir::enums::lookup, the visibility of a case expression's qualifier,
+# ResolveEnumCase), and CASE, looked up among that enum's declared cases
+# only. Its String constants then hold the enum's declaration identity and
+# the case. A name that resolves to no case keeps its spelling and records
+# its problem on the selection -- MATCH-NOT-A-CASE (the qualifier is no
+# enum type) or UNKNOWN-ENUM-CASE -- which the call's resolution reports
+# (Expr's `call` case), as is a payload binding of a payload-free case
+# (ENUM-PAYLOAD-UNEXPECTED, on the arm's enum#payload). Whether the arms
+# name every case of the scrutinee's enum exactly once is hir/match.tcl's
+# question, once the scrutinee is typed. A chain read back from HIR text
+# carries no marker: its constants are already resolved.
+proc hir::resolve::MatchSyntax {node ctx} {
+    set ns [CtxNamespace $ctx]
+    set then [dict get $node thenBody]
+    if {[llength $then] != 2} {
+        return $node
+    }
+    # The chain's levels, outermost first, then rebuilt innermost first.
+    set levels {}
+    set level [lindex $then 1]
+    while {[dict get $level kind] eq "if" && [dict exists $level condition matchCase]} {
+        lappend levels $level
+        set else [dict get $level elseBody]
+        if {[llength $else] != 1} {
+            break
+        }
+        set level [lindex $else 0]
+    }
+    if {$levels eq {}} {
+        return $node
+    }
+    # Innermost first: each level's else-branch is the level inside it (the
+    # innermost keeps its own: the end of the chain).
+    set inner ""
+    foreach level [lreverse $levels] {
+        set test [MatchSelection [dict get $level condition] $ns]
+        set body [dict get $level thenBody]
+        set take [lindex $body 0]
+        if {[dict get $take kind] eq "bind" && [dict exists $take value matchCase]} {
+            dict set take value [MatchSelection [dict get $take value] $ns [dict exists $test matchCase problem]]
+            lset body 0 $take
+        }
+        dict set level condition $test
+        dict set level thenBody $body
+        if {$inner ne ""} {
+            dict set level elseBody [list $inner]
+        }
+        set inner $level
+    }
+    lset then 1 $inner
+    dict set node thenBody $then
+    return $node
+}
+
+# CALL, a selection of a match arm (enum#is or enum#payload, marked
+# `matchCase`: MatchSyntax), with its case name resolved from namespace NS:
+# its two String constants the enum's declaration identity and the case,
+# or, for a name that names no case, its problem recorded in `matchCase`.
+# KNOWN 1 says the arm's selection already has a problem: its payload call
+# reports nothing more.
+proc hir::resolve::MatchSelection {call ns {known 0}} {
+    set marker [dict get $call matchCase]
+    set qualifier [dict get $marker qualifier]
+    set case [dict get $marker case]
+    set origin [dict get $marker origin]
+    set id [hir::enums::lookup $qualifier $ns]
+    set problem ""
+    if {$id eq ""} {
+        set problem [dict create kind MATCH-NOT-A-CASE origin $origin message \
+            [format {%s::%s names no enum case: %s is not an enum type visible here (a match arm names a case of the matched enum, "case Enum::Case:")} \
+                $qualifier $case $qualifier]]
+    } elseif {![hir::enums::hasCase $id $case]} {
+        set problem [dict create kind UNKNOWN-ENUM-CASE origin $origin \
+            message [hir::enums::UnknownCaseMessage $id $case]]
+    } else {
+        set args [dict get $call args]
+        foreach index {1 2} value [list $id $case] {
+            set const [lindex $args $index]
+            dict set const literal [list str $value]
+            lset args $index $const
+        }
+        dict set call args $args
+        if {[dict get $marker role] eq "payload" && [dict get $marker bound]
+                && ![hir::enums::hasPayload $id $case]} {
+            set problem [dict create kind ENUM-PAYLOAD-UNEXPECTED origin [dict get $call origin] message \
+                [format {case %s::%s carries no payload, so its arm binds none: write "case %s::%s:" (only a case declared with payload fields has one to bind)} \
+                    [hir::enums::display $id] $case [hir::enums::display $id] $case]]
+        }
+    }
+    if {$problem ne "" && !$known} {
+        dict set call matchCase problem $problem
+    }
+    return $call
 }
 
 # The hint an UNBOUND diagnostic for the bare NAME adds when NAME is the

@@ -1,0 +1,18 @@
+# case: a source whose yields are statically Bytes (a Byte parameter) and whose result is a count: the outward type is int, the join, so `first` is no Byte
+# class: narrowing
+# expect: widened
+# value: [65, 3]
+import std::coroutine
+import std::byte
+
+fn source(b: std::byte::Byte, n: int) -> int:
+    loop i from 0 to n:
+        yield b
+        continue
+    n
+
+coroutine {step, first} = source(65, 3)
+step()
+step()
+last = step()
+[first, last]

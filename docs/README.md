@@ -931,9 +931,11 @@ Implementation notes (not part of the semantics):
 Surface syntax beyond the minimal language of §17, macros, objects (structs,
 STRUCTS.md, are immutable values: no mutable struct, update syntax, methods or
 inheritance), assignment, mutable
-variables, exceptions, `?` propagation, pattern matching (enums, ENUMS.md, are
-closed sums whose cases may carry named-field payloads, with no `match` or
-exhaustiveness yet, so a payload cannot be read back out of a value), a type checker
+variables, exceptions, `?` propagation, general pattern matching (enums,
+ENUMS.md, are closed sums whose cases may carry named-field payloads, selected
+by an exhaustive `match` with one `case Enum::Case:` arm per case,
+PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md -- no wildcard, guard, literal or
+positional pattern, and no match over other values), a type checker
 beyond refinement tracking (struct destructuring, STRUCT-DESTRUCTURING.md, is
 irrefutable named projection, not pattern matching), async, coroutines, threads, or FFI. A small
 one-file/one-namespace module system *is* implemented (§17's
@@ -1888,6 +1890,27 @@ add10(32)          # 42 (add captures x)
   value or alias, no ordinal, integer or String conversion and no ordering:
   `==`, `!=` and `hash` compare the enum, the case and the payload. `enum`
   is a contextual word.
+* A **match** selects one case of an enum value
+  (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md):
+
+      match node:
+          case Node::Const {value}:
+              value
+          case Node::Param:
+              0
+          case Node::Add p:
+              p.left + p.right
+
+  evaluates the scrutinee once and runs the arm naming its case; the match
+  is that arm's value (a statement, or the value of `=`, `return` or a
+  destructuring, like an if; an arm may return, fail, break or continue).
+  An arm receives the payload destructured by name, bound whole, or not at
+  all, each binding at its case's declared field type and local to its
+  arm. The compiler proves the arms name every case of the scrutinee's enum
+  exactly once (MATCH-NOT-EXHAUSTIVE, MATCH-DUPLICATE-CASE); a scrutinee
+  whose enum is not known statically (`any`, another type) is a TYPE error.
+  Matching an affine enum moves it; selection never compares payloads.
+  `match` and `case` are contextual words.
 * **Opaque structs.** `opaque struct Token:` declares an ordinary struct whose
   representation belongs to the module that declares it: only that module may
   construct it (`token::Token {...}`) or inspect it (`x.value`, `{value} = x`);

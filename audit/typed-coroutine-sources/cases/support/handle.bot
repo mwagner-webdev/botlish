@@ -1,0 +1,26 @@
+# handle.bot -- the census's resource (a copy of tests/resources/handle.bot's
+# core): a Handle owns a number, and its cleanup records it in the Log.
+import std::mutable_vector
+
+opaque resource struct Handle:
+    id: int
+
+opaque context struct Log:
+    lines: MutableVector[int]
+
+fn create() -> Log:
+    Log {lines: std::mutable_vector::from_list([0])}
+
+cleanup fn close(h: Handle, context log: Log):
+    {id} = h
+    log.lines.push(id)
+
+fn open(n: int) -> Handle:
+    Handle {id: n}
+
+fn note(n: int, context log: Log):
+    log.lines.push(n)
+
+fn closed(context log: Log) -> List[int] errors IndexNotFound:
+    loop i from 1 to log.lines.length():
+        log.lines.at(i)

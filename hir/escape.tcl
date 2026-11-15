@@ -45,6 +45,14 @@
 # transport analysis rather than escape analysis proper (it also still answers
 # the List and plan questions below).
 #
+# Fold slots (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md; "Fold slots" below):
+# a fold's struct intermediate is the fourth slot kind beside bound locals,
+# instance parameters and instance results -- carried around the loop's back
+# edge as field registers, the fold itself a recognized construction while
+# its slot is virtual. A struct join may take a branch that is a reference
+# to a binding a slot carries, and a whole-struct share of one is a
+# construction lowered field by field (ClassifyIf's and Classify's REFJOIN).
+#
 # Semantic struct identity is never lost: the shape travels in the descriptor
 # (named identity and anonymous field set alike), so a virtual struct that
 # materializes is built with exactly the shape it would have had. Width is a
@@ -166,9 +174,27 @@ namespace eval hir::escape {
 # exactly one slot of its layout). Width policy is *not* applied here: the
 # caller that binds, returns or passes the value applies the cap of its own
 # boundary (local / return / argument).
-proc hir::escape::Classify {hir instance arity e {structOpts {}}} {
+#
+# A fold whose intermediate is a fold slot (FOLD-VIRTUAL-STRUCT-STATE-
+# MILESTONE-1.md, "Fold slots" below) is a construction too: its value is
+# its carried fields (FoldShape; a fold whose slot fell is in STRUCTOPTS'
+# foldDeny and is none). REFJOIN 1 lets an `if` branch end in a reference to
+# a struct binding a slot may carry (ClassifyIf): only a consumer that is
+# itself a slot asks for it, since such a branch is free only while the
+# binding it names stays virtual (Eligible's sources).
+proc hir::escape::Classify {hir instance arity e {structOpts {}} {refJoin 0}} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set kind [hir::kind $hir $e]
+    if {$kind in {loop listloop countloop lockloop}} {
+        if {![hir::isFold $hir $e]} {
+            return ""
+        }
+        set shape [FoldShape $hir $instance $arity $e $structOpts]
+        if {$shape eq ""} {
+            return ""
+        }
+        return [lrange $shape 0 2]
+    }
     if {$kind eq "struct"} {
         if {![StructEnabled $structOpts]} {
             return ""
@@ -187,7 +213,7 @@ proc hir::escape::Classify {hir instance arity e {structOpts {}}} {
         return [list local [list $n [list $id $layout]] {}]
     }
     if {$kind eq "if"} {
-        return [ClassifyIf $hir $instance $arity $e $structOpts]
+        return [ClassifyIf $hir $instance $arity $e $structOpts $refJoin]
     }
     if {$kind ne "call"} {
         return ""
@@ -196,6 +222,15 @@ proc hir::escape::Classify {hir instance arity e {structOpts {}}} {
     lassign [dict get $node target] targetKind target
     if {$targetKind eq "native"} {
         set name [dict get [hir::symbol $hir $target] name]
+        if {$refJoin} {
+            # A whole-struct share of a struct binding a slot may carry: its
+            # fields, each listed header shared on its own (REFJOIN as for a
+            # reference branch: the slot asking depends on the binding).
+            set src [StructShareSource $hir $e]
+            if {$src ne ""} {
+                return [list local [RefShape $hir $src] {}]
+            }
+        }
         if {[core::linuxabi::isSyscall $name]} {
             # A raw kernel transition builds its result, its architecture's
             # Register64 (std::abi::x86_64::Register64, std::abi::aarch64::
@@ -265,7 +300,13 @@ proc hir::escape::Classify {hir instance arity e {structOpts {}}} {
 # never recognized through an `if` (that would change their existing
 # behavior). TARGETS lists every instance a branch's forwarding call demands
 # a companion of.
-proc hir::escape::ClassifyIf {hir instance arity e structOpts} {
+#
+# REFJOIN 1 (Classify): a branch may also end in a reference to a local or a
+# fold intermediate whose static type is a struct of the descriptor
+# (RefShape), the identity branch `if c: S {...} else: s`. Its fields are
+# that binding's, moved into the join; the consumer asking is a slot, which
+# Eligible keeps only while every binding so named stays virtual itself.
+proc hir::escape::ClassifyIf {hir instance arity e structOpts {refJoin 0}} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {![StructEnabled $structOpts]} {
         return ""
@@ -284,7 +325,15 @@ proc hir::escape::ClassifyIf {hir instance arity e structOpts} {
         if {[hir::typeOf $hir $last] eq "never"} {
             continue
         }
-        set c [Classify $hir $instance $arity $last $structOpts]
+        if {$refJoin && [hir::kind $hir $last] eq "ref"} {
+            set d [RefShape $hir $last]
+            if {$d eq ""} {
+                return ""
+            }
+            set c [list local $d {}]
+        } else {
+            set c [Classify $hir $instance $arity $last $structOpts $refJoin]
+        }
         if {$c eq ""} {
             return ""
         }
@@ -490,10 +539,512 @@ proc hir::escape::WidthOk {structOpts desc boundary} {
         return 1
     }
     set n [lindex $desc 0]
-    if {$boundary ne "local" && $n < 1} {
+    if {$boundary ni {local fold} && $n < 1} {
         return 0
     }
     return [expr {$n <= [hir::transport::Ceiling $structOpts $boundary]}]
+}
+
+# ---------------------------------------------------------------------------
+# Fold slots (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md)
+#
+# A fold's intermediate (FOLD-LOOPS-MILESTONE-1.md) is a binding of its
+# iteration scope, bound once per iteration to the initial value or to the
+# previous normal completion of the body. When every value that can enter it
+# is a struct of one descriptor -- a recognized construction (a literal, a
+# join, a recognized call, an inner fold that is itself carried as fields),
+# the intermediate itself (an identity completion), or a reference to a
+# local or another intermediate whose static type is that struct -- the
+# intermediate is a *fold slot*: a fourth slot kind beside bound locals,
+# instance parameters and instance results. Eligible judges it like a local
+# whose binding runs once per iteration (UseVerdict with the fold as the
+# binding's loop), plus two rules of its own:
+#
+#   * sources: a reference that enters it (a completion `n`, an initial
+#     value `s` of an outer fold) is free only while the binding it names is
+#     itself virtual, and the slot stands only while every such binding does
+#     (the alias rule, generalized: Eligible's SOURCES);
+#   * no loss (FoldNoLoss): a slot is declined when a use that needs the
+#     whole object may run in an iteration that then keeps the intermediate
+#     unchanged (an identity completion or a `continue`) -- today that
+#     iteration builds nothing (the register keeps the one object), carried
+#     as fields it would build the object again every time.
+#
+# A fold is a recognized construction (Classify) exactly when its slot is
+# virtual. That fact is decided after the slot's eligibility, which itself
+# reads the shapes the constructions give, so analyze runs in rounds: a fold
+# whose slot fell is denied (STRUCTOPTS' foldDeny: no construction) and the
+# analysis runs again. Denying only removes constructions, so every slot can
+# only fall further: the rounds stop after at most one more than the number
+# of folds that fall, and the common case (no shaped fold falls) is one.
+#
+# A fold slot is never opened into a nested cut (NestingPlan makes every
+# class it touches opaque): its fields are its descriptor's, and an inner
+# struct stays one carried field value.
+
+# 1 if fold slots are on: struct scalar replacement under the transport
+# policy (the legacy policy is the previous milestones' comparison oracle,
+# kept byte for byte) with the foldSlots option.
+proc hir::escape::FoldEnabled {structOpts} {
+    return [expr {[StructEnabled $structOpts] && ![LegacyPolicy $structOpts]
+        && [hir::transport::Option $structOpts foldSlots]}]
+}
+
+# 1 if a struct join may take a branch that is a reference to a struct
+# binding (ClassifyIf's REFJOIN), under the same conditions and the refJoins
+# option.
+proc hir::escape::RefJoinEnabled {structOpts} {
+    return [expr {[StructEnabled $structOpts] && ![LegacyPolicy $structOpts]
+        && [hir::transport::Option $structOpts refJoins]}]
+}
+
+# 1 if binding B (VIEW) is the intermediate of a fold.
+proc hir::escape::IsFoldBinding {view b} {
+    set binding [hir::binding $view $b]
+    if {[dict get $binding kind] ne "param"} {
+        return 0
+    }
+    set scope [dict get $binding scope]
+    if {![dict exists $view scopes $scope owner]} {
+        return 0
+    }
+    set owner [dict get $view scopes $scope owner]
+    return [expr {$owner ne "" && [dict exists $view exprs $owner foldBinding]
+        && [dict get $view exprs $owner foldBinding] eq $b}]
+}
+
+# The descriptor {N {ID LAYOUT}} of the struct a value of static TYPE is, or
+# "" when TYPE is no struct this analysis can name: a named struct (nominal:
+# a value of it is an object of that declaration, hir::types::subtype) or an
+# anonymous struct (only an anonymous struct of the same field set is one).
+# The layout is the one a literal of the type carries.
+proc hir::escape::TypeShape {type} {
+    if {[hir::types::IsNamedStruct $type]} {
+        set id [lindex $type 1]
+        if {![hir::structs::declared $id]} {
+            return ""
+        }
+        set layout [hir::structs::names $id]
+        return [list [llength $layout] [list $id $layout]]
+    }
+    if {[hir::types::IsStruct $type]} {
+        set layout [hir::types::StructLayout $type]
+        return [list [llength $layout] [list "" $layout]]
+    }
+    return ""
+}
+
+# The descriptor of reference R (VIEW) as a value entering a slot: its
+# static type's struct (TypeShape) when R names a local or a fold's
+# intermediate -- bindings a slot may carry in every lowering variant of the
+# instance -- and "" otherwise (a parameter is virtual only in its
+# instance's `fields` variant).
+proc hir::escape::RefShape {view r} {
+    set b [hir::get $view $r binding]
+    if {$b eq ""} {
+        return ""
+    }
+    set kind [dict get [hir::binding $view $b] kind]
+    if {$kind ne "local" && ![IsFoldBinding $view $b]} {
+        return ""
+    }
+    return [TypeShape [hir::typeOf $view $r]]
+}
+
+# The reference argument of call E (VIEW) when E is a whole-struct share --
+# mutable_vector#share(REF, "sN....") (hir::mutvec's copy convention: a
+# fold's or a parameter's entry copy, `NAME = share(NAME#entry, D)`) -- of
+# a struct binding a slot may carry (RefShape) whose descriptor's slots are
+# that struct's layout positions; "" otherwise. Such a share is a struct
+# construction whose fields are the source's, each listed header shared on
+# its own (native/lower.tcl's ShareFields): no struct is built for it.
+proc hir::escape::StructShareSource {view e} {
+    if {[hir::kind $view $e] ne "call"} {
+        return ""
+    }
+    lassign [hir::get $view $e target] targetKind target
+    if {$targetKind ne "native" || [dict get [hir::symbol $view $target] name] ne [hir::mutvec::ShareNative]} {
+        return ""
+    }
+    set args [hir::get $view $e args]
+    if {[llength $args] != 2} {
+        return ""
+    }
+    lassign $args value d
+    if {[hir::kind $view $value] ne "ref" || [hir::kind $view $d] ne "const"} {
+        return ""
+    }
+    set text [hir::get $view $d value]
+    if {[core::value::kind $text] ne "str" || [string index [core::value::strOf $text] 0] ne "s"} {
+        return ""
+    }
+    set shape [RefShape $view $value]
+    set type [hir::typeOf $view $value]
+    if {$shape eq "" || [lindex $shape 1 1] ne [hir::types::StructLayout $type]} {
+        return ""
+    }
+    return $value
+}
+
+# The references a value V (VIEW) entering a slot is made of, in a join's
+# leaves (ValueLeaves): a reference leaf itself, a whole-struct share's
+# argument (StructShareSource). Each enters the slot unchanged (FLOWINTO)
+# and names a source the slot depends on.
+proc hir::escape::JoinRefs {view v} {
+    set refs {}
+    foreach leaf [ValueLeaves $view $v] {
+        if {[hir::kind $view $leaf] eq "ref"} {
+            lappend refs $leaf
+        } else {
+            set src [StructShareSource $view $leaf]
+            if {$src ne ""} {
+                lappend refs $src
+            }
+        }
+    }
+    return $refs
+}
+
+# The expressions value expression E (VIEW) yields through `if`s: E itself,
+# or in place of an `if` with two branches each branch's last statement, the
+# same way down (a branch HIR left unreachable, or whose last statement
+# never completes, yields none). The leaves Classify and ClassifyIf judge.
+proc hir::escape::ValueLeaves {view e} {
+    set result {}
+    set work [list $e]
+    while {$work ne {}} {
+        set work [lassign $work x]
+        set node [hir::node $view $x]
+        if {[dict get $node kind] eq "if" && [dict get $node thenBody] ne {} && [dict get $node elseBody] ne {}} {
+            foreach body [list [dict get $node thenBody] [dict get $node elseBody]] {
+                if {![hir::get $view [lindex $body 0] reachable]} {
+                    continue
+                }
+                set last [lindex $body end]
+                if {[hir::typeOf $view $last] eq "never"} {
+                    continue
+                }
+                lappend work $last
+            }
+            continue
+        }
+        lappend result $x
+    }
+    return $result
+}
+
+# The values fold E (VIEW) binds its intermediate to: the leaves
+# (ValueLeaves) of its initial value, then those of its body's trailing
+# value -- every normal completion (hir::mutvec::FoldIncoming's set, with
+# the initial value's `if`s split the same way).
+proc hir::escape::FoldIncoming {view e} {
+    set node [hir::node $view $e]
+    set result {}
+    set initial [dict get $node foldInitial]
+    if {[hir::get $view $initial reachable] && [hir::typeOf $view $initial] ne "never"} {
+        lappend result {*}[ValueLeaves $view $initial]
+    }
+    set body [dict get $node body]
+    if {$body ne {} && [hir::get $view [lindex $body 0] reachable]} {
+        set last [lindex $body end]
+        if {[hir::get $view $last reachable] && [hir::typeOf $view $last] ne "never"} {
+            lappend result {*}[ValueLeaves $view $last]
+        }
+    }
+    return $result
+}
+
+# The completion leaves of fold E (VIEW): FoldIncoming without the initial
+# value's.
+proc hir::escape::FoldCompletions {view e} {
+    set body [hir::get $view $e body]
+    if {$body eq {} || ![hir::get $view [lindex $body 0] reachable]} {
+        return {}
+    }
+    set last [lindex $body end]
+    if {![hir::get $view $last reachable] || [hir::typeOf $view $last] eq "never"} {
+        return {}
+    }
+    return [ValueLeaves $view $last]
+}
+
+# {KIND DESC TARGETS SOURCES} when fold E (VIEW, of INSTANCE) carries one
+# struct descriptor in every value that can enter its intermediate
+# (FoldIncoming), "" otherwise: every leaf is the intermediate itself, a
+# reference to a struct binding (RefShape: its binding goes into SOURCES), or
+# a recognized struct construction (Classify; a forwarding call's instance
+# goes into TARGETS, and KIND is remote when there is one). A shape fact
+# only: whether the slot may be carried as fields is Eligible's question,
+# and a fold whose slot fell is denied here (STRUCTOPTS' foldDeny).
+proc hir::escape::FoldShape {hir instance arity e structOpts} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+    if {![FoldEnabled $structOpts]} {
+        return ""
+    }
+    if {[dict exists $structOpts foldDeny [list [dict get $instance id] $e]]} {
+        return ""
+    }
+    set b [hir::get $hir $e foldBinding]
+    set desc ""
+    set targets {}
+    set sources {}
+    foreach v [FoldIncoming $hir $e] {
+        if {[hir::kind $hir $v] eq "ref"} {
+            set src [hir::get $hir $v binding]
+            if {$src eq $b} {
+                continue
+            }
+            set d [RefShape $hir $v]
+            if {$d eq ""} {
+                return ""
+            }
+            lappend sources $src
+        } else {
+            set c [Classify $hir $instance $arity $v $structOpts]
+            if {$c eq ""} {
+                return ""
+            }
+            lassign $c kind d t
+            if {[lindex $d 1] eq "" || [llength $d] > 2} {
+                # A List, or a recognized result opened into a cut: a fold
+                # slot carries its descriptor's own fields only.
+                return ""
+            }
+            lappend targets {*}$t
+        }
+        if {$desc eq ""} {
+            set desc $d
+        } elseif {$desc ne $d} {
+            return ""
+        }
+    }
+    if {$desc eq ""} {
+        return ""
+    }
+    return [list [expr {$targets eq "" ? "local" : "remote"}] $desc [lsort -unique $targets] [lsort -unique $sources]]
+}
+
+# A ∪ B of two InstanceId -> BindingId -> DESC slot dicts (bindings are
+# distinct across them).
+proc hir::escape::MergeSlots {a b} {
+    dict for {id bindings} $b {
+        dict for {binding desc} $bindings {
+            dict set a $id $binding $desc
+        }
+    }
+    return $a
+}
+
+# {RAWFOLD SHAPED SOURCES WHY}: RAWFOLD is InstanceId -> BindingId -> DESC for
+# every fold slot candidate (FoldShape holds, the intermediate is never
+# captured by a nested block, the descriptor fits the fold ceiling); SHAPED
+# is {InstanceId BindingId} -> fold ExprId for every fold FoldShape holds of
+# (candidate or not: each is a construction until its slot falls); SOURCES
+# is {InstanceId BindingId} -> the bindings references entering the slot
+# name (FoldShape's SOURCES); WHY is {InstanceId BindingId} -> reason tag of
+# a shaped fold that is no candidate (census bookkeeping).
+proc hir::escape::RawFoldArities {spec arity regions structOpts} {
+    set rawFold [dict create]
+    set shaped [dict create]
+    set sources [dict create]
+    set why [dict create]
+    if {![FoldEnabled $structOpts]} {
+        return [list $rawFold $shaped $sources $why]
+    }
+    foreach id [dict get $spec used] {
+        set info [dict get $regions $id]
+        set view [dict get $info view]
+        set instance [dict get $info instance]
+        set captured [dict get $info captured]
+        foreach e [dict get $info folds] {
+            set shape [FoldShape $view $instance $arity $e $structOpts]
+            if {$shape eq ""} {
+                continue
+            }
+            lassign $shape kind desc targets srcs
+            set b [hir::get $view $e foldBinding]
+            set key [list $id $b]
+            dict set shaped $key $e
+            if {[dict exists $captured $b]} {
+                dict set why $key capture
+                continue
+            }
+            if {![WidthOk $structOpts $desc fold]} {
+                dict set why $key width
+                continue
+            }
+            dict set rawFold $id $b $desc
+            if {$srcs ne ""} {
+                dict set sources $key $srcs
+            }
+        }
+    }
+    return [list $rawFold $shaped $sources $why]
+}
+
+# 1 unless one of MATS -- the references to fold E's intermediate B (VIEW)
+# that need the whole object (UseVerdict) -- may run in an iteration that
+# then keeps the intermediate unchanged: reaches an identity completion (a
+# completion leaf that is B itself) or a `continue` of E. Such an iteration
+# builds nothing today (the loop-carried register keeps the one object) and
+# would build the object once more on every pass as fields. A bare `break`
+# ends the fold (once), a `return` or a failure the function: neither is per
+# iteration, and no path goes on past one (the walk's dead state). Over-
+# approximated like hir::mutvec::FoldWalk: what runs before X in its
+# sequence, its operands in order, either branch of an `if`, a handler after
+# any part of its call, an inner loop's body any number of times (the loop
+# rule already declines a materialization there), and a `break` or
+# `continue` of an inner loop as if the code after it ran (its state flows
+# on past that loop).
+proc hir::escape::FoldNoLoss {view e b mats} {
+    set matSet [dict create]
+    foreach r $mats {
+        dict set matSet $r 1
+    }
+    set keep [dict create]
+    foreach leaf [FoldCompletions $view $e] {
+        if {[hir::kind $view $leaf] eq "ref" && [hir::get $view $leaf binding] eq $b} {
+            dict set keep $leaf 1
+        }
+    }
+    return [expr {[NoLossSequence $view $e $matSet $keep [hir::get $view $e body] 0] >= 0}]
+}
+
+# The state after the statements of SEQUENCE run from STATE (NoLossWalk).
+proc hir::escape::NoLossSequence {view f matSet keep sequence state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+    foreach s $sequence {
+        if {$state == 2} {
+            return 2
+        }
+        set state [NoLossWalk $view $f $matSet $keep $s $state]
+        if {$state < 0} {
+            return -1
+        }
+    }
+    return $state
+}
+
+# The join of two states the paths of a branch reach: a dead path (2)
+# contributes nothing.
+proc hir::escape::NoLossJoin {a b} {
+    if {$a == 2} {
+        return $b
+    }
+    if {$b == 2} {
+        return $a
+    }
+    return [expr {$a || $b}]
+}
+
+# The state after expression X of fold F's body runs, from STATE before it:
+# 1 once a materializing reference (MATSET) may have run in this iteration, 0
+# before; 2 when no path goes on past X (a `return` or a `fail` leaves the
+# function, a `break` or a `continue` of F ends the iteration); -1 when an
+# iteration that keeps the intermediate (a KEEP leaf, a `continue` of F) may
+# follow a materializing reference.
+proc hir::escape::NoLossWalk {view f matSet keep x state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+    set node [hir::node $view $x]
+    if {![dict get $node reachable]} {
+        return $state
+    }
+    switch -- [dict get $node kind] {
+        const - block {
+            return $state
+        }
+        ref {
+            if {$state && [dict exists $keep $x]} {
+                return -1
+            }
+            if {[dict exists $matSet $x]} {
+                return 1
+            }
+            return $state
+        }
+        continue - break {
+            foreach c [hir::children $view $x] {
+                set state [NoLossWalk $view $f $matSet $keep $c $state]
+                if {$state < 0 || $state == 2} {
+                    return $state
+                }
+            }
+            if {[dict get $node target] ne $f} {
+                # An inner loop's: what follows that loop runs from here.
+                return $state
+            }
+            if {$state && [dict get $node kind] eq "continue"} {
+                return -1
+            }
+            return 2
+        }
+        return - fail {
+            foreach c [hir::children $view $x] {
+                set state [NoLossWalk $view $f $matSet $keep $c $state]
+                if {$state < 0 || $state == 2} {
+                    return $state
+                }
+            }
+            return 2
+        }
+        if {
+            set state [NoLossWalk $view $f $matSet $keep [dict get $node condition] $state]
+            if {$state < 0 || $state == 2} {
+                return $state
+            }
+            set then [NoLossSequence $view $f $matSet $keep [dict get $node thenBody] $state]
+            set else [NoLossSequence $view $f $matSet $keep [dict get $node elseBody] $state]
+            if {$then < 0 || $else < 0} {
+                return -1
+            }
+            return [NoLossJoin $then $else]
+        }
+        handle {
+            set state [NoLossWalk $view $f $matSet $keep [dict get $node call] $state]
+            if {$state < 0 || $state == 2} {
+                return $state
+            }
+            # The call completing normally, or a handler from any point of
+            # it (the state after the call over-approximates every point).
+            set result $state
+            foreach body [dict get $node handlerBodies] {
+                set after [NoLossSequence $view $f $matSet $keep $body $state]
+                if {$after < 0} {
+                    return -1
+                }
+                set result [NoLossJoin $result $after]
+            }
+            return $result
+        }
+        loop - listloop - countloop - lockloop {
+            set body [dict get $node body]
+            set children [hir::children $view $x]
+            foreach c [lrange $children 0 end-[llength $body]] {
+                set state [NoLossWalk $view $f $matSet $keep $c $state]
+                if {$state < 0 || $state == 2} {
+                    return $state
+                }
+            }
+            # The body any number of times (zero included): a later pass
+            # starts where an earlier one ended; a pass that ends dead
+            # ends the fold or the function, so nothing follows it.
+            set after [NoLossSequence $view $f $matSet $keep $body $state]
+            if {$after == 1 && !$state} {
+                set after [NoLossSequence $view $f $matSet $keep $body 1]
+            }
+            if {$after < 0} {
+                return -1
+            }
+            return [NoLossJoin $state $after]
+        }
+    }
+    foreach c [hir::children $view $x] {
+        set state [NoLossWalk $view $f $matSet $keep $c $state]
+        if {$state < 0 || $state == 2} {
+            return $state
+        }
+    }
+    return $state
 }
 
 # Public wrapper of Classify for native/lower.tcl: HIR is the *view* of
@@ -919,6 +1470,15 @@ proc hir::escape::RegionInfo {hir spec id} {
     # LayoutCall stores its leaves into the emitted bytes, reading its fields
     # -- a structural use, like a context installation.
     set leafUse [dict create]
+    # The region's folds, and every reference that enters a slot unchanged
+    # (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md): a leaf of a fold's initial
+    # value or of its body's trailing value (FoldIncoming: the intermediate
+    # itself, a local, an outer intermediate), or a leaf of an `if` bound to a
+    # local (a join with a reference branch, ClassifyIf's REFJOIN) -> the
+    # {InstanceId BindingId} slot it enters. Such a reference is free while
+    # that slot stands (UseVerdict).
+    set folds {}
+    set flowInto [dict create]
     foreach e $exprs {
         switch -- [hir::kind $view $e] {
             block {
@@ -929,10 +1489,26 @@ proc hir::escape::RegionInfo {hir spec id} {
             project {
                 dict set projByRecv [hir::get $view $e receiver] $e
             }
+            loop - listloop - countloop - lockloop {
+                if {[hir::isFold $view $e] && [hir::get $view $e reachable]} {
+                    lappend folds $e
+                    set target [list $id [hir::get $view $e foldBinding]]
+                    foreach leaf [FoldIncoming $view $e] {
+                        if {[hir::kind $view $leaf] eq "ref"} {
+                            dict set flowInto $leaf $target
+                        }
+                    }
+                }
+            }
             bind {
                 set v [hir::get $view $e value]
                 if {[hir::kind $view $v] eq "ref"} {
                     dict set bindValue $v $e
+                } elseif {[hir::kind $view $v] in {if call} && ![hir::get $view $e duplicate]} {
+                    set target [list $id [hir::get $view $e binding]]
+                    foreach r [JoinRefs $view $v] {
+                        dict set flowInto $r $target
+                    }
                 }
             }
             ref {
@@ -1012,7 +1588,8 @@ proc hir::escape::RegionInfo {hir spec id} {
     return [dict create view $view instance $instance region $region exprs $exprs \
         trailing $trailing captured $captured refsByBinding $refsByBinding \
         listGetByArg $listGetByArg argPos $argPos projByRecv $projByRecv \
-        bindValue $bindValue wordUse $wordUse ctxUse $ctxUse leafUse $leafUse parent $parent loopOf $loopOf]
+        bindValue $bindValue wordUse $wordUse ctxUse $ctxUse leafUse $leafUse parent $parent loopOf $loopOf \
+        folds $folds flowInto $flowInto]
 }
 
 # {PARENT LOOPOF} of the region whose top-level body is TOPBODY (VIEW): PARENT
@@ -1175,6 +1752,11 @@ proc hir::escape::RawLocalArities {hir spec arity regions {structOpts {}}} {
     set targets [dict create]
     set aliasOf [dict create]
     set why [dict create]
+    # {InstanceId BindingId} -> the bindings the reference branches of a
+    # local's join name (ClassifyIf's REFJOIN): the local stands only while
+    # they do (Eligible).
+    set sources [dict create]
+    set refJoin [RefJoinEnabled $structOpts]
     foreach id [dict get $spec used] {
         set info [dict get $regions $id]
         set view [dict get $info view]
@@ -1188,7 +1770,7 @@ proc hir::escape::RawLocalArities {hir spec arity regions {structOpts {}}} {
             }
             set node [hir::node $view $e]
             set valueExpr [dict get $node value]
-            set c [Classify $view $instance $arity $valueExpr $structOpts]
+            set c [Classify $view $instance $arity $valueExpr $structOpts $refJoin]
             set isAlias [expr {$c eq "" && [StructEnabled $structOpts] && [hir::kind $view $valueExpr] eq "ref"}]
             if {$c eq "" && !$isAlias} {
                 continue
@@ -1220,6 +1802,12 @@ proc hir::escape::RawLocalArities {hir spec arity regions {structOpts {}}} {
             if {$kind eq "remote"} {
                 dict set targets $id $b $target
             }
+            if {$refJoin} {
+                set srcs [lmap r [JoinRefs $view $valueExpr] {hir::get $view $r binding}]
+                if {$srcs ne ""} {
+                    dict set sources [list $id $b] [lsort -unique $srcs]
+                }
+            }
         }
         # Aliases of shaped struct locals, to a fixed point (chains).
         set changed 1
@@ -1240,7 +1828,7 @@ proc hir::escape::RawLocalArities {hir spec arity regions {structOpts {}}} {
             }
         }
     }
-    return [list $result $targets $aliasOf $why]
+    return [list $result $targets $aliasOf $why $sources]
 }
 
 # RAWPARAM: InstanceId -> BindingId -> DESC, for every parameter binding of a
@@ -1416,7 +2004,15 @@ proc hir::escape::UseTag {info r {regions {}} {deny {}}} {
 # not. STRUCTURAL counts the references that cost nothing (a projection, an
 # alias or an argument forwarded into another candidate), FORWARDS the
 # argument forwards among them, MATS the tags of the references that need
-# the physical object (struct locals only).
+# the physical object (struct locals only), MATREFS those references
+# themselves (FoldNoLoss reads them).
+#
+# A reference that enters a slot unchanged (RegionInfo's FLOWINTO: a fold's
+# incoming leaf, the intermediate's own identity completion included, or a
+# reference branch of a local's join) is free while that slot is a current
+# candidate of the same descriptor, as a forward into a parameter is. A fold
+# slot (FOLDEXPR, the fold) is bound once per iteration: its binding's loop
+# is the fold itself.
 #
 # A *List* candidate keeps the original rule exactly: every reference must
 # be a `std::list::at` at a constant in-range index, or an unchanged forwarding
@@ -1431,7 +2027,7 @@ proc hir::escape::UseTag {info r {regions {}} {deny {}}} {
 # *parameter* never materializes: its callers hand it over as fields, so a
 # use inside the callee that needs the object would re-allocate it once per
 # call.
-proc hir::escape::UseVerdict {candidates regions aliasOf id b desc isParam bindExpr {deny {}}} {
+proc hir::escape::UseVerdict {candidates regions aliasOf id b desc isParam bindExpr {deny {}} {foldExpr ""}} {
     set info [dict get $regions $id]
     set view [dict get $info view]
     set refsByBinding [dict get $info refsByBinding]
@@ -1441,40 +2037,56 @@ proc hir::escape::UseVerdict {candidates regions aliasOf id b desc isParam bindE
     set structural 0
     set forwards 0
     set mats {}
+    set matRefs {}
     if {$shape eq ""} {
         set listGetByArg [dict get $info listGetByArg]
         foreach r $refs {
             if {[dict exists $listGetByArg $r]} {
                 if {![ScalarUse $view $listGetByArg $r $n]} {
-                    return [list list-use 0 0 {}]
+                    return [list list-use 0 0 {} {}]
                 }
                 continue
             }
             if {[dict exists $argPos $r] && [ForwardTarget $candidates $regions $argPos $r $desc]} {
                 continue
             }
-            return [list list-use 0 0 {}]
+            return [list list-use 0 0 {} {}]
         }
-        return [list "" 0 0 {}]
+        return [list "" 0 0 {} {}]
     }
     set layout [lindex $shape 1]
     set projByRecv [dict get $info projByRecv]
     set bindValue [dict get $info bindValue]
+    set flowInto [dict get $info flowInto]
     set loopOf [dict get $info loopOf]
-    if {$bindExpr eq "" || ![dict exists $loopOf $bindExpr]} {
+    if {$foldExpr ne ""} {
+        set bindLoop $foldExpr
+    } elseif {$bindExpr eq "" || ![dict exists $loopOf $bindExpr]} {
         set bindLoop "?"
     } else {
         set bindLoop [dict get $loopOf $bindExpr]
     }
     set wordUse [dict get $info wordUse]
     foreach r $refs {
+        if {$foldExpr ne "" && ![hir::get $view $r reachable]} {
+            # A fold slot's reference HIR left unreachable (a body that never
+            # runs: a List[never] instance's) is never lowered.
+            continue
+        }
         if {[dict exists $projByRecv $r]} {
             set slot [lsearch -exact $layout [hir::get $view [dict get $projByRecv $r] name]]
             if {$slot < 0} {
-                return [list projection 0 0 {}]
+                return [list projection 0 0 {} {}]
             }
             incr structural
             continue
+        }
+        if {[dict exists $flowInto $r]} {
+            set target [dict get $flowInto $r]
+            if {[dict exists $candidates $target] && [dict get $candidates $target] eq $desc} {
+                incr structural
+                continue
+            }
         }
         if {[dict exists $wordUse $r] && [llength $layout] == 1} {
             # A syscall register: reads the one field, like a projection.
@@ -1507,17 +2119,18 @@ proc hir::escape::UseVerdict {candidates regions aliasOf id b desc isParam bindE
         }
         set tag [UseTag $info $r $regions $deny]
         if {$isParam} {
-            return [list $tag 0 0 {}]
+            return [list $tag 0 0 {} {}]
         }
         if {![dict exists $loopOf $r] || [dict get $loopOf $r] ne $bindLoop} {
-            return [list loop 0 0 {}]
+            return [list loop 0 0 {} {}]
         }
         lappend mats $tag
+        lappend matRefs $r
     }
     if {$mats ne "" && $structural == 0} {
-        return [list [lindex $mats 0] 0 0 {}]
+        return [list [lindex $mats 0] 0 0 {} {}]
     }
-    return [list "" $structural $forwards $mats]
+    return [list "" $structural $forwards $mats $matRefs]
 }
 
 # 1 if the reference R (a call argument, ARGPOS) is passed, unchanged, to an
@@ -1550,10 +2163,23 @@ proc hir::escape::ForwardTarget {candidates regions argPos r desc} {
 # alias is dropped along with its source and vice versa (each is accepted
 # only while the other stands). WHY maps a dropped slot to its reason tag,
 # USEINFO a kept one to {STRUCTURAL FORWARDS MATS}.
-proc hir::escape::Eligible {rawLocal rawParam regions aliasOf {deny {}}} {
+#
+# RAWFOLD adds the fold slots (FOLDEXPRS: {InstanceId BindingId} -> the
+# fold), SOURCES the bindings whose references enter a slot ({InstanceId
+# BindingId} -> BindingIds: a fold's incoming references, a join's
+# reference branches). A slot stands only while each of its sources is a
+# candidate of the same descriptor (reason `source`: the reference is then
+# no longer free fields), and a fold slot only while FoldNoLoss holds of its
+# materializing references (reason `no-loss`).
+proc hir::escape::Eligible {rawLocal rawParam regions aliasOf {deny {}} {rawFold {}} {sources {}} {foldExprs {}}} {
     set candidates [dict create]
     set isParam [dict create]
     set bindExprs [dict create]
+    dict for {id bindings} $rawFold {
+        dict for {b n} $bindings {
+            dict set candidates [list $id $b] $n
+        }
+    }
     dict for {id bindings} $rawLocal {
         dict for {b n} $bindings {
             dict set candidates [list $id $b] $n
@@ -1582,17 +2208,38 @@ proc hir::escape::Eligible {rawLocal rawParam regions aliasOf {deny {}}} {
             dict set why $key $reason
         }
     }
+    # One no-loss walk per fold slot and set of materializing references.
+    set noLoss [dict create]
     set changed 1
     while {$changed} {
         set changed 0
         dict for {key desc} $candidates {
             lassign $key id b
+            set foldExpr [dict getdef $foldExprs $key ""]
             set verdict [UseVerdict $candidates $regions $aliasOf $id $b $desc [dict exists $isParam $key] \
-                [dict getdef $bindExprs $key ""] $deny]
-            lassign $verdict reason structural forwards mats
+                [dict getdef $bindExprs $key ""] $deny $foldExpr]
+            lassign $verdict reason structural forwards mats matRefs
             if {$reason eq "" && [dict exists $aliasOf $id $b]
                     && ![dict exists $candidates [list $id [dict get $aliasOf $id $b]]]} {
                 set reason alias
+            }
+            if {$reason eq ""} {
+                foreach src [dict getdef $sources $key {}] {
+                    set skey [list $id $src]
+                    if {![dict exists $candidates $skey] || [dict get $candidates $skey] ne $desc} {
+                        set reason source
+                        break
+                    }
+                }
+            }
+            if {$reason eq "" && $foldExpr ne "" && $matRefs ne ""} {
+                set memo [list $key $matRefs]
+                if {![dict exists $noLoss $memo]} {
+                    dict set noLoss $memo [FoldNoLoss [dict get $regions $id view] $foldExpr $b $matRefs]
+                }
+                if {![dict get $noLoss $memo]} {
+                    set reason no-loss
+                }
             }
             if {$reason ne ""} {
                 dict unset candidates $key
@@ -1869,9 +2516,25 @@ proc hir::escape::IntersectTrees {a b} {
 # a recognized aggregate value: {lit ID E} for a struct literal, {wb ID E}
 # for a foreign call's write-back value (WriteBackResult), {res CALLEE} for an
 # exact call to an instance with a recognized result, through `if` branches.
-# "" if E is anything else.
+# A fold carried as fields is {fold ID B}, its slot; a reference branch of a
+# join (ClassifyIf's REFJOIN) is {src ID B}, the slot of the binding it names,
+# and {opq ID E}: a class that holds one is opaque (no cut). "" if E is
+# anything else.
 proc hir::escape::Origins {view instance arity id e structOpts} {
     switch -- [hir::kind $view $e] {
+        loop - listloop - countloop - lockloop {
+            if {[Classify $view $instance $arity $e $structOpts] eq ""} {
+                return ""
+            }
+            return [list [list fold $id [hir::get $view $e foldBinding]]]
+        }
+        ref {
+            set b [hir::get $view $e binding]
+            if {$b eq "" || [RefShape $view $e] eq ""} {
+                return ""
+            }
+            return [list [list src $id $b] [list opq $id $e]]
+        }
         struct {
             if {[Classify $view $instance $arity $e $structOpts] eq ""} {
                 return ""
@@ -1879,6 +2542,12 @@ proc hir::escape::Origins {view instance arity id e structOpts} {
             return [list [list lit $id $e]]
         }
         call {
+            set src [StructShareSource $view $e]
+            if {$src ne "" && [RefJoinEnabled $structOpts]} {
+                # A whole-struct share of a slot's binding: the binding's
+                # slot, opaque (its fields keep the source's layout).
+                return [list [list src $id [hir::get $view $src binding]] [list opq $id $e]]
+            }
             set c [Classify $view $instance $arity $e $structOpts]
             if {[lindex $c 0] eq "local" && [IsWriteBack $view $e $structOpts]} {
                 return [list [list wb $id $e]]
@@ -1914,12 +2583,26 @@ proc hir::escape::Origins {view instance arity id e structOpts} {
     return ""
 }
 
-# Unions MEMBER with every construction in ORIGINS ({lit ID E} and {wb ID E}
-# always; {res ID} only if that result is itself a member).
+# Unions MEMBER with every construction in ORIGINS ({lit ID E}, {wb ID E} and
+# {opq ID E} always; {res ID} and {fold ID B} only if that result or slot is
+# itself a member; {src ID B} with the member slot of binding B, a local's or
+# a fold intermediate's, if it is one).
 proc hir::escape::UnionOrigins {ufVar member origins} {
     upvar 1 $ufVar uf
     foreach o $origins {
-        if {[lindex $o 0] eq "res" && ![dict exists $uf $o]} {
+        if {[lindex $o 0] in {res fold} && ![dict exists $uf $o]} {
+            continue
+        }
+        if {[lindex $o 0] eq "src"} {
+            set found ""
+            foreach kind {loc fold} {
+                if {[dict exists $uf [list $kind {*}[lrange $o 1 2]]]} {
+                    set found [list $kind {*}[lrange $o 1 2]]
+                }
+            }
+            if {$found ne ""} {
+                UfUnion uf $member $found
+            }
             continue
         }
         UfUnion uf $member $o
@@ -1977,7 +2660,7 @@ proc hir::escape::UfUnion {ufVar a b} {
 # is allocated between the foreign function's return and the code that reads
 # its result (C-FFI-ERROR-CAPTURE-MILESTONE-1.md). A child of an ordinary
 # literal keeps the rule that an independent use closes it.
-proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligible rawParam transport structOpts} {
+proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligible rawParam transport structOpts {foldExprs {}}} {
     set uf [dict create]
     set context [dict get $spec context]
     set selfTails [dict get $context selfTails]
@@ -1987,12 +2670,37 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
         if {[lindex $desc 1] eq ""} {
             continue
         }
-        set k [list [expr {[dict exists $rawParam $id $b] ? "par" : "loc"}] $id $b]
+        if {[dict exists $foldExprs $key]} {
+            set k [list fold $id $b]
+        } else {
+            set k [list [expr {[dict exists $rawParam $id $b] ? "par" : "loc"}] $id $b]
+        }
         UfFind uf $k
     }
     dict for {id desc} $arity {
         if {[lindex $desc 1] ne ""} {
             UfFind uf [list res $id]
+        }
+    }
+    # A fold slot (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md) carries its
+    # descriptor's own fields: its class -- every construction and slot a
+    # value entering it comes from, and every slot its value goes to -- is
+    # opaque ({opq ...}: no cut is chosen for it). After the result members
+    # exist: an exact call entering the slot (an initial value `start(k)`, a
+    # completion `step(s)`) puts its callee's result in the class, which
+    # UnionOrigins only does for a member it already has.
+    dict for {key e} $foldExprs {
+        lassign $key id b
+        set member [list fold $id $b]
+        set info [dict get $regions $id]
+        set view [dict get $info view]
+        UfUnion uf $member [list opq $id $e]
+        foreach v [FoldIncoming $view $e] {
+            if {[hir::kind $view $v] eq "ref"} {
+                UnionOrigins uf $member [list [list src $id [hir::get $view $v binding]]]
+            } else {
+                UnionOrigins uf $member [Origins $view [dict get $info instance] $arity $id $v $structOpts]
+            }
         }
     }
     set bindValues [dict create]
@@ -2050,7 +2758,14 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
             if {[hir::kind $cview $argExpr] eq "ref"} {
                 set src [list $callerId [hir::get $cview $argExpr binding]]
                 if {[dict exists $eligible $src] && [dict get $eligible $src] eq $desc} {
-                    UfUnion uf $member [list [expr {[dict exists $rawParam {*}$src] ? "par" : "loc"}] {*}$src]
+                    if {[dict exists $foldExprs $src]} {
+                        set kind fold
+                    } elseif {[dict exists $rawParam {*}$src]} {
+                        set kind par
+                    } else {
+                        set kind loc
+                    }
+                    UfUnion uf $member [list $kind {*}$src]
                 }
                 continue
             }
@@ -2091,7 +2806,7 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
             set member ""
             if {[hir::kind $view $node] eq "ref"} {
                 set b [hir::get $view $node binding]
-                foreach kind {loc par} {
+                foreach kind {loc par fold} {
                     if {[dict exists $uf [list $kind $id $b]]} {
                         set member [list $kind $id $b]
                     }
@@ -2132,8 +2847,11 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
         set tree ""
         set shape ""
         set lazyCapable {}
+        set opaque 0
         foreach k $members {
-            if {[lindex $k 0] in {lit wb}} {
+            if {[lindex $k 0] eq "opq"} {
+                set opaque 1
+            } elseif {[lindex $k 0] in {lit wb}} {
                 lassign $k kind id e
                 if {$kind eq "lit"} {
                     set t [LiteralTree [dict get $regions $id view] $e]
@@ -2157,7 +2875,7 @@ proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligibl
                 }
             }
         }
-        if {$tree eq "" || [dict size [lindex $tree 1]] == 0} {
+        if {$opaque || $tree eq "" || [dict size [lindex $tree 1]] == 0} {
             continue
         }
         # path statistics of the class
@@ -2298,35 +3016,80 @@ proc hir::escape::ChooseLevel {structOpts tree prefix blocked ceiling ea er cyc 
 #                 literal or an exact call): read straight from its fields
 #   census        one record per struct construction (see Census)
 proc hir::escape::analyze {hir spec {paramOpt 1} {structOpts {}}} {
-    lassign [Arities $hir $spec $structOpts] arity forward resultWhy retDepth
-    set retTop [RetTop $arity $forward]
     set regions [dict create]
     foreach id [dict get $spec used] {
         dict set regions $id [RegionInfo $hir $spec $id]
     }
-    lassign [RawLocalArities $hir $spec $arity $regions $structOpts] rawLocal localTargets aliasOf localWhy
-    set rawParam [dict create]
     set callSites {}
     if {$paramOpt} {
         set callSites [CallSites $hir $spec]
-        set rawParam [RawParamArities $spec $arity $rawLocal $callSites $regions $structOpts]
     }
-    lassign [Eligible $rawLocal $rawParam $regions $aliasOf] eligible dropWhy useInfo
-    set transport [dict create]
-    set deny [dict create]
-    if {[StructEnabled $structOpts] && ![LegacyPolicy $structOpts]} {
-        lassign [TransportPlan $spec $regions $callSites $arity $retDepth $eligible $rawParam $structOpts] deny transport
-        if {[dict size $deny]} {
-            lassign [Eligible $rawLocal $rawParam $regions $aliasOf $deny] eligible dropWhy useInfo
+    # Rounds (see "Fold slots"): a fold is a construction until its slot
+    # falls; then it is denied and every fact that read it is decided again.
+    set foldDeny [dict create]
+    # {InstanceId BindingId} -> why, for every shaped fold whose slot fell
+    # in some round.
+    set fellWhy [dict create]
+    set rounds 0
+    while 1 {
+        incr rounds
+        set so $structOpts
+        if {[dict size $foldDeny]} {
+            dict set so foldDeny $foldDeny
         }
+        lassign [Arities $hir $spec $so] arity forward resultWhy retDepth
+        lassign [RawLocalArities $hir $spec $arity $regions $so] rawLocal localTargets aliasOf localWhy localSources
+        lassign [RawFoldArities $spec $arity $regions $so] rawFold shaped foldSources foldWhy
+        set rawParam [dict create]
+        if {$paramOpt} {
+            # A fold intermediate forwarded unchanged to an exact callee
+            # proves the callee's parameter shape as a local does (ArgShape).
+            set rawParam [RawParamArities $spec $arity [MergeSlots $rawLocal $rawFold] $callSites $regions $so]
+        }
+        set sources [dict merge $localSources $foldSources]
+        set foldExprs [dict create]
+        dict for {id bindings} $rawFold {
+            foreach b [dict keys $bindings] {
+                dict set foldExprs [list $id $b] [dict get $shaped [list $id $b]]
+            }
+        }
+        lassign [Eligible $rawLocal $rawParam $regions $aliasOf {} $rawFold $sources $foldExprs] eligible dropWhy useInfo
+        set transport [dict create]
+        set deny [dict create]
+        if {[StructEnabled $so] && ![LegacyPolicy $so]} {
+            lassign [TransportPlan $spec $regions $callSites $arity $retDepth $eligible $rawParam $so] deny transport
+            if {[dict size $deny]} {
+                lassign [Eligible $rawLocal $rawParam $regions $aliasOf $deny $rawFold $sources $foldExprs] eligible dropWhy useInfo
+            }
+        }
+        set fallen [dict create]
+        dict for {key e} $shaped {
+            if {![dict exists $eligible $key]} {
+                dict set fallen [list [lindex $key 0] $e] 1
+                dict set fellWhy $key [if {[dict exists $foldWhy $key]} {dict get $foldWhy $key} else {dict getdef $dropWhy $key other}]
+            }
+        }
+        if {![dict size $fallen]} {
+            break
+        }
+        set foldDeny [dict merge $foldDeny $fallen]
     }
+    set structOpts $so
+    set retTop [RetTop $arity $forward]
     set virtual [dict create]
     set paramVirtual [dict create]
+    set foldVirtual [dict create]
     set wants [dict create]
     dict for {key desc} $eligible {
         lassign $key id b
         if {[dict exists $rawParam $id $b]} {
             dict set paramVirtual $id $b $desc
+        } elseif {[dict exists $rawFold $id $b]} {
+            dict set foldVirtual $id $b $desc
+            foreach t [lindex [FoldShape [dict get $regions $id view] [dict get $regions $id instance] \
+                    $arity [dict get $foldExprs $key] $so] 2] {
+                dict set wants $t 1
+            }
         } else {
             dict set virtual $id $b $desc
             if {[dict exists $localTargets $id $b]} {
@@ -2369,7 +3132,7 @@ proc hir::escape::analyze {hir spec {paramOpt 1} {structOpts {}}} {
     # field value.
     set nested {}
     if {[StructEnabled $structOpts] && ![LegacyPolicy $structOpts] && [hir::transport::Option $structOpts nesting]} {
-        lassign [NestingPlan $hir $spec $regions $callSites $arity $retDepth $eligible $rawParam $transport $structOpts] cuts nested
+        lassign [NestingPlan $hir $spec $regions $callSites $arity $retDepth $eligible $rawParam $transport $structOpts $foldExprs] cuts nested
         dict for {k cut} $cuts {
             switch -- [lindex $k 0] {
                 loc {
@@ -2424,14 +3187,24 @@ proc hir::escape::analyze {hir spec {paramOpt 1} {structOpts {}}} {
         }
     }
     set wants [Propagate $wants $forward]
+    # The fold of each virtual fold slot, and the fold slots that fell
+    # ({InstanceId BindingId} -> reason).
+    set foldOf [dict create]
+    dict for {id bindings} $foldVirtual {
+        foreach b [dict keys $bindings] {
+            dict set foldOf $id $b [dict get $foldExprs [list $id $b]]
+        }
+    }
+    set foldDropped $fellWhy
     set analysis [dict create arity $arity wants $wants virtual $virtual paramVirtual $paramVirtual \
+        foldVirtual $foldVirtual foldOf $foldOf foldDropped $foldDropped rounds $rounds \
         structOpts $structOpts direct $direct directRoot $directRoot registerWord $registerWord \
         transport $transport deny $deny \
         retDepth $retDepth retTop $retTop nested $nested]
     if {[StructEnabled $structOpts]} {
         dict set analysis census [Census $spec $regions $arity $resultWhy $wants $virtual $paramVirtual \
             $localWhy $dropWhy $useInfo $structOpts [dict create deny $deny transport $transport \
-            retDepth $retDepth retTop $retTop nested $nested]]
+            retDepth $retDepth retTop $retTop nested $nested foldVirtual $foldVirtual foldWhy $foldWhy]]
     } else {
         dict set analysis census {}
     }
@@ -2589,6 +3362,8 @@ proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtua
     set retDepth [dict getdef $ctx retDepth {}]
     set retTop [dict getdef $ctx retTop {}]
     set nested [dict getdef $ctx nested {}]
+    set foldVirtual [dict getdef $ctx foldVirtual {}]
+    set foldWhy [dict getdef $ctx foldWhy {}]
     # literal origin -> its class record
     set literalClass [dict create]
     foreach rec $nested {
@@ -2658,6 +3433,23 @@ proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtua
                 }
             } elseif {$pkind eq "project"} {
                 set class local
+            } elseif {$pkind in {loop listloop countloop lockloop} && [hir::isFold $view $pe]
+                    && ($v eq [hir::get $view $pe foldInitial] || $v eq [lindex [hir::get $view $pe body] end])} {
+                # A value entering a fold's intermediate (FOLD-VIRTUAL-STRUCT-
+                # STATE-MILESTONE-1.md): carried as the slot's fields when the
+                # slot is virtual, else built as before (the loop consumes it).
+                set fb [hir::get $view $pe foldBinding]
+                set dest [list fold $id $fb]
+                if {[dict exists $foldVirtual $id $fb]} {
+                    lassign [dict get $useInfo [list $id $fb]] structural forwards mats
+                    set class local
+                } elseif {[dict exists $dropWhy [list $id $fb]]} {
+                    set reason [dict get $dropWhy [list $id $fb]]
+                } elseif {[dict exists $foldWhy [list $id $fb]]} {
+                    set reason [dict get $foldWhy [list $id $fb]]
+                } else {
+                    set reason control
+                }
             } elseif {$pkind eq "bind" && [hir::get $view $pe value] eq $v} {
                 set b [hir::get $view $pe binding]
                 set dest [list loc $id $b]
@@ -2854,6 +3646,9 @@ proc hir::escape::CensusTransport {rec id regions transport retTop structOpts pa
     }
     set width [dict get $rec width]
     switch -- [lindex $dest 0] {
+        fold {
+            dict set rec where fold
+        }
         res {
             dict set rec where result
             if {[dict exists $retTop $id]} {
@@ -3006,6 +3801,22 @@ proc hir::escape::virtualShape {analysis id b} {
     return ""
 }
 
+# The descriptor ({N {ID LAYOUT}}) of fold slot B -- fold intermediate B of
+# instance ID carried as N field registers (FOLD-VIRTUAL-STRUCT-STATE-
+# MILESTONE-1.md) -- or "" when B is carried as one register.
+proc hir::escape::foldVirtualDesc {analysis id b} {
+    if {[dict exists $analysis foldVirtual $id $b]} {
+        return [dict get $analysis foldVirtual $id $b]
+    }
+    return ""
+}
+
+# The fold slots of ANALYSIS ({InstanceId -> BindingId -> fold ExprId}) and
+# the shaped folds whose slot fell ({InstanceId BindingId} -> reason): audit.
+proc hir::escape::foldSlots {analysis} {
+    return [list [dict getdef $analysis foldOf {}] [dict getdef $analysis foldDropped {}]]
+}
+
 # Like virtualArity, for a *parameter* binding B of instance ID (Eligible's
 # paramVirtual): N if B should be received as N ordinary field
 # registers by ID's `fields`/`fieldscompanion` internal variant, "" if B
@@ -3122,7 +3933,8 @@ proc hir::escape::explain {hir spec analysis} {
         set n [arity $analysis $id]
         set bindings [dict getdef [dict get $analysis virtual] $id {}]
         set params [dict getdef [dict get $analysis paramVirtual] $id {}]
-        if {$n eq "" && $bindings eq "" && $params eq ""} {
+        set folds [dict getdef [dict getdef $analysis foldVirtual {}] $id {}]
+        if {$n eq "" && $bindings eq "" && $params eq "" && $folds eq ""} {
             continue
         }
         lappend lines "[hir::specialize::label $spec $id] ($id):"
@@ -3135,6 +3947,9 @@ proc hir::escape::explain {hir spec analysis} {
         }
         foreach {b desc} $bindings {
             lappend lines "  virtual local $b: [DescName $desc], never materialized eagerly"
+        }
+        foreach {b desc} $folds {
+            lappend lines "  virtual fold intermediate $b: [DescName $desc], carried as field registers"
         }
     }
     if {$lines eq ""} {

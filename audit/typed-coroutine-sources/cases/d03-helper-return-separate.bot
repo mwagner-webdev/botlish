@@ -1,0 +1,20 @@
+# case: deep yields -- a helper yields ints and returns a str to its caller: the helper's return never mixes with the outward type (COROUTINES.md 20)
+# class: intended
+# expect: facts-widened
+# value: [1, 5, 4]
+import std::coroutine
+import std::str
+
+fn helper(n: int) -> str:
+    yield n
+    "label"
+
+fn source() -> int:
+    s = helper(1)
+    t = helper(s.length())
+    t.length() - 1
+
+coroutine {step, first} = source()
+second = step()
+final = step()
+[first, second, final]

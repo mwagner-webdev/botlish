@@ -273,6 +273,12 @@ namespace eval native::lower {
     # A payload-bearing enum case's construction (core/enums.tcl,
     # PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): `op enumcase`.
     dict set natives enum#case enumcase
+    # A match's case tests (core/enums.tcl, PORTABILITY-EXHAUSTIVE-MATCH-
+    # MILESTONE-1.md): `op enumis`, `op enumpayload` (EnumSelection) and the
+    # end of an unmatched chain.
+    dict set natives enum#is enumis
+    dict set natives enum#payload enumpayload
+    dict set natives enum#unmatched {op enumunmatched}
     # The borrow test fixture's synthetic foreign operations (core/cabi.tcl's
     # installBorrowFixture; runtime/ffifixture.rs), one op per behavior.
     foreach {name behavior} [core::cabi::borrowFixture] {
@@ -1484,6 +1490,7 @@ proc native::lower::Program {hirProgram args} {
             -struct-local-width "" -struct-return-width "" -struct-arg-width "" \
             -struct-policy "" -struct-arg-budget "" -struct-return-budget "" -struct-cycle-budget "" \
             -struct-arg-factor "" -struct-return-factor "" -struct-cycle-factor "" -struct-nesting "" \
+            -struct-fold "" -struct-ref-joins "" -struct-fold-width "" \
             -block-escape-opt $blockEscapeDefault \
             -string-region-opt $stringRegionDefault -string-traversal-opt $traversalDefault \
             -proven-bounds-opt $provenBoundsDefault \
@@ -1556,7 +1563,10 @@ proc native::lower::Program {hirProgram args} {
             -struct-arg-factor argFactor BOTLISH_NATIVE_STRUCT_ARG_FACTOR
             -struct-return-factor returnFactor BOTLISH_NATIVE_STRUCT_RETURN_FACTOR
             -struct-cycle-factor cycleFactor BOTLISH_NATIVE_STRUCT_CYCLE_FACTOR
-            -struct-nesting nesting BOTLISH_NATIVE_STRUCT_NESTING} {
+            -struct-nesting nesting BOTLISH_NATIVE_STRUCT_NESTING
+            -struct-fold foldSlots BOTLISH_NATIVE_STRUCT_FOLD
+            -struct-ref-joins refJoins BOTLISH_NATIVE_STRUCT_REF_JOINS
+            -struct-fold-width foldWidth BOTLISH_NATIVE_STRUCT_FOLD_WIDTH} {
         set width [dict get $options $option]
         if {$width eq "" && [info exists ::env($envName)] && $::env($envName) ne ""} {
             set width $::env($envName)
@@ -1856,7 +1866,33 @@ proc native::lower::Program {hirProgram args} {
     set text "[join $header \n]\n\n[join $texts \n\n]\n"
     return [dict create text $text functions $infos statistics [Statistics $infos] \
         specialization $spec abiPlan $abiPlan shortPlan $shortPlan construction $construction structCensus [hir::escape::census $escape] \
-        transportFacts [hir::escape::transportFacts $escape]]
+        transportFacts [hir::escape::transportFacts $escape] foldSlots [FoldSlotReport $hirProgram $spec $escape] \
+        escapeRounds [dict getdef $escape rounds 1]]
+}
+
+# The fold slots of ESCAPE (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md), one
+# record per shaped fold intermediate of a used instance, in a deterministic
+# order: {label LABEL name NAME status virtual|dropped width N reason WHY}
+# (WHY "" for a virtual one). An audit, like the struct census.
+proc native::lower::FoldSlotReport {hir spec escape} {
+    if {![dict exists $escape foldVirtual]} {
+        return {}
+    }
+    lassign [hir::escape::foldSlots $escape] foldOf dropped
+    set records {}
+    dict for {id bindings} $foldOf {
+        dict for {b e} $bindings {
+            lappend records [dict create label [hir::specialize::label $spec $id] \
+                name [dict get [hir::binding $hir $b] name] status virtual \
+                width [lindex [hir::escape::foldVirtualDesc $escape $id $b] 0] reason ""]
+        }
+    }
+    dict for {key why} $dropped {
+        lassign $key id b
+        lappend records [dict create label [hir::specialize::label $spec $id] \
+            name [dict get [hir::binding $hir $b] name] status dropped width "" reason $why]
+    }
+    return [lsort -dictionary -index 1 [lsort -dictionary -index 3 $records]]
 }
 
 # Code-size and guard statistics of the lowered functions INFOS.
@@ -4060,10 +4096,10 @@ proc native::lower::Expr {fnVar e {want tagged}} {
                 set repr $shortJoin
             }
         }
-        loop      { set result [Loop fn $e $node] }
-        listloop  { set result [ListLoop fn $e $node] }
-        countloop { set result [CountLoop fn $e $node] }
-        lockloop  { set result [LockLoop fn $e $node] }
+        loop      { set result [FoldObject fn $e $node [Loop fn $e $node]] }
+        listloop  { set result [FoldObject fn $e $node [ListLoop fn $e $node]] }
+        countloop { set result [FoldObject fn $e $node [CountLoop fn $e $node]] }
+        lockloop  { set result [FoldObject fn $e $node [LockLoop fn $e $node]] }
         struct    { set result [Struct fn $e $node] }
         project   { set result [Project fn $e $node $want] }
         return {
@@ -4120,7 +4156,18 @@ proc native::lower::Expr {fnVar e {want tagged}} {
             lassign [hir::affine::releasesOnExit $hir $e] before after
             ReleaseHandles fn $before $e
             lassign [dict get $fn loops [dict get $node target]] head exit resultReg accReg mode
-            if {$mode eq "fold"} {
+            if {$mode eq "vfold"} {
+                # A fold slot (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md): a
+                # bare break ends it with its current intermediate, the
+                # carried registers -- never a candidate this iteration
+                # computed, which only the back edge would have moved in.
+                foreach r $resultReg c $accReg {
+                    Emit fn "$r = move $c" $e
+                }
+                Emit fn "jump $exit" $e
+                dict set fn broken [dict get $node target] 1
+                set result never
+            } elseif {$mode eq "fold"} {
                 # A fold (FOLD-LOOPS-MILESTONE-1.md): a bare break ends it
                 # with its current intermediate, the register it carries (a
                 # plan fold's materialized: FoldValue).
@@ -4337,6 +4384,39 @@ proc native::lower::EnumCaseValue {fnVar e argExprs payload} {
     return [Assign fn "op enumcase $payload $index $number" $e]
 }
 
+# A match's selection E (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md):
+# enum#is(VALUE, "ID", "CASE") (OP enumis) or enum#payload(VALUE, "ID",
+# "CASE") (OP enumpayload), VALUE in register VALUE. The two names are
+# constants of the call, read here (their own registers are never used): E
+# the enum's number and C the case's position in its declaration, as a
+# case's word has them (representation only). A test of a value whose
+# every possible value is an immediate word (ImmediateEnum: an enum with no
+# payload-bearing case) is the word comparison `enumeq` with the case's
+# word; any other is `op enumis VALUE E C`, which reads the identity of a
+# word or an EnumCaseObj alike, never its payload. A payload-free case's
+# payload is unit, with no operation; a payload-bearing case's is
+# `op enumpayload VALUE E C` (one field read).
+proc native::lower::EnumSelection {fnVar e op argExprs value} {
+    upvar 1 $fnVar fn
+    variable hir
+    set id [lindex [hir::get $hir [lindex $argExprs 1] literal] end]
+    set caseName [lindex [hir::get $hir [lindex $argExprs 2] literal] end]
+    if {![hir::enums::declared $id] || [set case [lsearch -exact [hir::enums::cases $id] $caseName]] < 0} {
+        throw {NATIVE INVALID-HIR} "native lowering: enum \"$id\" has no case \"$caseName\" ($e)"
+    }
+    if {$op eq "enumpayload"} {
+        if {![hir::enums::hasPayload $id $caseName]} {
+            return [Assign fn unit $e]
+        }
+    } elseif {[ImmediateEnum [hir::typeOf $hir [lindex $argExprs 0]]]} {
+        set word [Assign fn "enum [EnumIndex $id] $case" $e]
+        return [Assign fn "op enumeq $value $word" $e]
+    }
+    set index [Assign fn "int [EnumIndex $id]" $e]
+    set number [Assign fn "int $case" $e]
+    return [Assign fn "op $op $value $index $number" $e]
+}
+
 # The NIR constant `enum E C` of the case value V ({enum ID CASE}): E the
 # enum's number, C the case's position in its declaration (ENUMS.md).
 proc native::lower::EnumConst {fnVar v e} {
@@ -4389,6 +4469,27 @@ proc native::lower::ShapeIndex {id layout} {
         lappend shapeList $key
     }
     return [dict get $shapeIds $key]
+}
+
+# The value of loop E (node NODE) whose lowering produced RESULT, where a
+# single register is wanted: RESULT itself, unless E is a fold slot
+# (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md) whose value is its carried
+# fields -- then the struct, built once from them here, after the loop (a
+# fold whose value nothing reads builds nothing, as a discarded literal).
+proc native::lower::FoldObject {fnVar e node result} {
+    upvar 1 $fnVar fn
+    variable context
+    if {$result eq "never"} {
+        return never
+    }
+    set desc [FoldSlotDesc $node]
+    if {$desc eq ""} {
+        return $result
+    }
+    if {[dict exists $context discarded $e]} {
+        return [Assign fn unit $e]
+    }
+    return [BuildStruct fn [lindex $desc 1] "" $result $e]
 }
 
 # The field registers of struct construction NODE (expression E) in SLOT
@@ -7946,8 +8047,48 @@ proc native::lower::VirtualValue {fnVar e arity {cut ""}} {
         }
         return $fields
     }
+    if {[dict get $node kind] eq "ref"} {
+        # A value entering a slot unchanged (FOLD-VIRTUAL-STRUCT-STATE-
+        # MILESTONE-1.md): a fold intermediate's identity completion, a
+        # local or an outer intermediate entering a fold, a reference branch
+        # of a join. hir::escape keeps the slot only while the binding named
+        # is itself virtual (Eligible's sources): its fields, read for free.
+        set b [dict get $node binding]
+        set local [dict getdef $fn locals $b ""]
+        if {[lindex $local 0] ne "virtual" || [lindex $local 2] eq ""
+                || [llength [lindex $local 1]] != $arity || [lindex $local 5] ne $cut} {
+            throw {NATIVE BUG} "native lowering: reference $e enters a $arity-field slot but $b is not held as those fields"
+        }
+        return [lindex $local 1]
+    }
+    if {[dict get $node kind] in {loop listloop countloop lockloop}} {
+        # A fold whose slot is carried as fields: its value is the fold's N
+        # result registers. A fold slot's class is never cut (hir::escape's
+        # NestingPlan makes it opaque).
+        set desc [FoldSlotDesc $node]
+        if {$desc eq "" || [lindex $desc 0] != $arity || $cut ne ""} {
+            throw {NATIVE BUG} "native lowering: fold $e is no $arity-field construction (slot $desc, cut $cut)"
+        }
+        switch -- [dict get $node kind] {
+            loop      { set fields [Loop fn $e $node] }
+            listloop  { set fields [ListLoop fn $e $node] }
+            countloop { set fields [CountLoop fn $e $node] }
+            lockloop  { set fields [LockLoop fn $e $node] }
+        }
+        if {$fields eq "never"} {
+            return [Never fn $e]
+        }
+        if {[hir::typeOf $hir $e] eq "never"} {
+            Emit fn unreachable $e
+            return [Never fn $e]
+        }
+        return $fields
+    }
     if {[dict get $node kind] ne "call"} {
         throw {NATIVE BUG} "native lowering: expected a recognized construction at $e"
+    }
+    if {[hir::escape::StructShareSource $hir $e] ne ""} {
+        return [ShareFields fn $e $node $arity $cut]
     }
     lassign [Call fn $e $node tagged $arity 0 $cut] result repr
     if {$result eq "never"} {
@@ -7963,6 +8104,112 @@ proc native::lower::VirtualValue {fnVar e arity {cut ""}} {
         return [Never fn $e]
     }
     return $result
+}
+
+# The fields of whole-struct share E (node NODE: mutable_vector#share(REF,
+# "sN.(SLOT.D)*"), hir::escape::StructShareSource) of a binding held as
+# ARITY virtual fields: those fields, each slot the descriptor lists replaced
+# by the share of that field by its own descriptor D -- exactly the copies
+# the runtime's share of the whole struct makes (runtime/mutvec.rs's
+# share_by: a new header per listed vector, a share of a listed inner struct)
+# -- and no struct around them (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md: a
+# fold the consumption leaves copying shares its intermediate at every
+# iteration's start).
+proc native::lower::ShareFields {fnVar e node arity cut} {
+    upvar 1 $fnVar fn
+    variable hir
+    lassign [dict get $node args] valueExpr dExpr
+    set b [hir::get $hir $valueExpr binding]
+    set local [dict getdef $fn locals $b ""]
+    if {[lindex $local 0] ne "virtual" || [llength [lindex $local 1]] != $arity || [lindex $local 5] ne "" || $cut ne ""} {
+        throw {NATIVE BUG} "native lowering: whole-struct share $e of $b, which is not held as $arity uncut fields"
+    }
+    set fields [TaggedFields fn [lindex $local 1] $e]
+    foreach {slot sub} [ShareParts [core::value::strOf [hir::get $hir $dExpr value]]] {
+        if {$slot >= $arity} {
+            throw {NATIVE BUG} "native lowering: share descriptor slot $slot of a $arity-field struct ($e)"
+        }
+        set d [Assign fn "str [Quote $sub]" $e]
+        lset fields $slot [Assign fn "op mvshare [lindex $fields $slot] $d" $e]
+    }
+    dict lappend fn calls [list native [hir::mutvec::ShareNative]]
+    return $fields
+}
+
+# {SLOT D ...}: the top-level parts of struct share descriptor TEXT
+# ("sN.(SLOT.D)*", hir::mutvec::ShareDescriptor), each slot with its own
+# descriptor's text. Iterative: a descriptor nests as deep as its type.
+proc native::lower::ShareParts {text} {
+    if {[string index $text 0] ne "s"} {
+        throw {NATIVE BUG} "native lowering: \"$text\" is no struct share descriptor"
+    }
+    set pos 1
+    set n [ShareNumber $text pos]
+    set parts {}
+    for {set i 0} {$i < $n} {incr i} {
+        set slot [ShareNumber $text pos]
+        set start $pos
+        set pos [ShareSkip $text $pos]
+        lappend parts $slot [string range $text $start [expr {$pos - 1}]]
+    }
+    if {$pos != [string length $text]} {
+        throw {NATIVE BUG} "native lowering: trailing text in share descriptor \"$text\""
+    }
+    return $parts
+}
+
+# The digits of TEXT at POSVAR's position, up to the `.` that ends them
+# (consumed), as a number.
+proc native::lower::ShareNumber {text posVar} {
+    upvar 1 $posVar pos
+    set start $pos
+    while {[string is digit -strict [string index $text $pos]]} {
+        incr pos
+    }
+    if {$pos == $start || [string index $text $pos] ne "."} {
+        throw {NATIVE BUG} "native lowering: bad share descriptor \"$text\" at $start"
+    }
+    set n [string range $text $start [expr {$pos - 1}]]
+    incr pos
+    return [scan $n %d]
+}
+
+# The position right after the one share descriptor starting at POS of TEXT
+# (`h`, `d`, or `sN.` and N parts SLOT.D).
+proc native::lower::ShareSkip {text pos} {
+    # The remaining parts of every struct descriptor still open.
+    set open {}
+    while 1 {
+        set c [string index $text $pos]
+        incr pos
+        switch -- $c {
+            h - d {}
+            s {
+                set n [ShareNumber $text pos]
+                if {$n > 0} {
+                    lappend open $n
+                    ShareNumber $text pos
+                    continue
+                }
+            }
+            default {
+                throw {NATIVE BUG} "native lowering: bad share descriptor \"$text\" at [expr {$pos - 1}]"
+            }
+        }
+        # A descriptor ended: close every struct it was the last part of.
+        while {$open ne ""} {
+            set left [expr {[lindex $open end] - 1}]
+            if {$left > 0} {
+                lset open end $left
+                ShareNumber $text pos
+                break
+            }
+            set open [lrange $open 0 end-1]
+        }
+        if {$open eq ""} {
+            return $pos
+        }
+    }
 }
 
 # 1 if TARGET (a callee InstanceId, possibly "") has a `fields`/
@@ -8044,6 +8291,13 @@ proc native::lower::CanSupplyFields {fnVar argExprs fieldWidths {fieldCuts {}}} 
             switch -- [hir::kind $hir $arg] {
                 call {}
                 if {}
+                loop - listloop - countloop - lockloop {
+                    # A fold hir::escape proved the parameter's shape from is
+                    # a fold slot, its value fields (VirtualValue).
+                    if {[lindex [FoldSlotDesc [hir::node $hir $arg]] 0] != $width || $cut ne ""} {
+                        return 0
+                    }
+                }
                 struct {
                     set shape [StructShapeOf [hir::node $hir $arg]]
                     if {[hir::escape::CutFields $shape $cut] != $width} {
@@ -8128,7 +8382,7 @@ proc native::lower::TryFields {fnVar e n {cut ""}} {
             }
             return [TaggedFields fn $fields $e]
         }
-        struct - if {
+        struct - if - loop - listloop - countloop - lockloop {
             return [TaggedFields fn [VirtualValue fn $e $n $cut] $e]
         }
         call {
@@ -10230,6 +10484,10 @@ proc native::lower::NativeCallOp {e node} {
             # enum#case(PAYLOAD, "ID", "CASE") (EnumCaseValue).
             return [list $name enumcase]
         }
+        enumis - enumpayload {
+            # enum#is / enum#payload(VALUE, "ID", "CASE") (EnumSelection).
+            return [list $name [lindex $impl 0]]
+        }
         equality {
             if {[llength $argExprs] != 2} {
                 return [list $name veq]
@@ -11147,6 +11405,9 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     }
     if {$op eq "enumcase"} {
         return [list [EnumCaseValue fn $e $argExprs [lindex $argRegs 0]] tagged]
+    }
+    if {$op in {enumis enumpayload}} {
+        return [list [EnumSelection fn $e $op $argExprs [lindex $argRegs 0]] tagged]
     }
     set big [BigConstantResult $e $argExprs $op]
     if {$big ne ""} {
@@ -12528,6 +12789,25 @@ proc native::lower::CollectFinish {fnVar e accReg} {
 #            invisible: no path extends the plan and then also passes the
 #            old intermediate on. -virtual-construction-opt 0 keeps the
 #            ordinary register.
+#   vfold    a fold slot (hir::escape's fold slots, FOLD-VIRTUAL-STRUCT-STATE-
+#            MILESTONE-1.md): the struct intermediate carried as N field
+#            registers ACCREG, one per field of its descriptor. The initial
+#            value's fields (VirtualValue: a construction, or a virtual
+#            binding's fields) are moved into them once, after the loop's
+#            operands; the intermediate is bound as a virtual local over them
+#            for the body (projections are the registers, a use that needs
+#            the object materializes it once per iteration: MaterializeVirtual
+#            and the body's own scope); the body's trailing value is lowered
+#            as fields (SequenceVirtual: the If join's lowering); a normal
+#            completion replaces all N at once -- a parallel move, since a
+#            completion's field may be a carried register itself
+#            (FoldBackEdge); `continue` skips the move; exhaustion and a bare
+#            break move the carried registers into the loop's N result
+#            registers (LoopResultRegs). The fold's value is those fields:
+#            handed on as fields where the fold is a recognized construction
+#            (VirtualValue), built once after the loop otherwise (FoldObject).
+#            Every carried register is tagged: a C word or a pending object
+#            entering it is converted where it enters.
 #
 # {MODE ACCREG} for loop E (node NODE), or never when a fold's initial value
 # never completes.
@@ -12535,6 +12815,20 @@ proc native::lower::LoopResultStart {fnVar e node} {
     upvar 1 $fnVar fn
     variable context
     if {[hir::IsFoldNode $node]} {
+        set desc [FoldSlotDesc $node]
+        if {$desc ne ""} {
+            set n [lindex $desc 0]
+            set initial [TaggedFields fn [VirtualValue fn [dict get $node foldInitial] $n] $e]
+            if {$initial eq "never"} {
+                return never
+            }
+            set carried [NewRegs fn $n]
+            foreach r $carried v $initial {
+                Emit fn "$r = move $v" $e
+                JoinKeepAddr fn $r $v
+            }
+            return [list vfold $carried]
+        }
         set family [FoldFamily $e]
         if {$family ne ""} {
             # A plan fold: the initial value stays a construction if it is
@@ -12574,15 +12868,44 @@ proc native::lower::LoopEntry {continueLabel exit resultReg mode accReg} {
         collect { return [list $continueLabel $exit $resultReg $accReg] }
         discard { return [list $continueLabel $exit $resultReg discard] }
         fold    { return [list $continueLabel $exit $resultReg $accReg fold] }
+        vfold   { return [list $continueLabel $exit $resultReg $accReg vfold] }
     }
     error "native::lower::LoopEntry: bad mode $mode"
 }
 
+# The result register(s) of a loop whose accumulator is MODE ACCREG
+# (LoopResultStart): RESULTREG, or for a fold slot one register per carried
+# field.
+proc native::lower::LoopResultRegs {fnVar mode accReg resultReg} {
+    upvar 1 $fnVar fn
+    if {$mode eq "vfold"} {
+        return [NewRegs fn [llength $accReg]]
+    }
+    return $resultReg
+}
+
+# The descriptor of fold NODE's slot when its intermediate is carried as
+# field registers in the instance being lowered (hir::escape's fold slots),
+# "" when it is one register.
+proc native::lower::FoldSlotDesc {node} {
+    variable escape
+    variable currentInstance
+    if {![dict exists $node foldBinding]} {
+        return ""
+    }
+    return [hir::escape::foldVirtualDesc $escape $currentInstance [dict get $node foldBinding]]
+}
+
 # Binds fold E's (node NODE) intermediate to its register ACCREG for the
-# body: a plan fold's as a plan parameter's local is bound.
+# body: a plan fold's as a plan parameter's local is bound, a fold slot's as
+# a virtual local over its carried field registers (its own root, nothing
+# materialized yet).
 proc native::lower::LoopResultBind {fnVar e node mode accReg} {
     upvar 1 $fnVar fn
-    if {$mode eq "fold"} {
+    if {$mode eq "vfold"} {
+        set b [dict get $node foldBinding]
+        dict set fn locals $b [list virtual $accReg [lindex [FoldSlotDesc $node] 1] $b "" ""]
+    } elseif {$mode eq "fold"} {
         if {[IsPlanReg fn $accReg]} {
             dict set fn locals [dict get $node foldBinding] [list plan $accReg [FoldFamily $e]]
         } else {
@@ -12616,6 +12939,13 @@ proc native::lower::FoldValue {fnVar e accReg} {
 proc native::lower::LoopBody {fnVar e mode body} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
+    if {$mode eq "vfold"} {
+        if {$body eq ""} {
+            throw {NATIVE BUG} "native lowering: fold slot $e has an empty body"
+        }
+        variable hir
+        return [SequenceVirtual fn $body [lindex [FoldSlotDesc [hir::node $hir $e]] 0] ""]
+    }
     if {$mode eq "fold"} {
         return [SequenceTo fn $body [FoldFamily $e]]
     }
@@ -12633,6 +12963,39 @@ proc native::lower::LoopResultAdd {fnVar e mode accReg value} {
             Emit fn "$accReg = move $value" $e
             JoinKeepAddr fn $accReg $value
         }
+        vfold {
+            FoldBackEdge fn $e $accReg [TaggedFields fn $value $e]
+        }
+    }
+}
+
+# The back edge of a fold slot: carried registers CARRIED all take the
+# completion's field values VALUES at once. A completion's field may be a
+# carried register itself (a projection of the intermediate is its field
+# register: `P {a: s.b, b: s.a}`), so this is a parallel move: every source
+# that is a carried register some other move writes is copied to a fresh
+# register first, before any carried register is written. A field carried
+# unchanged (`b: s.b`) moves nothing.
+proc native::lower::FoldBackEdge {fnVar e carried values} {
+    upvar 1 $fnVar fn
+    if {[llength $values] != [llength $carried]} {
+        throw {NATIVE BUG} "native lowering: fold $e completes with [llength $values] fields, carries [llength $carried]"
+    }
+    set sources {}
+    foreach r $carried v $values {
+        if {$v ne $r && $v in $carried} {
+            set copy [NewReg fn]
+            Emit fn "$copy = move $v" $e
+            JoinKeepAddr fn $copy $v
+            set v $copy
+        }
+        lappend sources $v
+    }
+    foreach r $carried v $sources {
+        if {$v ne $r} {
+            Emit fn "$r = move $v" $e
+            JoinKeepAddr fn $r $v
+        }
     }
 }
 
@@ -12645,6 +13008,11 @@ proc native::lower::LoopResultFinish {fnVar e mode accReg resultReg} {
         }
         fold {
             Emit fn "$resultReg = move [FoldValue fn $e $accReg]" $e
+        }
+        vfold {
+            foreach r $resultReg c $accReg {
+                Emit fn "$r = move $c" $e
+            }
         }
         discard {
             set unitConst [Assign fn unit $e]
@@ -12720,6 +13088,7 @@ proc native::lower::ListLoop {fnVar e node} {
         return never
     }
     lassign $accumulator mode accReg
+    set resultReg [LoopResultRegs fn $mode $accReg $resultReg]
     set head [NewLabel fn]
     set bodyLabel [NewLabel fn]
     # `continue`'s own target (registered below): only advances the index
@@ -12931,6 +13300,7 @@ proc native::lower::CountLoop {fnVar e node} {
         return never
     }
     lassign $accumulator mode accReg
+    set resultReg [LoopResultRegs fn $mode $accReg $resultReg]
     set head [NewLabel fn]
     set bodyLabel [NewLabel fn]
     # `continue`'s own target (registered below): only advances I and loops
@@ -13097,6 +13467,7 @@ proc native::lower::LockLoop {fnVar e node} {
         return never
     }
     lassign $accumulator mode accReg
+    set resultReg [LoopResultRegs fn $mode $accReg $resultReg]
     set head [NewLabel fn]
     set bodyLabel [NewLabel fn]
     set continueLabel [NewLabel fn]
@@ -13373,6 +13744,7 @@ proc native::lower::Loop {fnVar e node} {
             return never
         }
         lassign $accumulator mode accReg
+        set result [LoopResultRegs fn $mode $accReg $result]
     }
     # What the body needs built of a deferred value bound outside it,
     # built once, here (C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
@@ -13381,7 +13753,7 @@ proc native::lower::Loop {fnVar e node} {
     EmitLabel fn $head
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
-    if {$mode eq "fold"} {
+    if {$mode in {fold vfold}} {
         dict set fn loops $e [LoopEntry $head $exit $result $mode $accReg]
         LoopResultBind fn $e $node $mode $accReg
     } else {
@@ -13389,7 +13761,7 @@ proc native::lower::Loop {fnVar e node} {
     }
     set value [LoopBody fn $e $mode [dict get $node body]]
     if {$value ne "never"} {
-        if {$mode eq "fold"} {
+        if {$mode in {fold vfold}} {
             LoopResultAdd fn $e $mode $accReg $value
         }
         Emit fn "jump $head" $e

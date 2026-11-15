@@ -1,5 +1,5 @@
 # kernel.tcl -- times the mid-end-shaped kernel (audit/mid-end-port/README.md,
-# "The kernel") in its five versions and checks that they agree:
+# "The kernel") in its six versions and checks that they agree:
 #
 #   tclsh9.0 audit/mid-end-port/tools/kernel.tcl ?-functions 1500? ?-depth 8?
 #       ?-repeat 5?
@@ -8,6 +8,9 @@
 #   tcl list      kernel/ranges.tcl list    (flat lists, pairs returned)
 #   tcl tables    kernel/ranges.tcl tables  (flat lists, side tables only)
 #   native structs  kernel/ranges-structs.bot as a native executable
+#   native enums    kernel/ranges-enums.bot as a native executable: payload-
+#                   bearing nodes and exhaustive matches (PORTABILITY-
+#                   EXHAUSTIVE-MATCH-MILESTONE-1.md)
 #   native tables   kernel/ranges-tables.bot as a native executable
 #
 # Each is run -repeat times and its best time kept; a native time is the
@@ -42,7 +45,7 @@ try {
         }
         lappend rows [list "tcl $mode" $best [list $nodes $rounds $check]]
     }
-    foreach variant {structs tables} {
+    foreach variant {structs enums tables} {
         set source [file join $audit kernel ranges-$variant.bot]
         set channel [open $source]
         set text [read $channel]

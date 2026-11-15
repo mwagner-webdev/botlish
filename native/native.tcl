@@ -85,6 +85,11 @@
 #                                       (STRUCT-SCALAR-REPLACEMENT.md); an
 #                                       audit, not a language feature.
 #                                       native::structCensusText renders it.
+#   native::foldSlots HIR ?OPTIONS?     one record per fold intermediate of
+#                                       one struct descriptor: carried as
+#                                       field registers or one register, and
+#                                       why (FOLD-VIRTUAL-STRUCT-STATE-
+#                                       MILESTONE-1.md); an audit.
 #   native::allocationReport HIR MODE ?RUNS? ?OPTIONS?
 #                                       allocation instrumentation report (a
 #                                       dict; runtime/src/runtime/metrics.rs's
@@ -953,6 +958,15 @@ proc native::allocationReport {hir mode {runs 1} args} {
 # such use only).
 proc native::structCensus {hir args} {
     return [dict get [lowered $hir {*}$args] structCensus]
+}
+
+# The fold slots of HIR's native lowering (FOLD-VIRTUAL-STRUCT-STATE-
+# MILESTONE-1.md): one record per fold intermediate whose every incoming
+# value is one struct descriptor, {label LABEL name NAME status
+# virtual|dropped width N reason WHY} -- carried as N field registers, or
+# carried as one register and why. An audit, not a language feature.
+proc native::foldSlots {hir args} {
+    return [dict get [lowered $hir {*}$args] foldSlots]
 }
 
 # A human-readable rendering of native::structCensus: one line per

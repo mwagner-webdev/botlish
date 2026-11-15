@@ -632,6 +632,14 @@ proc hir::read::Program {text} {
     # recognizer table, so a claim read back is reported not proved -- never
     # taken for certified.
     hir::emission::verify hir
+    # Matches (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md): the text claims
+    # nothing it is trusted for -- every match's chain is held again to the
+    # shape a match builds and to its enum's declared cases, and every
+    # payload taken to its own selection, or the text is no program.
+    set problem [hir::match::validate $hir]
+    if {$problem ne ""} {
+        throw [list HIR PARSE] "HIR text: $problem"
+    }
     return $hir
 }
 
@@ -1444,11 +1452,18 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e args $args
         }
         if {
+            if {[regexp {^match(?: (.*))?$} $head -> rest]} {
+                # A match's block (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-
+                # 1.md): hir::match::validate checks its chain once the
+                # program is read (Program).
+                SetField hir $e match 1
+                set head $rest
+            }
             if {$head ne ""} {
                 # An inject block's contexts (RESTRICTED-CONTEXT-INJECTION-
                 # MILESTONE-1.md).
                 if {![regexp {^injects \((.*)\)$} $head -> ids]} {
-                    Fail $number "expected \"if ?injects (IDS)? : TYPE\""
+                    Fail $number "expected \"if ?match? ?injects (IDS)? : TYPE\""
                 }
                 SetField hir $e injects [if {$ids eq ""} {list} else {split [string map {", " ,} $ids] ,}]
             }

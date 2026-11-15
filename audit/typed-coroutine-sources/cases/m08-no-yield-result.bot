@@ -1,0 +1,10 @@
+# case: matrix -- no yields, a non-unit result: a coroutine construction of a function that cannot yield is rejected
+# class: rejected-correct
+# expect: rejected COROUTINE-RHS-NOT-YIELDING
+import std::coroutine
+
+fn source(n: int) -> int:
+    n + 1
+
+coroutine {step, first} = source(1)
+first

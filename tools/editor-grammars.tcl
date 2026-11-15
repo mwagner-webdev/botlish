@@ -134,6 +134,12 @@ namespace eval grammars {
         {words {static compile}
          textmate {match {\b(static)\s+(compile)\s*(?=:)} captures {1 contextual 2 contextual}}
          vim {{{} static {\s\+compile\s*:}} {{\<static\s\+} compile {\s*:}}}}
+        {words {match}
+         textmate {match {^\s*(?:[A-Za-z_]\w*\s*=\s*|return\s+)?(match)\s+(?=[^\s=.].*:\s*(?:#.*)?$)} captures {1 contextual}}
+         vim {{{^\s*\(\h\w*\s*=\s*\|return\s\+\)\=} match {\s\+[^ \t=.].*:\s*\(#.*\)\=$}}}}
+        {words {case}
+         textmate {match {^\s+(case)\s+(?=(?:::)?[A-Za-z_]\w*::)} captures {1 contextual}}
+         vim {{{^\s\+} case {\s\+\(::\)\=\h\w*::}}}}
         {words {coroutine}
          textmate {match {\b(coroutine)\s*(?=\{)} captures {1 contextual}}
          vim {{{} coroutine {\s*\%x7b}}}}
