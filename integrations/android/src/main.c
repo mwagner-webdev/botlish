@@ -1026,6 +1026,25 @@ static void pruneEmpty(const char *dir) {
 /* The output directory, made ready: empty, or holding only a project this
  * generator made (with -replace), whose files are removed. Anything else
  * there is someone's, and refused. */
+/* Removes the file or directory tree P, if there is one (a directory with
+ * /bin/rm -rf: a build's outputs, never a file of the project's record). */
+static void removePath(const char *p) {
+    struct stat s;
+    if (lstat(p, &s) != 0) return;
+    if (!S_ISDIR(s.st_mode)) {
+        unlink(p);
+        return;
+    }
+    char *cmd[] = {"/bin/rm", "-rf", "--", (char *)p, NULL};
+    pid_t pid = fork();
+    if (pid == 0) {
+        execv(cmd[0], cmd);
+        _exit(127);
+    }
+    int status;
+    if (pid > 0) waitpid(pid, &status, 0);
+}
+
 static void prepareOutput(const char *out, const char *project, int replace) {
     if (strstr(out, "/.bot_modules/") || (strlen(out) >= 13 && !strcmp(out + strlen(out) - 13, "/.bot_modules")))
         die(1, "AN-OUTPUT", out, "lies inside a .bot_modules directory, the installed packages, which no tool writes");
@@ -1055,21 +1074,7 @@ static void prepareOutput(const char *out, const char *project, int replace) {
     static const char *derived[] = {".gradle", "build", "app/build", "app/.cxx", "local.properties"};
     for (size_t i = 0; i < sizeof derived / sizeof *derived; i++) {
         char *p = xprintf("%s/%s", out, derived[i]);
-        struct stat s;
-        if (lstat(p, &s) == 0) {
-            if (S_ISDIR(s.st_mode)) {
-                char *cmd[] = {"/bin/rm", "-rf", "--", p, NULL};
-                pid_t pid = fork();
-                if (pid == 0) {
-                    execv(cmd[0], cmd);
-                    _exit(127);
-                }
-                int status;
-                if (pid > 0) waitpid(pid, &status, 0);
-            } else {
-                unlink(p);
-            }
-        }
+        removePath(p);
         free(p);
     }
     if (!emptyDirectory(out))
@@ -1134,6 +1139,11 @@ static void runBuild(const char *out, const char *task) {
     if (!isRegular(gradlew)) die(1, "AN-OUTPUT", gradlew, "is missing: generate the project again");
     if (!getenv("ANDROID_HOME") || !*getenv("ANDROID_HOME"))
         die(1, "AN-TOOLCHAIN", NULL, "ANDROID_HOME is not set: the Android SDK builds the project");
+    /* An earlier build's packages go first: a build that fails leaves no
+     * APK that looks like its result. */
+    char *outputs = xprintf("%s/app/build/outputs", out);
+    removePath(outputs);
+    free(outputs);
     finish();
     fflush(NULL);
     pid_t pid = fork();

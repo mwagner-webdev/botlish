@@ -760,6 +760,27 @@ test as-tool-output {the output directory: one inside .bot_modules, a non-empty 
     lappend results $status [regexp {AN-TOOLCHAIN} $output]
 } -result {1 1 1 1 0 1 1 0 0 1 1 1 1 1}
 
+test as-tool-failed-build {a build that fails leaves no APK that looks like its result: an earlier build's outputs are removed before Gradle runs, and the failure is the tool's status} -constraints {androidTool} -body {
+    set p [asProject]
+    set out [file join [asDir failed-build] android]
+    lassign [asRunTool $p $out -words {generate}] gstatus
+    set apk $out/app/build/outputs/apk/release/app-release.apk
+    file mkdir [file dirname $apk]
+    asWrite $apk "an earlier build's APK"
+    # The project's Gradle wrapper, made to fail as a broken build does.
+    asWrite $out/gradlew "#!/bin/sh\necho gradle failed >&2\nexit 1\n"
+    file attributes $out/gradlew -permissions 0755
+    set saved [array get ::env ANDROID_HOME]
+    if {![info exists ::env(ANDROID_HOME)]} { set ::env(ANDROID_HOME) [asDir sdk] }
+    try {
+        lassign [asRunTool $p $out -words {build}] status output
+    } finally {
+        unset -nocomplain ::env(ANDROID_HOME)
+        array set ::env $saved
+    }
+    list $gstatus $status [regexp {Gradle's assembleRelease failed} $output] [file exists $apk] [file exists $out/botlish-android.json]
+} -result {0 1 1 0 1}
+
 test as-tool-generate {what the tool generates: deterministic (twice the same bytes), generic (no word of 2048 in the tool or the counter's project), the display name escaped for Android's resources, the application library and libSDL3.so the packages' bytes, SDL's Java classes beside the generated Activity naming SDL3, the library and main; -intent-arguments adds the test configuration's arguments, absent otherwise} -constraints {androidTool} -body {
     set p [asProject]
     set a [file join [asDir gen-a] android]
