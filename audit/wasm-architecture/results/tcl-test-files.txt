@@ -2,3 +2,10 @@
 # resumable lowering), each with a private -tmpdir. A file not listed here had not
 # finished when the report was written.
 actor.test:	Total	67	Passed	67	Skipped	0	Failed	0
+event-loop.test:	Total	109	Passed	109	Skipped	0	Failed	0
+dfa.test:	Total	85	Passed	84	Skipped	0	Failed	1
+#   dfa-lowering-fused-no-allocation: expects coroutine fusion and constant
+#   allocation; the prototype is a fallback-roots build, where fusion never runs
+#   (AGENTS.md, "Coroutine fusion": STACK_SWITCHING). Got fused {} and
+#   allocations {34 2014} for 10 and 1000 symbols, expected {count w} and {2 2}.
+#   results/dfa-tail.txt measures what the allocations are.

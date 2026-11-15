@@ -1,0 +1,19 @@
+# tools/dfa-tail.sh (one run each, the session's 4-core container; indicative).
+# The prototype's frames have no kind of their own in the allocation report:
+# they are total minus the named kinds (here 1,000,004 frames, 88,000,680 bytes,
+# 88 bytes each). Struct is the resume message (std::dfa::Symbol) per symbol.
+== resumable
+value {list {{int 1} {int 0}}}
+wall 0.270s user 0.25s maxrss 13024 KiB gc-cycles 122
+coroutines {stacksMapped 0 stacksReused 0 released 2 releasedSuspended 0 sweptSuspended 0}
+allocs total=2000014/128001008B List=1/40B Struct=1000003/40000120B MutableArray=1/56B Coroutine=2/208B
+== stackful-fused
+value {list {{int 1} {int 0}}}
+wall 0.040s user 0.03s maxrss 13076 KiB gc-cycles 0
+coroutines -
+allocs total=2/96B List=1/40B MutableArray=1/56B
+== stackful-unfused
+value {list {{int 1} {int 0}}}
+wall 0.221s user 0.21s maxrss 13456 KiB gc-cycles 38
+coroutines {stacksMapped 1 stacksReused 1 released 2 releasedSuspended 0 sweptSuspended 0}
+allocs total=1000007/40000408B List=1/40B Struct=1000003/40000120B MutableArray=1/56B Coroutine=2/192B

@@ -421,7 +421,15 @@ lines, a NIR-to-NIR pass in the driver's load path, after fusion):
   `callenv`'s closure is always saved (a resumed callee may read captures).
 * *Reuse*: an activation suspending again reuses its frame, so a generator
   in steady state allocates nothing per resume [obs: 4 allocations for
-  1,000,000 resumes, case 6a].
+  1,000,000 resumes, case 6a]. A *new* activation gets a new frame, and the
+  prototype treats a tail call as one: a declared recognizer's lowering
+  (`NAME#run`) yields and then calls itself in tail position once per
+  symbol, so it allocated one 88-byte frame per symbol (1,000,000 symbols:
+  0.25 s and 122 collections, against 0.18 s for the stackful runtime
+  unfused and 0.025 s fused; memory flat at 13 MB in all three:
+  `results/dfa-tail.txt`) [obs]. A yielding tail call can hand its
+  finished activation's frame to the callee (the same function: the same
+  frame shape); production does, and `dfa-tail.bot` measures it [dec].
 * *ABI*: a yielding function's scalar result (raw, short, packed ASCII:
   proven, so boxing is exact) is boxed at its returns and unboxed by its
   callers after their suspension check; multi-result companions carry
@@ -467,6 +475,14 @@ change.
 * The prototype makes every frame operation a helper call; production
   inlines them as field stores (a frame is a fixed-shape object per
   function) [inf].
+* Fusion is gated on stack switching (`fusion::enabled`,
+  `native/src/codegen/fusion.rs:124-126`) only so that it never makes a
+  program run where the general runtime refuses it [fact]. Once the
+  resumable lowering makes the runtime accept every coroutine, that gate
+  becomes "coroutines run", and fusion applies on wasm and on the fallback
+  plan before the resumable lowering, as it does natively today (the
+  prototype left the gate alone, so `dfa.test`'s fusion test failed:
+  section 11.7) [dec].
 * Frames in case 6b: 20,000 frames (a thunk's and `holder`'s per
   coroutine), 88 bytes each on x86-64 [obs].
 
@@ -910,14 +926,17 @@ the third-party tool binaries were built with the container's rustc 1.97.0
   resumable native with GC stress off and on, wasm with GC stress off and
   on); `tools/golden-sweep.sh` (all 122 golden suites); the same with
   `BOTLISH_NATIVE_GC_STRESS=1` for `coroutines.bot` and `tree-struct.bot`;
-  `tools/mutants.sh`.
+  `tools/mutants.sh`; `tools/dfa-tail.sh`; three Tcl test files through
+  the prototype driver.
 * **Observed**: section 5.1 and 6.2: every value equal; 5,773 tests, 0
   failed; 62/62 and 19/19 under GC stress; M1 and M2 killed.
 * **Establishes**: the lowering preserves coroutine semantics on every
   golden suite with the fallback root plan, and on wasm for the corpus.
   **Does not**: production performance (frame operations are helper
-  calls); of the Tcl test files, only `tests/actor.test` finished (67/67,
-  section 11.7).
+  calls); of the Tcl test files, `tests/actor.test` (67/67),
+  `tests/event-loop.test` (109/109) and `tests/dfa.test` (84/85: its one
+  failure expects fusion, which never runs on a fallback-roots build)
+  finished (section 11.7).
 
 ### 11.4 C-A: Asyncify
 
@@ -956,12 +975,17 @@ the third-party tool binaries were built with the container's rustc 1.97.0
 * Botlish-generated code under Asyncify (the Asyncify functions are
   hand-written).
 * The golden suites on wasm (the prototype emitter covers a subset).
-* The Tcl test files of the coroutine-heavy areas through the prototype
-  driver (`BOTLISH_NATIVE_BIN`): `tests/actor.test` finished, **67 of 67
-  passed** (std::actor over std::event_loop: every actor and task a
-  coroutine); `tests/event-loop.test`, `tests/dfa.test` and
-  `tests/coroutines.test` were still running when this was written
-  (`results/tcl-test-files.txt` records what finished).
+* Part of the Tcl test files of the coroutine-heavy areas through the
+  prototype driver (`BOTLISH_NATIVE_BIN`; `results/tcl-test-files.txt`):
+  `tests/actor.test` **67 of 67** (std::actor over std::event_loop: every
+  actor and task a coroutine), `tests/event-loop.test` **109 of 109**,
+  `tests/dfa.test` **84 of 85** -- the failure,
+  `dfa-lowering-fused-no-allocation`, asserts that the recognizer is fused
+  and allocates nothing per symbol; the prototype is a fallback-roots
+  build, where fusion never runs, and what it allocates instead is the
+  frame per tail call of section 5.1 and the resume message, which the
+  stackful runtime unfused allocates too (`results/dfa-tail.txt`).
+  `tests/coroutines.test` had not finished when this was written.
 * JSPI, browsers, workerd, Emscripten.
 * A Rust Wasmtime embedder (trap codes, epoch interruption from the host):
   the CLI's behavior stands in for it.
@@ -979,6 +1003,11 @@ the third-party tool binaries were built with the container's rustc 1.97.0
   the remedy, if needed, is resuming the innermost frame directly and
   completing callers through their frames (a second protocol), not stack
   switching.
+* **Allocation per new yielding activation**: a loop written as tail
+  recursion through a yield (the DFA lowering) allocates a frame per
+  iteration until tail calls reuse frames (5.1); a yielding call made
+  anew per iteration (not a tail call) still does. Measure the corpus of
+  yielding call sites in milestone A0.
 * **Frame size of large functions**: a frame holds every live register at
   its widest suspension point; the prototype allocates the maximum per
   function. Per-site frames are the remedy if it matters.
@@ -1031,7 +1060,8 @@ the design; "implementation risk" is how much work could surprise.
 
 **A0. Resumable coroutines and ShadowOnly roots on the native fallback
 plan** (new; no wasm). The pass (production form: an explicit frame
-parameter, inline frame operations), the frame object, ShadowOnly storage
+parameter, inline frame operations, a yielding tail call reusing its
+frame), fusion gated on "coroutines run", the frame object, ShadowOnly storage
 (no leaf publication, no depth token), the fallback plan running
 coroutines, a CI lane (x86-64 `fallback-roots`: golden suites, coroutine
 test files, GC stress), mutants of section 6.3's invariants. Fixes section

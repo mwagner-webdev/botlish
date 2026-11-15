@@ -15,7 +15,7 @@ or by CI. Every script writes only below the scratch directory it is given.
 |---|---|
 | `patches/e1-runtime-wasm32.patch` | E1: the runtime target-gated for wasm32 plus the five throwaway patches (a platform stub, an argv branch, String and byte-storage header constants per pointer width, an allocator shim for `wasm32-unknown-unknown`) |
 | `patches/resumable-and-wasm-prototype.patch` | E1's patch plus the prototypes: the resumable lowering (`codegen/resumable.rs`), resume frames (`runtime/coroutine.rs`, `heap.rs`, `vm.rs`, `value.rs`), 15 frame ops (`nir.rs`, `ops.rs`, `clif.rs`), ShadowOnly-style root storage (`roots.rs`), the NIR→wasm emitter (`codegen/wasmemit.rs`) and the driver's `wasm-asm` command (`main.rs`) |
-| `corpus/` | the coroutine corpus (cases 1–8; case 5 is a copy of `tests/resources/coro.bot` and `handle.bot`), `e2-fib.bot`, `leaf-reentry.bot` (the fallback plan's leaf publication), `w32-index.bot` (a 32-bit index) |
+| `corpus/` | the coroutine corpus (cases 1–8; case 5 is a copy of `tests/resources/coro.bot` and `handle.bot`), `e2-fib.bot`, `leaf-reentry.bot` (the fallback plan's leaf publication), `w32-index.bot` (a 32-bit index), `dfa-tail.bot` (a yielding self tail call per symbol) |
 | `asyncify/` | experiment C-A: `co.rs`, a minimal runtime with per-coroutine Asyncify buffers, linear stacks and root segments, and the corpus hand-written for it; `sp.s`, `__stack_pointer` access |
 | `wasi/` | W1 `wait.rs` (waiting in the host), W2 `traps.rs` (how a run ends), W3 `httpc/` (a `wasi:http` handler), `adapter/` (dumps Wasmtime 50.0.1's WASI preview1 adapters) |
 | `stack-switching/gen.wat` | two generators on the core stack-switching proposal |
@@ -100,6 +100,18 @@ bash audit/wasm-architecture/tools/fallback-leaf.sh SCRATCH
 Stock `main` built with `--features fallback-roots` against the stack-map
 build and the prototype, on `corpus/leaf-reentry.bot`.
 
+```bash
+bash audit/wasm-architecture/tools/dfa-tail.sh SCRATCH
+```
+
+`corpus/dfa-tail.bot` (a declared recognizer fed 1,000,000 symbols; its
+lowering yields and then calls itself in tail position) on the prototype and
+on stock `main` with fusion on and off: allocations by kind and collections.
+
+The Tcl test files of `results/tcl-test-files.txt` ran from the repository
+root with `BOTLISH_NATIVE_BIN=SCRATCH/proto/native/target/release/botlish-native
+tclsh9.0 tests/NAME.test -tmpdir DIR` (a private DIR each).
+
 Single steps: `tools/emit-nir.sh SCRATCH FILE.bot OUT.nir` (a program's NIR)
 and `tools/bot2wasm.sh SCRATCH FILE.nir OUTDIR [wasm32-wasip1|wasm32-wasip2]`
 (one module).
@@ -116,5 +128,7 @@ and `tools/bot2wasm.sh SCRATCH FILE.nir OUTDIR [wasm32-wasip1|wasm32-wasip2]`
 | `mutants.txt` | `mutants.sh` |
 | `fallback-leaf.txt` | `fallback-leaf.sh` |
 | `measurements-native.txt` | cases 6 and 8 natively, through `tools/allocsum.py` |
+| `dfa-tail.txt` | `dfa-tail.sh` |
+| `tcl-test-files.txt` | the Tcl test files above, through the prototype driver |
 
 The report's section 11 says what each establishes and what it does not.
