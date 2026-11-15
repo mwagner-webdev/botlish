@@ -1,0 +1,679 @@
+# RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1
+
+## Full-width native C pointers and byte exposure on Android, without regressing desktop performance
+
+Evidence categories, as in the earlier Android reports: **observed**
+(executed in this environment: a 4-core Intel Xeon @ 2.10 GHz Linux
+x86-64 container, rustc 1.97.0, Tcl 9.0.1, the Android NDK r29
+29.0.14206865, qemu-user 8.2.2 and Google's pinned arm64-v8a system images
+of API 21, 24 and 35), **static** (source or artifacts inspected), **CI**
+(a completed workflow on another host), **projected** (a design consequence
+not executed).
+
+## 1. Executive result
+
+Android applications run with Bionic's heap pointer tagging **on**
+(**observed**, API 35, 4 KiB and 16 KiB pages, also under GC stress): byte
+exposures of Botlish storage to C, C pointers returned, stored in an
+installed context, handed back, read from C records, stored through native
+edits, passed to and from callbacks, Bionic's `qsort` calling back with
+pointers into an exposed buffer, and SDL3's surfaces over the committed
+Android binding -- every pointer arriving with Bionic's `0xb4` tag in its
+top byte and leaving with it, bit for bit, no application opting out.
+
+The design is **target-specialized at compile time, one word, no
+allocation anywhere**:
+
+* A C address word is `(rotl(address, R) << 4) | 0b1110`. R is **0** on
+  every desktop target -- exactly the word every earlier runtime made, so
+  Linux, macOS and Windows code is **byte-identical** (CLIF compared,
+  **observed** on x86-64; **static** for the other desktop targets through a
+  code-generation test) and their runtime ABI fingerprints are **unchanged**
+  (`14aa5041bb46ae5d` before and after on Linux x86-64). R is **8** on
+  Android AArch64: the whole top byte is kept and bits 52..55 must repeat
+  bit 51, which every user and kernel address of a 48-bit address space
+  does, tagged or not. One extra `ror` per encode and decode, on Android
+  only.
+* A C call's byte exposure is no longer a Botlish value: the call takes the
+  exposed storage and makes its payload address itself (an inline kind
+  check, then the storage plus the payload offset) -- a machine word of the
+  full width. This removed a runtime helper call per exposure: read
+  exposures are **~1.5 ns faster** on x86-64 (**observed**), with no new
+  runtime helper (so no fingerprint change for it either).
+
+Ordinary Int semantics, ownership, nullability, lifetimes and checked
+failures are unchanged; no pointer arithmetic, integer-to-pointer
+conversion or unsafe surface was added.
+
+## 2. The original defect
+
+Reproduced with the unmodified compiler and runtime at the base commit
+`ce54fead` (`/root/botlish-baseline`, its own driver and Android runtime
+package, fingerprint `14aa5041bb46ae5d` for Android too), in Android
+processes (`audit/android-tagged-pointers/tools/probe.sh`, **observed**;
+outputs in `audit/android-tagged-pointers/results/baseline-*`):
+
+| API | Program | Tagging | Result |
+|---|---|---|---|
+| 21, 24 | hello, heap, tagged, sdl_surface | (none: Android 10 and earlier) | `MAIN 0 0`, `MAIN 1 0` |
+| 35 | hello (liblog over byte exposures) | on | `MAIN 0 2 CORE SEMANTIC RANGE std::abi::x86_64::from_bytes: the payload address 0xb40040011b51c620 is outside the small-Int range` |
+| 35 | heap (a C heap pointer, no exposure) | on | `MAIN 0 2 NATIVE ADDRESS the C function tp::alloc returned the address 0xb4004001a50dcb00, which a Botlish C pointer cannot hold (its word keeps a sign-extended 60-bit address: a top-byte-tagged pointer is not one)` |
+| 35 | sdl_surface (SDL3) | on | `MAIN 0 2 NATIVE ADDRESS the C function sdl3::surface::SDL_CreateSurface returned the address 0xb4004000eee5aa30, ...` |
+| 35 | every program, tagging turned off first (`mallopt`) | off | `MAIN 0 0`, `MAIN 1 0` |
+
+The two failure paths are independent: the exposure (a small Int of 62
+bits) and the C address word (sign-extended 60 bits). The SDL3 row is the
+earlier milestone's projected `SDL_CreateWindow` failure, now observed on a
+real SDL3 function returning a heap pointer.
+
+## 3. Pointer representation census
+
+Every place a native address is made, held, compared or handed over
+(**static**; `grep` of `CPTR_TAG`, `make_cptr`, `cptr_address`,
+`cptr_fits`, `sshr_imm_s(_, 4)`, `bytesaddr` over `native/`):
+
+| Pointer category | Representation before | Bits a target needs | Escapes to C? | Treatment |
+|---|---|---|---|---|
+| Ordinary Botlish Int | small Int (62 bits) or BigInt | language-defined | as numeric data | unchanged |
+| C data / function pointer (`Ptr`, `FnPtr`) | C address word, sign-extended 60 bits | Android: tag byte + 48-bit VA | yes | the target's encoding (R = 0 or 8) |
+| C pointer result (`foreign_result`) | inline `<< 4`, fits check | as above | from C | `cptr_rotated` then the check, NATIVE ADDRESS otherwise |
+| C pointer argument, variadic pointer (`foreign_call`, `vararg_value`) | inline `sshr 4` | as above | yes | `cptr_address`: `sshr 4`, `rotr R` |
+| Callback entry address (`cbaddr`) | inline `<< 4` | code addresses: untagged | yes | rotated (fits every encoding) |
+| Callback parameters and results (runtime/callback.rs) | `make_cptr`/`cptr_address` | as above | from and to C | the runtime's encoding |
+| Native view / edit (`NativeView[L]`, `NativeEdit[L]`), nested views (`cptroffset`) | C address word | as above | memory reads/writes | the runtime's encoding |
+| Pointer field read through a view (`nativeloadptr`) | `cptr_fits` | as above | from memory | the runtime's encoding |
+| Pointer stored by an edit or into bytes (`pointer_bits`) | `cptr_address` | full width | to memory | the full decoded address |
+| Null | the bare tag, 14 | 0 | yes | 14 under both encodings (`rotl(0) = 0`) |
+| C call byte exposure (BorrowCall) | `op bytesaddr`: small Int, `sshr 1` at the call | full width | yes | the storage itself; the call makes `storage + 16` |
+| Fixture operations' exposures (test-only) | small Int | host | no (test helpers) | unchanged |
+| Linux syscall bridge (`std::abi::*::from_bytes`) | small Int (a Register64 Int) | Linux heaps: untagged | to the kernel | unchanged (an Int by type; section 7) |
+| GC references | heap pointers, low bits `000` | runtime-internal | no | unchanged (never C address words) |
+| Native-library boundary | C scalars, owned strings/errors | n/a | yes | no pointer type crosses (`exported c fn`) |
+
+Width assumptions found: `value.rs`'s `cptr_fits` (60), four inline sites
+in `codegen/clif.rs`, `ops.rs`'s `rt_bytes_addr`/`rt_mbytes_addr` (62,
+through the C call), and none elsewhere -- every runtime path goes through
+`cptr_fits`/`make_cptr`/`cptr_address`.
+
+## 4. Android's tagging contract
+
+Android 11 and later tag every Bionic heap pointer's top byte (`0xb4` in
+the TBI mode these images use; MTE tags live in bits 56..59 of the same
+byte), and AArch64's Top Byte Ignore makes the tag invisible to loads and
+stores. The tag must survive: `free` and Bionic's heap checks compare it.
+Bits 48..55 of a user address are zero (bit 55 selects TTBR0), so a tagged
+user pointer is `[tag:8][0:8][address:48]`.
+
+Observed values (**observed**, API 35, tagging on; addresses differ from
+run to run, ASLR; these are the committed result files'):
+
+| Pointer | Value |
+|---|---|
+| liblog exposure address (baseline refusal) | `0xb40040011b51c620` |
+| a C heap block (`tp_alloc`, baseline refusal) | `0xb4004001a50dcb00` |
+| `SDL_CreateSurface` result / its `pixels` | `0xb4004001d61070b0` / `0xb4004001d6103860` (C test, `sdltry/t3.c`) |
+| the top byte C reads of a Botlish exposure and of a heap block, after the fix | `180` (`0xb4`) |
+
+Tagging is shown to be genuinely on: the probe's C side reads the top byte
+of each address itself (`tp_top_byte`, `tp_exposed_top_byte`) and reports
+180 on API 35 and 0 on API 21 and 24 and with tagging turned off; the tests
+require exactly that, so an environment without tagging fails the tagged
+expectation rather than passing silently.
+
+## 5. Representation alternatives
+
+| Criterion | Compact existing | Universal full-width (boxed) | Target-specialized rotation (chosen) | Compact + boxed fallback |
+|---|---|---|---|---|
+| Correct on tagged Android pointers | no | yes | yes (48-bit VA, any tag) | yes |
+| Desktop conversion cost | baseline | an allocation per pointer result; a load per use | **identical code** | a branch per conversion |
+| Android conversion cost | refuses | an allocation per pointer result | one `ror` each way | an allocation for **every** heap pointer (all are tagged) |
+| Allocation | none | per pointer | none | per tagged pointer |
+| Runtime memory | one word | word + 16-byte object | one word | as boxed on Android |
+| GC | never a root | a new rooted kind | never a root | a new rooted kind |
+| Codegen complexity | -- | every site, plus stack maps | two helpers, four sites | every site, two paths |
+| ABI impact | -- | every target | Android only | every target |
+
+Measured where it decides: the boxed representations' allocation per
+pointer would add a `rt_*` allocation (tens of ns, plus collector work) to
+`ptr result` and `ptr echo`, which cost **0.7-1.7 ns** today (section 18);
+the rotation costs one ALU instruction. The rotation's limit: an AArch64
+address of a **52-bit** user address space with bit 51 set (only reachable
+on Linux by an explicit high `mmap` hint; Android's kernels use 39- or
+48-bit spaces) does not fit -- it is refused NATIVE ADDRESS, never
+truncated (section 25).
+
+## 6. The design decision
+
+**Target-specialized, chosen at compile time.** The universal options are
+rejected on cost (an allocation per pointer, a new GC-rooted kind) and on
+compatibility (every desktop fingerprint, stub and object would change for
+no desktop benefit). The fallback option degenerates to the boxed one on
+Android, where every heap pointer is tagged. The rotation keeps one
+immediate word everywhere, adds nothing on desktop -- the same CLIF, the
+same objects, the same fingerprints -- and one rotation each way on
+Android.
+
+The policy is a property of the target's pointer ABI ("pointers carry a
+tag in their top byte"), stated once for every target in
+`native/src/codegen/target.rs:138` (`address_word`) and once by each
+runtime for its own build in `native/src/runtime/value.rs:178`
+(`ADDRESS_WORD`, `cfg!(target_os = "android")`); a test requires the two
+to agree for the host (`address_word_is_the_runtimes`). No OS name is read
+anywhere else, and nothing is decided per call at run time.
+
+## 7. Native C pointer implementation
+
+`native/src/runtime/value.rs:110` `AddressWord` (`Canonical60`,
+`TopByteTagged`) with `rotation`, `fits`, `encode`, `decode` and `holds`
+(the NATIVE ADDRESS text); `cptr_fits`, `make_cptr`, `cptr_address`
+(`:1030-1043`) are the runtime's only paths. Generated code:
+`codegen/clif.rs:1540` `cptr_address` (decode: `sshr 4`, `rotr R`) and
+`:1551` `cptr_rotated` (encode's rotation), used by the argument and
+variadic decodes, the result's encode and fits check (`:1622`) and the
+callback address (`:2208`). The translator reads the encoding from the
+module's ISA triple (`address_word` field), never from the host.
+
+Preserved by construction: null (14 under both), distinct tags are distinct
+words (`distinct_addresses_are_distinct_words`), `-1` (`MAP_FAILED`) and
+small integers cast to pointers fit both encodings. Refused, never fixed: an
+address whose bits 52..55 do not repeat bit 51 on Android, whose bits 60..63
+do not repeat bit 59 elsewhere.
+
+The Linux syscall bridge `std::abi::*::from_bytes` keeps its small-Int
+contract: its value is a Register64, an Int a program sees, used only by
+the Linux syscall transports (`std::linux` is Linux's platform; Android
+imports none of it), and Linux heaps carry no tag. Making it a BigInt or a
+C address word would change an Int's meaning or invent an
+integer-to-pointer path; neither is needed.
+
+## 8. Byte exposure
+
+`native/lower.tcl` BorrowCall now hands a C call the exposed **storage**
+(`foreigncall F %s ... exposed=I [mutable=I]`, `:6178`); the call
+(`codegen/clif.rs:1521` `exposure_address`) checks its kind inline
+(`KIND_BYTES`, or `KIND_MUTBYTES` for `mutable=`; a wrong kind takes the
+slow path to `rt_bytes_addr`/`rt_mbytes_addr`, which raise the TYPE
+refusal they always did) and passes `storage + BYTES_PAYLOAD_OFFSET`. The
+address exists only in a machine register during the call: no Botlish
+value holds it, so no width limit applies. The write exposure's private
+copy (`mbytesclone`), the keepalive after the call (`KeepStoragesAlive`,
+`:6043`) and every borrow rule (contracts, noescape, access) are unchanged;
+the fixture's operations and the syscall bridges keep `bytesaddr`.
+
+On Android the address C receives carries Bionic's tag (Botlish's heap is
+Rust's system allocator, Bionic's `malloc`): `exposure 180 36` -- the top
+byte C reads and the sum it computes over the right bytes (**observed**).
+Writes through a write exposure land in the private copy and come back
+(`write true`).
+
+## 9. Lowering and code generation
+
+NIR gains `mutable=` on `foreigncall` (`nir.rs`: a subset of `exposed=`,
+validated; `fusion.rs` and `nirtext.rs` carry it). `codegen/mod.rs:713`
+records the target's runtime fingerprint in the program record
+(`target::runtime_fingerprint`). A code-generation test compiles one NIR
+program -- a pointer echoed through C and an exposure -- for five triples
+(`codegen::clif::address_word_tests`): Android's CLIF has `rotl`/`rotr` by
+8, Linux x86-64, Linux AArch64, macOS AArch64 and Windows x86-64 have none,
+and every exposure is an `iadd` of the payload offset.
+
+## 10. The C binding generator
+
+No change: generated bindings declare `Ptr[...]` and layouts; the encoding
+is below them. The committed android-aarch64 SDL3 binding is used
+unchanged by the SDL3 probe (section 16); no binding was regenerated.
+
+## 11. Native ownership
+
+Pointers stay affine values with no runtime ownership state; the
+encoding changes only the payload bits above the unchanged four-bit tag.
+A heap block kept in an installed opaque context (`Heap.block`), observed
+through a context place, handed back and finally freed: `heap 180 same`,
+`release done` (**observed**). Resources' cleanup, thread affinity and
+sendability rules are untouched (no code there changed).
+
+## 12. GC correctness
+
+C address words keep the low bits `1110`, never a heap pointer's `000`, so
+the collector's classification is unchanged; byte exposures add no root
+(the storage was and is kept by the keepalive after the call). The probe
+passes under `BOTLISH_NATIVE_GC_STRESS=1` on API 35 with tagging on
+(**observed**), and the desktop files touching pointers and exposures pass
+(section 23).
+
+## 13. Application-library compatibility
+
+`NAME_main`, schema 3 and the entry dispatch are unchanged. Every probe is
+an application library run by the earlier milestone's host (`MAIN 0 0`,
+`MAIN 1 0`, twice per process). A library's manifest now states its
+target's runtime fingerprint as `compiler.runtimeAbi`
+(`native/library.tcl`), equal to its target support package's
+(`at-tagged-manifest`), as the React Native tool requires.
+
+## 14. Native-library compatibility
+
+No export signature, ownership rule or manifest schema changed. Desktop
+libraries' manifests state the same fingerprint as before (it is the
+host's). `tests/native-library.test` and `tests/application-library.test`
+pass (section 23).
+
+## 15. Android execution
+
+`audit/android-tagged-pointers/results/fixed-summary.txt` (**observed**,
+with the fixed compiler and its Android package, fingerprint
+`637264e0003a0b68`):
+
+| API | Pages | Tagging | hello | heap | tagged probe | sdl_surface |
+|---|---|---|---|---|---|---|
+| 21 | 4 KiB | none | 0 0 | 0 0 | all checks, tags 0 | all checks, tags 0 |
+| 24 | 4 KiB | none | 0 0 | 0 0 | all checks, tags 0 | all checks, tags 0 |
+| 35 | 4 KiB | **on** | 0 0 | 0 0 | all checks, **tags 180** | all checks, **tags 180** |
+| 35 | 4 KiB | off (`mallopt`) | 0 0 | 0 0 | all checks, tags 0 | all checks, tags 0 |
+| 35 | 16 KiB | **on** | -- | -- | all checks, tags 180 | -- |
+| 35 | 4 KiB, GC stress | **on** | -- | -- | all checks, tags 180 | -- |
+
+The tagged probe's lines, twice per process
+(`results/fixed-35-tagged.txt`): `log called`, `exposure 180 36`, `write
+true`, `heap 180 same`, `view 77 0`, `record same same`, `callback same`,
+`qsort true`, `null true same`, `release done`. Nothing turns tagging off:
+no manifest attribute, no `mallopt` (only the comparison hosts built with
+`-DNO_HEAP_POINTER_TAGGING` do, as before).
+
+This is an Android process's userspace (Android's linker, Bionic, liblog,
+libandroid, libSDL3) under qemu-user on a Linux kernel: no ART, Activity,
+or MTE hardware.
+
+## 16. SDL3 integration
+
+`audit/android-tagged-pointers/android/sdl_surface.bot`, over the committed
+android-aarch64 binding and Android's libSDL3.so (3.4.18, NDK r29, API 21):
+`SDL_CreateSurface` (a tagged `SDL_Surface *`), `SDL_FillSurfaceRect`, the
+`pixels` field -- a tagged pointer inside SDL's struct -- read through the
+generated `SDL_Surface` layout's native view and read through,
+`SDL_DuplicateSurface`, both `SDL_DestroySurface` (**observed**: `sdl
+surface 180 180 8x8 32`, `sdl fill true 287454020 287454020`, `sdl
+duplicate 287454020`, `sdl destroyed` on API 35 with tagging on; the
+baseline refuses `SDL_CreateSurface`'s result).
+
+Why surfaces, not a window: `SDL_Init` needs Android's Java side (JNI) --
+in a C-only Android process it crashes before any Botlish code runs (a C
+program calling `SDL_Init(SDL_INIT_EVENTS)` alone, **observed**), and the
+software renderer waits on the platform; SDL's surfaces need neither.
+Icy Tower's library loads and starts under `SDL_RunApp` and stops in
+`SDL_Init` there. Window and renderer pointers on Android are the next
+milestone's, in an Activity (section 26). libSDL3.so's dependency on
+libandroid needs ICU on Android 10+: `audit/android-tagged-pointers/tools/
+apex.sh` unpacks the pinned image's i18n APEX (Android 21 and 24 keep ICU
+in /system).
+
+## 17. Desktop compatibility
+
+* The C address word, objects and generated code of Linux, macOS and
+  Windows are the default encoding's: byte-identical CLIF for every
+  pointer-only program before and after (section 18); fingerprints
+  unchanged.
+* Exposure programs' code changed (the helper call replaced by an inline
+  check and add), as intended; every desktop test that runs C passes.
+* `runtime-abi` gains an `address-word` line; `runtime-abi TRIPLE` is new.
+
+## 18. Desktop performance
+
+`bench/tagged-pointers.tcl`, baseline (`-root /root/botlish-baseline`,
+`ce54fead`) and this change run alternately twice on the same idle machine;
+ns per iteration, best of 9 runs of 2,000,000 iterations of a fold that
+allocates nothing; "op" is the operation's cost over the fold's trivial
+body (**observed**, Linux x86-64):
+
+| Operation | baseline 1 | baseline 2 | new 1 | new 2 | CLIF |
+|---|---:|---:|---:|---:|---|
+| ptr result (`bcf_address()`) | 0.76 | -0.21 | 0.71 | 0.91 | identical |
+| ptr argument (`bcf_is_null(p)`) | 2.43 | 1.82 | 0.62 | 1.50 | identical |
+| ptr echo | 2.21 | 1.52 | 1.47 | 1.69 | identical |
+| ptr same (two decodes) | 1.82 | 1.31 | 0.86 | 1.02 | identical |
+| `null?` | -0.07 | 0.47 | -0.47 | -0.04 | identical |
+| context-held handle | 1.95 | 1.46 | 0.35 | 0.22 | identical |
+| read 64 B exposure | 3.94 | 4.05 | 2.77 | 2.47 | changed |
+| read 64 KiB exposure | 4.52 | 4.16 | 2.77 | 2.14 | changed |
+| write 64 B exposure | 44.88 | 45.50 | 43.42 | 42.37 | changed |
+| write 64 KiB exposure | 1631.26 | 1664.31 | 1635.22 | 1626.41 | changed |
+| text 64 B (C reads every byte) | 23.90 | 24.98 | 22.28 | 22.61 | changed |
+| control (no C: Int arithmetic) | 0.26 | -0.15 | 0.87 | 0.93 | identical |
+
+Where the CLIF is identical the differences are code placement and noise
+(the trivial fold's own time moves between 0.95 and 3.4 ns from program to
+program: alignment), not the operation; nothing changed in the code.
+Exposures got faster: about 1.5 ns per read exposure (the `rt_bytes_addr`
+call is gone). No desktop allocation was added anywhere.
+
+Application level, Icy Tower's 600-frame autopilot: section 18a.
+Linux AArch64, macOS AArch64 and Windows x86-64: the same CLIF claim holds
+statically (`desktop_code_never_rotates` compiles for each); their timing
+is CI's (section 23), not measured here.
+
+### 18a. Icy Tower and the footprint
+
+Icy Tower built by `examples/games/icy-tower/build.sh` with each checkout
+against the same libSDL3.so (3.4.18), run `--autopilot --fixed-step
+--frames 600 --seed 17` on SDL's dummy driver (**observed**): both print
+the identical summary (`frames=600 ... score=360 ... rng=659525717`).
+Instructions under callgrind (deterministic: the baseline run twice gives
+the same count):
+
+| Object | before | after | difference |
+|---|---:|---:|---:|
+| the program and runtime (icy) | 294,086,969 | 293,909,980 | -176,989 (-0.06%) |
+| libSDL3.so | 638,891,193 | 638,891,193 | 0 |
+| libc (malloc internals: `_int_malloc`, `malloc_consolidate`) | 81,944,938 | 82,312,545 | +367,607 |
+| total | 1,051,883,847 | 1,052,096,194 | +212,347 (+0.020%) |
+
+The program's own instructions went down (its exposures lost their helper
+call); glibc's allocator did more work for the same calls (its free lists
+start from another heap state: the executable's layout differs), a
+difference unrelated to pointers. Wall time, alternating runs on a machine
+also running mutation tests: best of 7, 301 ms before and 302 ms after.
+
+Footprint (**observed**, Linux x86-64; stripped sizes in parentheses):
+
+| Artifact | before | after |
+|---|---:|---:|
+| single-file compiler (`single/build.sh`) | 15,607,833 | 15,610,549 (+2,716) |
+| driver `botlish-native` | 61,417,960 (10,053,576) | 61,476,168 (10,068,568) |
+| runtime archive `libbotlish_runtime.a` | 41,325,388 (13,602,794) | 41,440,104 (13,596,330) |
+| stub `botlish-aot-stub` | 12,054,264 (1,263,088) | 12,089,448 (1,257,792) |
+| Android runtime archive | 44,364,258 (43,922,918) | 44,252,274 (43,820,014) |
+| Icy Tower executable (stripped) | 984,104 | 981,400 |
+| Icy Tower program object (`botlish-native object`) | 160,208 | 160,264 |
+| `handle` benchmark executable (rustc linker, unstripped) | 11,501,880 | 11,537,440 |
+
+Code generation time for Icy Tower's program (`botlish-native object` of
+its NIR, each driver on its own checkout's, alternating, 15 runs each on the
+idle machine): best 68.0 ms before and 67.6 ms after, means 74.8 and 76.5 ms
+(single runs scatter from 67 to 98 ms); the change adds a handful of
+Cranelift instructions per exposure site and none elsewhere.
+
+## 19. Android performance
+
+The rotation is one `ror` (AArch64, single-cycle) per encode and per
+decode; exposures lost their helper call there as everywhere. Android
+timings under qemu-user are emulation, not device numbers: not reported as
+performance.
+
+## 20. Runtime ABI and target packages
+
+| Runtime | Fingerprint |
+|---|---|
+| Linux x86-64 driver, before and after | `14aa5041bb46ae5d` |
+| `runtime-abi aarch64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc` | the default encoding's (equal to the host's on x86-64; each host's own) |
+| Android runtime before (base commit) | `14aa5041bb46ae5d` (archive SHA-256 `653bed00377113d5...`) |
+| Android runtime after (`runtime-abi aarch64-linux-android`) | `637264e0003a0b68` (archive SHA-256 `6fbd8f342ecc733e...`) |
+
+The fingerprint digests the encoding only when it is not the default
+(`runtime/aotimage.rs:104` `fingerprint_for`, `:115` the mark
+`CPTRWORD` and the rotation), so desktop runtimes, stubs and records keep
+theirs and the stale Android package -- whose fingerprint is the old one --
+is refused by `-target-support` before anything links (`at-runtime-
+identity` requires the archive to state Android's fingerprint and not the
+driver's own). The driver reports a target's with `runtime-abi TRIPLE`
+(`main.rs:686`); `native::runtimeAbi ?TRIPLE?`, `native/support.tcl:240`
+and the manifest compare with it; `package.sh` checks the archive against
+it. ELF facts, 16 KiB alignment, Bionic-only dependencies: unchanged
+(`at-library-elf` and the rest of android-target.test pass).
+
+## 21. Negative tests
+
+Refused, never fixed (**observed** in tests): an address no word of the
+runtime's encoding holds (`cf-wild-address`, `0xf000000000000010`); an
+Android address whose bits 52..55 do not repeat bit 51
+(`top_byte_tagged_refuses_what_it_cannot_hold`); a wrong storage kind at a
+C call (TYPE, the mutants `exposure-kinds-swapped`,
+`exposure-writable-unmarked` below); a target support package of the old
+fingerprint; a program built for another target. Synthetic tagged values
+are only encoded and decoded, never dereferenced or freed; every pointer
+dereferenced or freed came from Bionic or SDL.
+
+## 22. Mutation testing
+
+`audit/android-tagged-pointers/tools/mutate.tcl` over its `mutants.txt`
+(**observed**; ANDROID_NDK_ROOT, qemu-aarch64 and the three Android
+userspaces present, so every Android detector ran -- each mutant's private
+copy rebuilt its own Android runtime archive through `package.sh`): **23
+mutants, 23 killed**, none surviving, untested, not applied or not built.
+(The run was split across two harness processes, the second taking the last
+ten with `-only`.) Each was killed by a detector its `!!` line names:
+
+| Mutant | The defect | Killed by |
+|---|---|---|
+| decode-masks-tag | decode clears the top byte | rust `address_word_tests`; at-tagged-pointers |
+| encode-clears-tag | encode drops the top byte | rust `address_word_tests` (also `distinct_addresses_are_distinct_words`); at-tagged-pointers |
+| fits-ignores-rotation | the old 60-bit fits check on every encoding | rust `top_byte_tagged_keeps_every_tag`, `..._refuses_what_it_cannot_hold` |
+| android-runtime-untagged | Android's runtime keeps the default encoding | at-tagged-pointers |
+| desktop-rotates | the default encoding rotates | rust `canonical60_is_the_sign_extended_60_bit_word` |
+| null-word | null no longer the bare tag | rust `top_byte_tagged_keeps_every_tag` |
+| android-codegen-untagged | Android's code uses the default encoding | rust `address_word_is_the_runtimes`, `android_code_rotates_by_the_top_byte`; at-tagged-pointers |
+| every-aarch64-tagged | every AArch64 target's code rotates | rust `address_word_is_the_runtimes`, `desktop_code_never_rotates` |
+| fingerprint-ignores-encoding | a stale Android runtime accepted | rust `abi_fingerprint_states_the_address_encoding`, `address_word_is_the_runtimes`; at-runtime-identity |
+| record-host-fingerprint | an Android record states the host's fingerprint | at-application-run, at-tagged-heap-pointer |
+| runtime-abi-host | `runtime-abi TRIPLE` ignores the triple | at-runtime-identity |
+| support-host-abi | packages compared with the host's fingerprint | at-library-elf |
+| manifest-host-abi | manifests record the host's fingerprint | at-tagged-manifest |
+| codegen-decode-unrotated | generated decode without the rotation | rust `android_code_rotates_by_the_top_byte`; at-tagged-pointers |
+| codegen-encode-unrotated | generated encode without the rotation | rust `android_code_rotates_by_the_top_byte`; at-tagged-heap-pointer |
+| callback-address-unrotated | a callback's entry encoded unrotated | at-tagged-pointers (qsort, user-data callback) |
+| result-fits-unrotated | the result check compares the unrotated address | at-tagged-heap-pointer, at-tagged-sdl3 |
+| exposure-small-int | the old small-Int exposure restored | rust `an_exposure_is_the_storage_plus_the_payload_offset`; cf-nir; at-application-run |
+| exposure-masks-tag | the exposure loses its top byte | at-tagged-pointers |
+| exposure-header-address | C given the storage's header | rust `an_exposure_...`; cf-borrow-sha256-shape |
+| exposure-kinds-swapped | readable and writable kind checks swapped | cf-borrow-sha256-shape |
+| exposure-writable-unmarked | a writable storage not marked `mutable=` | cf-borrow-sha256-shape, cf-nir |
+| exposure-no-keepalive | exposed storages not kept alive | cf-nir |
+
+Timing was never a detector. The brief's runtime-safety mutants on code
+this change does not touch -- resource cleanup, thread affinity,
+integer-to-pointer conversion, released handles, GC root classification
+(the four-bit tag is unchanged) -- are the existing catalogs'
+(`audit/c-abi-types`, `audit/context-affine`, `audit/per-thread-runtime`,
+`audit/c-pointer-borrowing`), whose mutants all still apply
+(`tools/mutant-catalogs.tcl`: 108 catalogs, 3713 mutants, 0 problems). A
+NUL-terminated-length mutant has no place here: exposures take explicit
+lengths, which nothing in this change touched.
+
+**Other catalogs' mutants of the changed code.** Sixteen mutants of
+`audit/c-abi-types`, `audit/c-ffi`, `audit/c-pointer-borrowing` and
+`audit/host-startable-library` replaced code this change rewrote; each was
+updated to the new code as a mutant of the same rule and run through its
+own harness (**observed**): `address-word-truncated` (c-abi-types: killed by
+ca-ptr-wide-address and its fuzzer); `pointer-untag-forgotten`,
+`keepalive-dropped`, `argument-after-exposure`, `address-masked`,
+`pointer-result-truncated`, `va-pointer-truncated`, `va-keepalive-dropped`
+(c-ffi: 7 killed); `owner-liveness-dropped`, `borrow-allowed-across-yield`,
+`exposure-address-truncated`, `read-exposure-copied`,
+`exposure-wrong-owner`, `allocation-after-c-call` (c-pointer-borrowing: 6
+killed; `apple-exposure-tagged` is macOS-only and was skipped here -- the
+macOS tier item `c-borrow-mutants` runs it); `abi-ignores-library`
+(host-startable-library: killed by `abi_fingerprint_constant_is_the_digest_of_its_words`
+and `abi_fingerprint_states_the_address_encoding`).
+
+## 23. Regression and CI
+
+**Local** (**observed**, Linux x86-64, each file with a private `-tmpdir`;
+no failures, the skips host constraints):
+
+| Area | Files (passed / total) |
+|---|---|
+| C calls, pointers, exposures | c-ffi 123/129, c-pointer-borrowing 62/62, c-byte-borrowing 19/20, c-abi-types 73/73, c-ffi-error-capture 27/27, variadics 58/58 |
+| Native memory | native-view 39/39, native-edit 55/55, binary-layout 51/51, layout-arrays 53/53, layout-unions 43/43 |
+| Callbacks and floats | c-callbacks 40/42, c-float-ffi 37/37, raw-c-float-ffi 31/31 |
+| Libraries, linkers, executables | native-library 32/44, application-library 17/18, external-tools 49/49, system-linker 15/15, native-executable 20/20, aot-stub-linker 6/6, native-link-plan 34/37 |
+| Platforms and targets | target-model 25/25, windows-io 12/27, darwin-io 13/28, linux-syscall 37/37, abi-bytes 73/73, abi-mutable-bytes 76/76, context-affine 28/28 |
+| Android (NDK, runtime, qemu, three images, SDL3) | android-target 32/32, none skipped (an earlier run's one failure was at-tagged-pointers' own expectation of liblog's answer on API 21 and 24, fixed before this run) |
+| Workloads | workload-icy-tower 25/43 (the 18 skips: macOS and Windows executables, release tooling), react-native-package 46/48 (the 2 skips: no prepared React Native app) |
+| Native unit tests | `cargo test --release -- address_word fingerprint target::` (the encoding, the fingerprints, the code-generation test) |
+| Catalogs, reference | `tools/mutant-catalogs.tcl` 0 problems; `tools/compilerpedia.tcl check` 0 problems (1298 topics, 776 examples) |
+
+**CI** (**CI**; the four test workflows dispatched on `bc160372` with
+`workflow_dispatch`, read at 20:46 UTC on 2026-11-13). A job not listed as
+passed or failed is pending, not passed:
+
+| Workflow (run) | Passed | Failed | Pending |
+|---|---|---|---|
+| tests (43479266196) | canary (mutant catalogs, warning gate, canary files), native Rust unit tests and the driver without its JIT, golden shard 2/4, the method-call decision's reference audit | interp (3 of 12,367: `argv-focused-valid-fuzz`, `native-tcl-unicode-lowercase-all-scalars`, `nl-no-string-ternary`); cranelift coverage (the same three, its only "native backend bugs") | compile, cranelift-generic coverage, system- and stub-linked executables, golden shards 1, 3, 4 |
+| tests (linux arm64) (43479271138) | canary, native Rust unit tests (also under GC stress), golden shards 1-4 | system-linked executables (1 of 4,615: `argv-focused-valid-fuzz`) | interp, compile, both coverage jobs, both GC-stress jobs |
+| tests (macos arm64) (43479276703) | smoke (Tier A: Rust tests, native status, aot facts, the canary), the Linux control, acceptance shards 2/6 and 4/6 | acceptance shard 5/6 (1 of 2,415: `argv-focused-valid-fuzz`); system linker (its own tests 15/15, then 1 of 4,615 system-linked: `argv-focused-valid-fuzz`) | acceptance shards 1, 3, 6; Botlish.app |
+| tests (windows x86-64) (43479281847) | canary; root plans; in the smoke job every check but one: Rust tests, the stack guard, native status (C calls, callbacks, byte borrowing), objects and executables (C runtime matrix), GC workloads and the unwind check, Windows I/O, DLL libraries, variadic C calls and the filesystem under GC stress | smoke's tier step: `argv-focused-valid-fuzz`, on interp and compile alike | acceptance shards 1-4, system linker |
+| react-native 2048 (43477196183, the push of `401ac700`) | every job | -- | -- |
+
+Three tests failed, two causes:
+
+* `nl-no-string-ternary` was this branch's: `native::runtimeAbi` chose its
+  argument list with `expr`'s `?:` (the rule of AGENTS.md, "Tcl's `expr`
+  reads a numeric-looking result as a number"). The commit after
+  `bc160372` builds the list with `if`; tests/numeric-looking-names.test
+  5/5, the runtime ABI answers unchanged (`14aa5041bb46ae5d`, Android's
+  `637264e0003a0b68`; at-runtime-identity, at-tagged-manifest,
+  at-library-elf and at-tagged-heap-pointer pass, **observed**).
+* `native-tcl-unicode-lowercase-all-scalars` and `argv-focused-valid-fuzz`
+  (whose program lowercases its arguments) are main's, the toolchain's: CI
+  installs stable Rust, 1.100.0 since 2026-11-12, whose standard library is
+  Unicode 18 (`char::UNICODE_VERSION`; 1.97.0's is 17) with 20 more simple
+  lowercase mappings (1,507 against 1,487, counted over every scalar,
+  **observed**). The native runtime's `std::str::lowercase` is Rust's
+  `char::to_lowercase` adjusted to the Tcl backends' Unicode 16, and the
+  new mappings are not adjusted: the native backends disagree with interp
+  and compile on planes 0 and 1. Both tests pass on this branch built with
+  rustc 1.97.0 (**observed**), and main's own Windows smoke job at the
+  base commit `ce54fead` (run 43467261271, job 132035849002) fails argv's
+  fuzz on the same three iterations (11, 22, 29) on both passes. Nothing of
+  either test calls C or holds a C pointer, and a desktop target's code is
+  byte-identical under this change (section 18). Fixing it -- making the
+  runtime's case mapping independent of the toolchain's Unicode version --
+  is main's, not this milestone's.
+
+main at the base commit `ce54fead`: c-bindgen, bench, icy-tower (Linux,
+macOS, Windows), single executable and scalar-asm-audit green, the Windows
+smoke failure above; its previous commit's canaries had failed in
+rustc-linked tests (the cargo 1.100 layout `ce54fead` fixes). main has
+since moved to `14937461` (native build caches keyed by the Rust
+toolchain), whose runs were queued.
+
+The four test workflows are dispatched again on the fix's commit
+`e63466e8` (superseding the runs above where they were unfinished): tests
+43505390208, tests (linux arm64) 43505394990, tests (macos arm64)
+43505400374, tests (windows x86-64) 43505405543, all four finished (the
+last job at 10:06 UTC on 2026-11-14; **CI**):
+
+| Workflow | Passed | Failed | Pending |
+|---|---|---|---|
+| tests, finished | canary, native Rust unit tests, the method-call decision's reference audit, golden shards 1-4 | interp (2 of 12,367: `argv-focused-valid-fuzz`, `native-tcl-unicode-lowercase-all-scalars`; `nl-no-string-ternary` passes); system-linked executables (1 of 4,615: argv's fuzz); stub-linked executables (1 of 4,244: argv's fuzz); compile (2 of 12,367: the same two); cranelift and cranelift-generic coverage (their "native backend bugs": the same two and nothing else; at `bc160372` cranelift coverage listed `nl-no-string-ternary` as a third) | -- |
+| tests (linux arm64), finished | canary, native Rust unit tests, golden shards 1-4 | interp and compile (2 of 12,367 each: the same two); system-linked executables (1 of 4,615: argv's fuzz); cranelift and cranelift-generic coverage (their "native backend bugs": the same two and nothing else); both GC-stress jobs, interp and compile (2 of 12,367 each: the same two) | -- |
+| tests (macos arm64), finished | smoke, the Linux control, acceptance shards 1-4, Botlish.app, Botlish.app without developer tools, main-thread startup, static SDL3 through Botlish.app | acceptance shard 5 (1 of 2,415: argv's fuzz), shard 6 (1 of 2,255: lowercase); system linker (its own tests 15/15, then 1 of 4,615 system-linked: argv's fuzz) | -- |
+| tests (windows x86-64), finished | canary, root plans, acceptance shards 2-4, every smoke check but one (C calls and libraries, filesystem and variadic C calls under GC stress included) | smoke (argv's fuzz, 1 of 1,287 on each pass); acceptance shard 1 (2 of 2,820: argv's fuzz and lowercase); system linker (its own tests 15/15 and under GC stress 181/181; argv's fuzz 1 of 401 on each pass; the runtime archive's system-library check: rustc now names `synchronization.lib`, which `runtime_system_libraries` lacks) | -- |
+
+Every failure is main's. The tests that fail are the two Unicode 18 ones
+(above), wherever they run; the Windows system-library check is the same
+toolchain: Rust 1.100.0's standard library links `synchronization.lib`
+(rustc's `--print native-static-libs`), and this change touches neither
+the runtime's system libraries nor the check. main's runs at its latest
+commit `14937461` fail the same jobs the same way: tests (windows x86-64)
+(run 43489783453) smoke (argv's fuzz), system linker (the same
+`synchronization.lib` line, argv's fuzz) and acceptance shard 1 (argv's
+fuzz and lowercase); tests (linux arm64) (run 43489783116) interp,
+compile, both GC-stress jobs (2 failures each: the same two tests), both
+coverage jobs (the same two as their only "native backend bugs") and
+system-linked executables (argv's fuzz). Its tests run was in progress.
+
+**The verdict** (**CI**): every job of the four test workflows on the
+fix's commit `e63466e8` has finished. Every job that failed failed only on
+main's toolchain failures -- `argv-focused-valid-fuzz` and
+`native-tcl-unicode-lowercase-all-scalars` (Rust 1.100.0's Unicode 18) and,
+on Windows, the runtime archive's system-library check (`synchronization.lib`)
+-- and main's own runs at `14937461` fail the same jobs the same way.
+None is this change's: the one failure that was (`nl-no-string-ternary`,
+at `bc160372`) is fixed and passes in every job that runs it. Every check
+of C calls, C pointers, byte exposures, callbacks, native libraries, the
+linkers and executables, the C runtime matrix, the golden suites and GC
+stress passed on every host it ran on. The branch's CI is not green, and
+cannot be before main's toolchain failures are fixed on main.
+
+**The merge into main** (2026-11-15, **observed** on the merged tree
+before the push): main had moved from `ce54fead` to `3a819456` (rustc
+1.100.0 pinned with a Unicode 16 lowercase table of the runtime's own and
+`synchronization.lib` in Windows' link -- the toolchain failures above,
+fixed on main --, payload-bearing enum cases, exhaustive matches, C
+coroutine frames, native function types), merged into the branch three
+times without a conflict. Main's native changes in that span are enum and
+match operations; none touches a C pointer, an exposure or the address
+word. On the merged tree, built with the pinned rustc 1.100.0: the native
+Rust tests (355 and 137, the encoding's, the fingerprints' and the
+code-generation tests among them), c-ffi 123/129, c-pointer-borrowing
+62/62, c-byte-borrowing 19/20, c-callbacks 40/42, c-abi-types 73/73,
+c-ffi-error-capture 27/27, native-view 39/39, native-edit 55/55,
+native-library 32/44, native-executable 20/20, system-linker 15/15, enums
+66/66, argv 71/77 and native-tcl-unicode 127/127 (main's fix: both pass),
+numeric-looking-names 5/5, text-collection-docs-diagnostics 24/24 (the
+skips host constraints), `tools/mutant-catalogs.tcl` (113 catalogs, 3,840
+mutants, 0 problems), `tools/compilerpedia.tcl check` (0 problems), and
+android-target.test 32/32 with the Android runtime rebuilt from the merged
+source. The merged runtime's fingerprints are main's own plus this
+change's encoding word for Android: `3109b2adb00065a9` (desktop: the
+default encoding adds no word) and `08043a5642fed7dc` (android-aarch64,
+top-byte-tagged); the values sections 18-24 state are the branch's before
+the merge. The push to main runs main's full CI.
+
+## 24. Cleanroom
+
+`audit/android-tagged-pointers/cleanroom/cleanroom.sh` (**observed**;
+`results/cleanroom/`): the single-file compiler built from this change
+(`single/build.sh`, 15,610,549 bytes) copied into a fresh directory and run
+with an emptied environment (`env -i PATH=/usr/bin:/bin`, a fresh HOME,
+`ANDROID_NDK_ROOT`), nothing of the checkout reachable. Its inputs are what
+a developer has: the Android target support package packed by that compiler
+(`package.sh OUT single/out/botlish`: runtime ABI `637264e0003a0b68`,
+archive SHA-256 `6fbd8f342ecc733e...`), the probe's sources and the
+userspace runner copied into the room, Android's libSDL3.so and the
+committed android-aarch64 SDL3 binding staged as sources, the NDK and the
+three Android userspaces.
+
+1. The package is installed (`botlish add ... -target android-aarch64`).
+2. hello, heap, tagged and sdl_surface are compiled as application
+   libraries of android-aarch64 (`-target-support
+   botlish_target_android_aarch64 -emit-native-library NAME -application`),
+   tagged and heap linking the probe's NDK-built static archive (`static
+   at`), sdl_surface libSDL3.so; the hosts by the NDK.
+3. Each manifest is schema 3 with `compiler.runtimeAbi` and
+   `targetSupport.runtimeAbi` both `637264e0003a0b68`
+   (`results/cleanroom/tagged.manifest.json`).
+4. Run in Android processes: every program `MAIN 0 0`, `MAIN 1 0` on API 21,
+   24 and 35; on API 35 with tagging on `exposure 180 36`, `heap 180 same`,
+   `sdl surface 180 180 8x8 32` and every other check; also with 16 KiB
+   pages and under GC stress (`results/cleanroom/cleanroom.txt`).
+5. The base commit's Android package installed by the same compiler is
+   refused before anything links: `NATIVE TARGET-SUPPORT ABI`, "the
+   package's runtime ABI fingerprint is 14aa5041bb46ae5d, and this
+   compiler's for android-aarch64 is 637264e0003a0b68"
+   (`results/cleanroom/stale-package.txt`).
+
+## 25. Remaining limitations
+
+* **52-bit AArch64 address spaces**: under the tagged encoding a user
+  address with bit 51 set (Linux's large virtual addresses past the default
+  48-bit window, only by an explicit `mmap` hint) is refused NATIVE
+  ADDRESS. Android's kernels use 39- and 48-bit spaces.
+* **Linux AArch64 with MTE or HWASan heaps** keeps the default encoding:
+  glibc's tagged heaps (its memory-tagging tunable) are refused as before.
+  It joins the tagged encoding by its row in `address_word` and its
+  runtime's cfg, with its own measurements (**projected**).
+* **MTE**: tags in bits 56..59 are kept like any tag (the whole top byte),
+  but no MTE hardware ran here: tag-check faults were not exercised.
+* **No ART**: no Activity, `SDL_Init`, window or renderer ran on Android
+  (section 16); qemu-user processes are Android userspaces, not devices.
+* **The Linux syscall bridge** keeps its small-Int address on purpose
+  (section 7).
+
+## 26. Next milestone
+
+**RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1** can proceed without
+`android:allowNativeHeapPointerTagging="false"`: its first prerequisite in
+RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md (section 24, item 1)
+is met by the runtime. Its emulator jobs will be the first to run
+`SDL_CreateWindow` and `SDL_CreateRenderer` on Android, where both return
+tagged pointers this runtime holds.

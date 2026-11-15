@@ -301,9 +301,9 @@ proc hir::types::subtype {a b} {
 @@ address-word-truncated the native address word keeps only 32 bits of the address
 ## native/src/runtime/value.rs
 <<<<
-    ((address as u64) << 4) | CPTR_TAG
+        ((address.rotate_left(self.rotation()) as u64) << 4) | CPTR_TAG
 ====
-    (((address as u64) & 0xffff_ffff) << 4) | CPTR_TAG
+        (((address.rotate_left(self.rotation()) as u64) & 0xffff_ffff) << 4) | CPTR_TAG
 >>>>
 
 @@ target-not-isolated a HIR's declarations leave out the C scalars, so a later compilation's target leaks into it

@@ -1,0 +1,27 @@
+== the compiler: Botlish compiler (no release version; this is a development build)
+21-hello exit=0 MAIN 0 0;MAIN 1 0; 
+21-hello-untagged exit=0 MAIN 0 0;MAIN 1 0; 
+21-heap exit=0 MAIN 0 0;MAIN 1 0; 
+21-heap-untagged exit=0 MAIN 0 0;MAIN 1 0; 
+21-tagged exit=0 MAIN 0 0;MAIN 1 0; exposure 0 36;heap 0 same;
+21-tagged-untagged exit=0 MAIN 0 0;MAIN 1 0; exposure 0 36;heap 0 same;
+24-hello exit=0 MAIN 0 0;MAIN 1 0; 
+24-hello-untagged exit=0 MAIN 0 0;MAIN 1 0; 
+24-heap exit=0 MAIN 0 0;MAIN 1 0; 
+24-heap-untagged exit=0 MAIN 0 0;MAIN 1 0; 
+24-tagged exit=0 MAIN 0 0;MAIN 1 0; exposure 0 36;heap 0 same;
+24-tagged-untagged exit=0 MAIN 0 0;MAIN 1 0; exposure 0 36;heap 0 same;
+35-hello exit=0 MAIN 0 0;MAIN 1 0; 
+35-hello-untagged exit=0 MAIN 0 0;MAIN 1 0; 
+35-heap exit=0 MAIN 0 0;MAIN 1 0; 
+35-heap-untagged exit=0 MAIN 0 0;MAIN 1 0; 
+35-tagged exit=0 MAIN 0 0;MAIN 1 0; exposure 180 36;heap 180 same;
+35-tagged-untagged exit=0 MAIN 0 0;MAIN 1 0; exposure 0 36;heap 0 same;
+21-sdl_surface exit=0 MAIN 0 0;MAIN 1 0; sdl surface 0 0 8x8 32;sdl fill true 287454020 287454020;
+21-sdl_surface-untagged exit=0 MAIN 0 0;MAIN 1 0; sdl surface 0 0 8x8 32;sdl fill true 287454020 287454020;
+24-sdl_surface exit=0 MAIN 0 0;MAIN 1 0; sdl surface 0 0 8x8 32;sdl fill true 287454020 287454020;
+24-sdl_surface-untagged exit=0 MAIN 0 0;MAIN 1 0; sdl surface 0 0 8x8 32;sdl fill true 287454020 287454020;
+35-sdl_surface exit=0 MAIN 0 0;MAIN 1 0; sdl surface 180 180 8x8 32;sdl fill true 287454020 287454020;
+35-sdl_surface-untagged exit=0 MAIN 0 0;MAIN 1 0; sdl surface 0 0 8x8 32;sdl fill true 287454020 287454020;
+35-tagged-16k exit=0 MAIN 0 0;MAIN 1 0; exposure 180 36;heap 180 same;
+35-tagged-gc-stress exit=0 MAIN 0 0;MAIN 1 0; exposure 180 36;heap 180 same;

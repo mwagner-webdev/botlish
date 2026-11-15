@@ -760,7 +760,7 @@ test cf-borrow-sha256-shape {SHA256's shape: read input, write output, and a poi
     set dir [bcfApp "${::bytesPrelude}src = text(\"hello\")\nout = std::abi::bytes::zeroed(std::abi::usize(5))\nr = bcf::reverse(src, len(src), out)\n\[std::abi::bytes::freeze(r.out) == text(\"olleh\"), r.result, src == text(\"hello\"), std::abi::bytes::freeze(out) == std::abi::bytes::freeze(std::abi::bytes::zeroed(std::abi::usize(5)))\]\n"]
     set hir [appHir $dir]
     set call [lindex [lsearch -all -inline -regexp [split [native::nir $hir] \n] {foreigncall}] 0]
-    list [appValues $dir {cranelift cranelift-generic}] [regexp {foreigncall \d+ %\d+ %\d+ %\d+ exposed=0,2 discard} $call]
+    list [appValues $dir {cranelift cranelift-generic}] [regexp {foreigncall \d+ %\d+ %\d+ %\d+ exposed=0,2 mutable=2 discard} $call]
 } -cleanup removeApps -result {{{[true, unit, true, true]} {[true, unit, true, true]}} 1}
 
 test cf-borrow-refusals {byte storage is refused, FOREIGN-BORROW, where the contract may keep the pointer (captures, unknown), where C may write an immutable Bytes, and where the pointee is not byte-sized -- exactly the borrowing milestone's rules} -constraints cfFixture -body {
@@ -876,17 +876,18 @@ test cf-function-pointers {a C function pointer is an ABI value: C returns one a
     appValues [bcfApp "import std::ffi::c\nimport bcf\n\nf = bcf::callback_twice()\nbcf::apply(f, 21)\n"] {cranelift}
 } -cleanup removeApps -result 42
 
-test cf-nir {the call lowers to one foreigncall of the program's foreign table -- symbol, ABI classes, alias -- after the argument evaluation and exposures, with the keepalives after it; the link plan in the header} -constraints cfFixture -body {
+test cf-nir {the call lowers to one foreigncall of the program's foreign table -- symbol, ABI classes, alias -- after the argument evaluation and the write exposure's private copy, taking the exposed storages themselves (the readable one exposed=, the writable copy also mutable=: the call makes their payload addresses, RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md), with the keepalives of exactly those storages after it; the link plan in the header} -constraints cfFixture -body {
     set nir [appNir [bcfApp "${::bytesPrelude}src = text(\"hello\")\nr = bcf::reverse(src, len(src), std::abi::bytes::zeroed(std::abi::usize(5)))\nbcf::add(1, 2)\n"]]
     set lines [split $nir \n]
     set call [lsearch -regexp $lines {foreigncall}]
+    regexp {foreigncall \d+ (%\d+) %\d+ (%\d+) exposed=0,2 mutable=2} [lindex $lines $call] -> read written
+    regexp {(%\d+) = op mbytesclone} [lindex $lines [expr {$call - 1}]] -> copy
     list [lsearch -all -inline -regexp $lines {^(link|foreign) }] \
-        [lindex [regexp -inline {op mbytesclone} [lindex $lines [expr {$call - 3}]]] 0] \
-        [lindex [regexp -inline {op bytesaddr} [lindex $lines [expr {$call - 2}]]] 0] \
-        [lindex [regexp -inline {op mbytesaddr} [lindex $lines [expr {$call - 1}]]] 0] \
-        [lindex [regexp -inline {op keepalive} [lindex $lines [expr {$call + 1}]]] 0] \
-        [lindex [regexp -inline {op keepalive} [lindex $lines [expr {$call + 2}]]] 0]
-} -cleanup removeApps -result [subst -nocommands -nobackslashes {{{link "botlish_cffi_fixture"} {foreign 0 "bcf_reverse" params="ptr $::cfULongClass ptr" result=ptr alias=2 name="bcf::reverse"} {foreign 1 "bcf_add" params="i32 i32" result=i32 name="bcf::add"}} {op mbytesclone} {op bytesaddr} {op mbytesaddr} {op keepalive} {op keepalive}}]
+        [lindex [regexp -inline {op mbytesclone} [lindex $lines [expr {$call - 1}]]] 0] \
+        [expr {$written eq $copy}] [llength [lsearch -all -regexp $lines {op (m?bytesaddr)}]] \
+        [expr {[lsort [list [lindex [regexp -inline {op keepalive %\d+} [lindex $lines [expr {$call + 1}]]] 0] [lindex [regexp -inline {op keepalive %\d+} [lindex $lines [expr {$call + 2}]]] 0]]]
+            eq [lsort [list "op keepalive $read" "op keepalive $written"]]}]
+} -cleanup removeApps -result [subst -nocommands -nobackslashes {{{link "botlish_cffi_fixture"} {foreign 0 "bcf_reverse" params="ptr $::cfULongClass ptr" result=ptr alias=2 name="bcf::reverse"} {foreign 1 "bcf_add" params="i32 i32" result=i32 name="bcf::add"}} {op mbytesclone} 1 0 1}]
 
 test cf-clif {natively the call is one direct call of the imported symbol with the platform C signature -- the host target's C convention, narrow parameters extended by their class, the result at its width -- no helper, no lookup, no Tcl} -constraints {cfFixture} -body {
     set hir [appHir [bcfApp "import std::ffi::c\nimport bcf\n\nfn f(x: std::ffi::c::UChar, y: std::ffi::c::Short) -> int:\n    bcf::widen_uchar(x) + bcf::widen_short(y)\n\nf(1, 2)\n"]]
@@ -1933,10 +1934,10 @@ set ::snprintfCalls [list \
 test cf-va-borrow-nir {a variadic call exposes byte storage exactly as a fixed call does -- its fixed pointer parameters' contracts admit it, after every argument, a write exposure a private copy -- and keeps every exposed storage alive after the call (its trailing operands passed as their promoted classes)} -constraints cfFixture -body {
     set lines [split [appNir [snprintfApp [list 16 {%d %.1f} {bcf::c_int(1), 2.5}] ""]] \n]
     set call [lsearch -regexp $lines {foreigncall .*varargs}]
-    list {*}[lmap line [lrange $lines [expr {$call - 3}] [expr {$call + 2}]] {
+    list {*}[lmap line [lrange $lines [expr {$call - 1}] [expr {$call + 2}]] {
         regsub -all {%[0-9]+|@e[0-9]+} [string trim [regsub {^\s*%[0-9]+ = } $line {}]] {}
     }]
-} -cleanup removeApps -result {{op mbytesclone  } {op mbytesaddr  } {op bytesaddr  } {foreigncall 0      exposed=0,2 varargs=i32:i32,f64:f64 } {op keepalive  } {op keepalive  }}
+} -cleanup removeApps -result {{op mbytesclone  } {foreigncall 0      exposed=0,2 mutable=0 varargs=i32:i32,f64:f64 } {op keepalive  } {op keepalive  }}
 
 test cf-va-crt-snprintf {the platform C runtime's own variadic snprintf (glibc's, libSystem's; on Windows the static C runtime's, through legacy_stdio_definitions.lib) formats doubles, ints, long longs, an unsigned int, a char and a C string, in its first trailing position (on Win64 the fourth: r9 and xmm3) and past every register, into a MutableBytes exposed for writing, from a Bytes format exposed for reading: the exact bytes, the returned length, and C99's truncation (the length it would have written, the buffer cut and terminated) -- on both native backends, in an executable and under GC stress} -constraints {cfFixture nativeCVariadics} -body {
     set dir [snprintfApp $::snprintfCalls]
