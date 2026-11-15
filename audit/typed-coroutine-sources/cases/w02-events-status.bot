@@ -1,0 +1,17 @@
+# case: workload -- an incremental processor that yields application events and returns a terminal status code: rejected (Event and int); `first`, an Event at run time, is typed int (the declared result), so reading its kind is NOT-A-STRUCT
+# class: rejected-precision
+# expect: rejected COROUTINE-RESULT-MISMATCH NOT-A-STRUCT
+import std::coroutine
+
+struct Event:
+    kind: str
+    at: int
+
+fn process(inputs: List[int]) -> int:
+    loop x in inputs:
+        if x > 0:
+            yield Event {kind: "positive", at: x}
+    0
+
+coroutine {step, first} = process([1, 2])
+first.kind

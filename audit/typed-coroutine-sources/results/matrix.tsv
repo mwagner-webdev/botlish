@@ -1,0 +1,121 @@
+case	class	observed	verdict	root	declared	R	Y	O	Yrange	first	firstRange	backends
+c01-sentinel-end	narrowing	precise	ok	symbols	int	int	int	int	[-∞, +∞]	int	[-∞, +∞]	yes
+c02-sentinel-collision	narrowing	precise	ok	symbols	int	int	int	int	[-∞, +∞]	int	[-∞, +∞]	yes
+c02-sentinel-collision	narrowing	precise	ok	symbols	int	int	int	int	[-∞, +∞]	int	[-∞, +∞]	yes
+d01-deep-byte-helper	narrowing	widened	ok	source	int	int	int[std::byte::Byte]	int	[66, 66] {66}	int	[-∞, +∞]	yes
+d02-two-helpers	rejected-correct	rejected COROUTINE-RESULT-MISMATCH	ok	source	int	int	any	int	-	int		-
+d03-helper-return-separate	intended	facts-widened	ok	source	int	int	int	int	[0, 4611686018427387903]	int	[-∞, +∞]	yes
+d04-recursive-helper	intended	facts-widened	ok	source	int	int	int	int	[-∞, 3]	int	[-∞, +∞]	yes
+d05-generic-helper	rejected-precision	rejected COROUTINE-RESULT-MISMATCH	ok	ints	int	int	any	int	-	int		-
+d05-generic-helper	rejected-precision	rejected COROUTINE-RESULT-MISMATCH	ok	texts	str	str	any	str	-	str		-
+d05b-generic-helper-undeclared	narrowing	precise	ok	ints		int	any	any	[-∞, +∞]	any	[-∞, +∞]	yes
+d05b-generic-helper-undeclared	narrowing	precise	ok	texts		str	any	any	[-∞, +∞]	any	[-∞, +∞]	yes
+d06-branch-yield-return	intended	facts-widened	ok	source	int	int	int	int	[1, 2]	int	[-∞, +∞]	yes
+d07-handled-helper-error	intended	precise	ok	source	int	int	int	int	[-∞, +∞]	int	[-∞, +∞]	yes
+d07b-known-error-helper	rejected-correct	rejected KNOWN-ERROR	ok	source	int	int	int	int	-	int		-
+d08-nested-coroutine	intended	facts-widened	ok	words	str	str	str	str	[-∞, +∞]	str	[-∞, +∞]	yes
+d08-nested-coroutine	intended	facts-widened	ok	lengths	int	int	int	int	[0, 4611686018427387903]	int	[-∞, +∞]	yes
+e01-fail-before-first	intended	facts-widened	ok	source	int	int	int	int	[0, -5]	int	[-∞, +∞]	yes
+e02-fail-after-yields	intended	facts-widened	ok	source	int	int	int	int	[1, 2]	int	[-∞, +∞]	yes
+e03-unhandled-resume	rejected-correct	rejected UNHANDLED-ERROR	ok	source	int	int	int	int	-	int		-
+e04-handled-inside	intended	facts-widened	ok	source	int	int	int	int	[5, 5] {5}	int	[-∞, +∞]	yes
+e05-handler-sentinel	intended	precise	ok	source	int[std::byte::Byte]	int[std::byte::Byte]	int[std::byte::Byte]	int[std::byte::Byte]	[65, 65] {65}	int[std::byte::Byte]	[0, 255]	yes
+e05b-handler-sentinel-int	intended	rejected TYPE	ok	source	int[std::byte::Byte]	int[std::byte::Byte]	int[std::byte::Byte]	int[std::byte::Byte]	-	int[std::byte::Byte]		-
+m01-byte-byte	intended	precise	ok	source	int[std::byte::Byte]	int[std::byte::Byte]	int[std::byte::Byte]	int[std::byte::Byte]	[65, 65] {65}	int[std::byte::Byte]	[0, 255]	yes
+m02-byte-int	narrowing	widened	ok	source	int	int	int[std::byte::Byte]	int	[65, 65] {65}	int	[-∞, +∞]	yes
+m03-byte-unit-declared	rejected-precision	rejected COROUTINE-RESULT-MISMATCH	ok	source	unit	unit	int[std::byte::Byte]	unit	-	unit		-
+m03-byte-unit-inferred	rejected-precision	rejected COROUTINE-RESULT-MISMATCH	ok	source		List[never]	int[std::byte::Byte]	any	-	any		-
+m04-byte-struct-inferred	rejected-precision	rejected COROUTINE-RESULT-MISMATCH	ok	source		Summary	int[std::byte::Byte]	any	-	any		-
+m04-byte-struct	rejected-precision	rejected COROUTINE-RESULT-MISMATCH	ok	source	Summary	Summary	int[std::byte::Byte]	Summary	-	Summary		-
+m05-int-str	rejected-precision	rejected COROUTINE-RESULT-MISMATCH	ok	source	str	str	int	str	-	str		-
+m06-str-int-any	narrowing	widened	ok	source	any	any	str	any	[-∞, +∞]	any	[-∞, +∞]	yes
+m06-str-int	rejected-precision	rejected COROUTINE-RESULT-MISMATCH	ok	source	int	int	str	int	-	int		-
+m07-nested-yield-types	intended	precise	ok	source	int[std::byte::Byte]	int[std::byte::Byte]	int[std::byte::Byte]	int[std::byte::Byte]	[3, 200] {3,200}	int[std::byte::Byte]	[0, 255]	yes
+m07-two-yield-types	rejected-correct	rejected COROUTINE-RESULT-MISMATCH	ok	source	int	int	any	int	-	int		-
+m08-no-yield-result	rejected-correct	rejected COROUTINE-RHS-NOT-YIELDING	ok	source	int	int	-	any	-	any		-
+m08-unexecuted-yield	intended	precise	ok	source	int	int	int	int	[-∞, +∞]	int	[-∞, +∞]	yes
+m09-always-fails	intended	facts-widened	ok	source	int	int	int	int	[10, 11]	int	[-∞, +∞]	yes
+m09-never-completes	intended	facts-widened	ok	counter		never	int	int	[0, 1000000]	int	[-∞, +∞]	yes
+m10-no-yield-never	rejected-correct	rejected COROUTINE-RHS-NOT-YIELDING TYPE	ok	source	int	int	-	any	-	any		-
+n01-done-guard-no-narrowing	narrowing	rejected TYPE	ok	source	int	int	int[std::byte::Byte]	int	-	int		-
+n02-fold-consumer	narrowing	widened	ok	source	int	int	int[std::byte::Byte]	int	[65, 65] {65}	int	[-∞, +∞]	yes
+o01-yield-affine	rejected-precision	rejected AFFINE-ERASURE-UNSUPPORTED COROUTINE-CONTRACT	ok	child	int	int	int	int	-	int		-
+o01-yield-affine	rejected-precision	rejected AFFINE-ERASURE-UNSUPPORTED COROUTINE-CONTRACT	ok	child	int	int	int	int	-	int		-
+o01-yield-affine	rejected-precision	rejected AFFINE-ERASURE-UNSUPPORTED COROUTINE-CONTRACT	ok	source	Holder	Holder	Holder	Holder	-	Holder		-
+o02-hold-affine-across	intended	facts-widened	ok	child	int	int	int	int	[1, 1] {1}	int	[-∞, +∞]	yes
+o02-hold-affine-across	intended	facts-widened	ok	source	int	int	int	int	[-∞, +∞]	int	[-∞, +∞]	yes
+o03-move-in	intended	facts-widened	ok	child	int	int	int	int	[1, 1] {1}	int	[-∞, +∞]	yes
+o03-move-in	intended	facts-widened	ok	relay	int	int	int	int	[-∞, +∞]	int	[-∞, +∞]	yes
+o04-resource-abandon	intended	facts-widened	ok	source	int	int	int	int	[1, 2]	int	[-∞, +∞]	yes
+o04-resource-abandon	intended	facts-widened	ok	source	int	int	int	int	[1, 2]	int	[-∞, +∞]	yes
+o05-context-source	intended	facts-widened	ok	source	int	int	int	int	[1, 257]	int	[-∞, +∞]	yes
+o06-inject-no-context	intended	facts-widened	ok	source	int	int	int	int	[1, 1] {1}	int	[-∞, +∞]	yes
+p01-protocol-trace	intended	precise	ok	source	int	int	int	int	[-∞, +∞]	int	[-∞, +∞]	yes
+p02-same-type-phases	intended	facts-widened	ok	source	int	int	int	int	[2, 2] {2}	int	[-∞, +∞]	yes
+p03-abandon	intended	precise	ok	source	int	int	int	int	[-∞, +∞]	int	[-∞, +∞]	yes
+p04-message-protocol	intended	precise	ok	source	Event	Event	Event	Event	[-∞, +∞]	Event	[-∞, +∞]	yes
+s2-byte-typed-source-direct	narrowing	rejected TYPE	ok	source	int	int	int[std::byte::Byte]	int	-	int		-
+s2-byte-typed-source	narrowing	widened	ok	source	int	int	int[std::byte::Byte]	int	[65, 65] {65}	int	[-∞, +∞]	yes
+s2-csv-reduced-direct	narrowing	rejected TYPE	ok	field_source	int	int	int	int	-	int		-
+s2-csv-reduced	narrowing	facts-widened	ok	field_source	int	int	int	int	[32, 126]	int	[-∞, +∞]	yes
+s2-csv-reduced	narrowing	facts-widened	ok	field_source	int	int	int	int	[32, 126]	int	[-∞, +∞]	yes
+s2-csv-typed-yields	narrowing	widened	ok	field_source	int	int	int[std::byte::Byte]	int	[0, 255]	int	[-∞, +∞]	yes
+t01-yields-str	intended	precise	ok	source		str	str	str	[-∞, +∞]	str	[-∞, +∞]	yes
+t02-yields-struct	intended	precise	ok	source		Event	Event	Event	[-∞, +∞]	Event	[-∞, +∞]	yes
+t03-yields-payload-enum	intended	precise	ok	source	Out	Out	Out	Out	[-∞, +∞]	Out	[-∞, +∞]	yes
+t04-generic-instance	intended	precise	ok	source		any	any	int	[-∞, +∞]	int	[-∞, +∞]	yes
+t04-generic-instance	intended	precise	ok	source		any	any	str	[-∞, +∞]	str	[-∞, +∞]	yes
+t05-yields-int-literals	narrowing	facts-widened	ok	source	int	int	int	int	[34, 44] {34,44}	int	[-∞, +∞]	yes
+t06-call-result-facts	intended	rejected TYPE	ok	-	-	-	-	-	-	-	-	-
+t07-declared-call-result	intended	none	ok	-	-	-	-	-	-	-	-	yes
+w01-parser-records-summary	rejected-precision	rejected COROUTINE-RESULT-MISMATCH UNKNOWN-FIELD	ok	parse	Summary	Summary	Record	Summary	-	Summary		-
+w01b-parser-envelope	narrowing	precise	ok	parse	Out	Out	Out	Out	[-∞, +∞]	Out	[-∞, +∞]	yes
+w01b-parser-envelope	narrowing	precise	ok	parse	Out	Out	Out	Out	[-∞, +∞]	Out	[-∞, +∞]	yes
+w01c-parser-payload-enum	unsupported	rejected NOT-A-STRUCT	ok	parse	Out	Out	Out	Out	-	Out		-
+w02-events-status	rejected-precision	rejected COROUTINE-RESULT-MISMATCH NOT-A-STRUCT	ok	process	int	int	Event	int	-	int		-
+w02b-events-status-in-event	narrowing	precise	ok	process	Event	Event	Event	Event	[-∞, +∞]	Event	[-∞, +∞]	yes
+w03-option-by-list	narrowing	widened	ok	run	List[int]	List[int]	List[int]{length: 1}	List[int]	[-∞, +∞]	List[int]	[-∞, +∞]	yes
+w04-last-item-is-result	intended	precise	ok	items	int	int	int	int	[-∞, +∞]	int	[-∞, +∞]	yes
+x01-emits-certified	narrowing	facts-widened	ok	source	int	int	int	int	[65, 66]	int	[-∞, +∞]	yes
+x01b-emits-direct	narrowing	rejected TYPE	ok	source	int	int	int	int	-	int		-
+examples/dfa/csv/export.bot		facts-widened	ok	sources::bytes_document_source	int	int	int	int	[0, 244]	int	[-∞, +∞]	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::strict_field_source	int	int	int	int	-	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::strict_document_source	int	int	int	int	-	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::utf8_field_source	int	int	int	int	-	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::utf8_document_source	int	int	int	int	-	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::bytes_field_source	int	int	int	int	[0, 244]	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::bytes_field_from_bytes_source	int	int	int	int	[0, 244]	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::bytes_document_source	int	int	int	int	[0, 244]	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::bytes_stream_source	int	int	int	int	[0, 244]	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::bytes_unterminated_source	int	int	int	int	[0, 244]	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::selective_field_source	int	int	int	int	-	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::selective_document_source	int	int	int	int	-	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::selective_strict_document_source	int	int	int	int	-	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::bytes_document_source	int	int	int	int	[0, 244]	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::bytes_document_source	int	int	int	int	[0, 244]	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::bytes_document_source	int	int	int	int	[0, 244]	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::bytes_document_source	int	int	int	int	[0, 244]	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::bytes_document_source	int	int	int	int	[0, 244]	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::bytes_document_source	int	int	int	int	[0, 244]	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::bytes_stream_source	int	int	int	int	[0, 244]	int	?	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	sources::bytes_document_source	int	int	int	int	[0, 244]	int	[-∞, +∞]	-
+examples/dfa/csv/sinks.bot		facts-widened	ok	csv_utf8::document3_bytes	int	int	int	int	[0, 0] {0}	int	[-∞, +∞]	-
+examples/dfa/json/sinks.bot		facts-widened	ok	number_emit::integer_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	number_emit::integer_text_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	number_emit::integer_trusted_source	int	int	int	int	[0, 1114111]	int	[-∞, +∞]	-
+examples/dfa/json/sinks.bot		facts-widened	ok	string_emit::string_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	string_emit::string_ascii_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	string_emit::string_bytes_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	string_emit::string_codes_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	value_emit::text_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	value_emit::stacked_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	value_emit::flat_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	value_emit::stacked_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	value_emit::text_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	value_emit::stacked_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	value_emit::text_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	value_emit::text_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	number_emit::integer_source	int	int	int	int	-	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	number_emit::integer_trusted_source	int	int	int	int	[0, 1114111]	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	json_lex::json_number	int	int	int	int	[0, 0] {0}	int	?	-
+examples/dfa/json/sinks.bot		facts-widened	ok	json_lex::json_number	int	int	int	int	[0, 0] {0}	int	[-∞, +∞]	-

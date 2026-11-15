@@ -1,0 +1,17 @@
+# case: precision -- yields one payload-bearing case, returns another of the same enum: one common type, accepted (an envelope); the cases are told apart here only by equality with a known value
+# class: intended
+# expect: precise
+# value: [true, false, true]
+import std::coroutine
+
+enum Out:
+    Record {n: int},
+    Summary {count: int},
+
+fn source(n: int) -> Out:
+    yield Out::Record {n: n}
+    Out::Summary {count: 1}
+
+coroutine {step, first} = source(5)
+final = step()
+[first == Out::Record {n: 5}, final == Out::Record {n: 5}, final == Out::Summary {count: 1}]

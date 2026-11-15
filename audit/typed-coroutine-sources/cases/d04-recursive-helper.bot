@@ -1,0 +1,21 @@
+# case: deep yields -- a self-recursive yielding helper (a countdown) under a root returning the count
+# class: intended
+# expect: facts-widened
+# value: [3, 2, 1, 3]
+import std::coroutine
+
+fn down(n: int) -> unit:
+    if n == 0:
+        return unit
+    yield n
+    down(n - 1)
+
+fn source(n: int) -> int:
+    down(n)
+    n
+
+coroutine {step, first} = source(3)
+a = step()
+b = step()
+final = step()
+[first, a, b, final]

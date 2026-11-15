@@ -1,0 +1,21 @@
+# case: workload -- a streaming parser that yields records and returns a summary: the natural shape, rejected (no common outward type of Record and Summary); and `first`, a Record at run time, is typed Summary (the declared result), so reading its key is UNKNOWN-FIELD
+# class: rejected-precision
+# expect: rejected COROUTINE-RESULT-MISMATCH UNKNOWN-FIELD
+import std::coroutine
+import std::list
+
+struct Record:
+    key: str
+    value: int
+
+struct Summary:
+    records: int
+    skipped: int
+
+fn parse(lines: List[str]) -> Summary:
+    loop line in lines:
+        yield Record {key: line, value: 1}
+    Summary {records: lines.length(), skipped: 0}
+
+coroutine {step, first} = parse(["a", "b"])
+first.key
