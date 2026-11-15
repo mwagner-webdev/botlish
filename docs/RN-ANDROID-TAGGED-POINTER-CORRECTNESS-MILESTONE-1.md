@@ -594,6 +594,31 @@ linkers and executables, the C runtime matrix, the golden suites and GC
 stress passed on every host it ran on. The branch's CI is not green, and
 cannot be before main's toolchain failures are fixed on main.
 
+**The merge into main** (2026-11-15, **observed** on the merged tree
+before the push): main had moved from `ce54fead` to `3a819456` (rustc
+1.100.0 pinned with a Unicode 16 lowercase table of the runtime's own and
+`synchronization.lib` in Windows' link -- the toolchain failures above,
+fixed on main --, payload-bearing enum cases, exhaustive matches, C
+coroutine frames, native function types), merged into the branch three
+times without a conflict. Main's native changes in that span are enum and
+match operations; none touches a C pointer, an exposure or the address
+word. On the merged tree, built with the pinned rustc 1.100.0: the native
+Rust tests (355 and 137, the encoding's, the fingerprints' and the
+code-generation tests among them), c-ffi 123/129, c-pointer-borrowing
+62/62, c-byte-borrowing 19/20, c-callbacks 40/42, c-abi-types 73/73,
+c-ffi-error-capture 27/27, native-view 39/39, native-edit 55/55,
+native-library 32/44, native-executable 20/20, system-linker 15/15, enums
+66/66, argv 71/77 and native-tcl-unicode 127/127 (main's fix: both pass),
+numeric-looking-names 5/5, text-collection-docs-diagnostics 24/24 (the
+skips host constraints), `tools/mutant-catalogs.tcl` (113 catalogs, 3,840
+mutants, 0 problems), `tools/compilerpedia.tcl check` (0 problems), and
+android-target.test 32/32 with the Android runtime rebuilt from the merged
+source. The merged runtime's fingerprints are main's own plus this
+change's encoding word for Android: `3109b2adb00065a9` (desktop: the
+default encoding adds no word) and `08043a5642fed7dc` (android-aarch64,
+top-byte-tagged); the values sections 18-24 state are the branch's before
+the merge. The push to main runs main's full CI.
+
 ## 24. Cleanroom
 
 `audit/android-tagged-pointers/cleanroom/cleanroom.sh` (**observed**;
