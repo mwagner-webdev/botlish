@@ -9,3 +9,10 @@ dfa.test:	Total	85	Passed	84	Skipped	0	Failed	1
 #   (AGENTS.md, "Coroutine fusion": STACK_SWITCHING). Got fused {} and
 #   allocations {34 2014} for 10 and 1000 symbols, expected {count w} and {2 2}.
 #   results/dfa-tail.txt measures what the allocations are.
+coroutines.test:	Total	81	Passed	79	Skipped	0	Failed	2
+#   co-release-native-stacks and co-exit-release-native-stacks read the stackful
+#   runtime's counters. Equal: the program's value, `released` (2000; 27900) and
+#   `sweptSuspended` 0 -- every coroutine released, none left to a collection.
+#   Different by definition: stacksMapped/stacksReused (no stacks exist: 0) and
+#   releasedSuspended, which counts releases of a suspended coroutine *holding a
+#   stack* (runtime/metrics.rs's record_coroutine_release; 0 for 2000 and 18000).

@@ -64,7 +64,7 @@ stack and a root segment per coroutine).
 | The milestone's question | Answer | Evidence |
 |---|---|---|
 | 1. What is lowered to Wasm, and how is it linked? | **NIR**, by a wasm backend of the driver beside `clif.rs` (not CLIF). A relocatable wasm object plus a generated startup crate, linked by `rustc` and `rust-lld` against the Rust runtime built for wasm32 into one module. The program descriptor is the native one, unchanged. | [obs] E2: real Botlish source to a running wasm module, sections 4, 11.2 |
-| 2. How is any coroutine suspended and resumed independently? | Every function that may yield becomes a state machine over a **heap frame**: a suspension saves exactly the registers live after it and returns `SUSPEND` through every activation to the coroutine's segment; a resume re-enters the chain from its outermost frame and dispatches each function to its suspension point. | [obs] the seven-case corpus on wasm and natively; 122 golden suites, 5,773 tests, natively; section 5 |
+| 2. How is any coroutine suspended and resumed independently? | Every function that may yield becomes a state machine over a **heap frame**: a suspension saves exactly the registers live after it and returns `SUSPEND` through every activation to the coroutine's segment; a resume re-enters the chain from its outermost frame and dispatches each function to its suspension point. | [obs] the seven-case corpus on wasm and natively; 122 golden suites, 5,773 tests, natively; the actor, event-loop, DFA and coroutine Tcl test files, whose only failures assert the stackful runtime's own counters and fusion; sections 5, 11.7 |
 | 3. Where does suspended state live, who owns it? | In a chain of frame objects on the Botlish heap, owned by the coroutine object (`CoroutineObj.frame`), each frame owning its suspended callee's. No stack, buffer or root segment per coroutine. | [obs] section 6 |
 | 4. How does GC find exactly what suspended coroutines hold? | A frame is an ordinary heap object: the collector traces its first `ntagged` slots (the tagged registers live after its suspension point) and its callee frame; it is reached only through its coroutine. Running frames keep one LIFO shadow stack (the ShadowOnly root mode). | [obs] corpus under GC stress (86,407 collections in one case), a precision probe, two killed mutants; section 6 |
 | 5. How does a long-lived program wait without busy-waiting or JavaScript? | The event loop's `Driver.block(deadline)` is one blocking host call: `poll_oneoff` (WASI 0.1) or `wasi:io/poll` (0.2). The instance's thread sleeps in the host. | [obs] W1: 3 s of waits, 0.10 s of CPU including startup; section 7 |
@@ -933,10 +933,7 @@ the third-party tool binaries were built with the container's rustc 1.97.0
 * **Establishes**: the lowering preserves coroutine semantics on every
   golden suite with the fallback root plan, and on wasm for the corpus.
   **Does not**: production performance (frame operations are helper
-  calls); of the Tcl test files, `tests/actor.test` (67/67),
-  `tests/event-loop.test` (109/109) and `tests/dfa.test` (84/85: its one
-  failure expects fusion, which never runs on a fallback-roots build)
-  finished (section 11.7).
+  calls). Four Tcl test files through the same driver: section 11.7.
 
 ### 11.4 C-A: Asyncify
 
@@ -970,22 +967,39 @@ the third-party tool binaries were built with the container's rustc 1.97.0
   (Windows' `roots` CI job builds it). **Does not**: that a shipped build is
   affected: every shipped host has native-frame roots.
 
-### 11.7 Not run
+### 11.7 Tcl test files through the prototype driver
+
+* **Command**: from the repository root,
+  `BOTLISH_NATIVE_BIN=SCRATCH/proto/native/target/release/botlish-native
+  tclsh9.0 tests/NAME.test -tmpdir DIR`, a private DIR each.
+* **Observed** (`results/tcl-test-files.txt`): `tests/actor.test` **67 of
+  67** (std::actor over std::event_loop: every actor and task a coroutine);
+  `tests/event-loop.test` **109 of 109**; `tests/dfa.test` **84 of 85**;
+  `tests/coroutines.test` **79 of 81**.
+* **The three failures** assert the stackful runtime's own mechanisms,
+  never a value:
+  * `dfa-lowering-fused-no-allocation` asserts that the recognizer is fused
+    and allocates nothing per symbol. The prototype is a fallback-roots
+    build, where fusion never runs (5.1); what it allocates instead is the
+    frame per tail call of section 5.1 and the resume message, which the
+    stackful runtime unfused allocates too (`results/dfa-tail.txt`).
+  * `co-release-native-stacks` and `co-exit-release-native-stacks` read the
+    stackful runtime's counters. The values, `released` and
+    `sweptSuspended 0` (every coroutine released, none left to a
+    collection) are equal; only the stack counters differ (no stacks exist;
+    `releasedSuspended` counts releases of a suspended coroutine holding a
+    stack).
+* **Establishes**: the event loop, actors, declared recognizers and the
+  coroutine test file's semantics hold under the resumable lowering.
+  **Does not**: the other Tcl test files, or any of them under GC stress.
+
+### 11.8 Not run
 
 * Botlish-generated code under Asyncify (the Asyncify functions are
   hand-written).
 * The golden suites on wasm (the prototype emitter covers a subset).
-* Part of the Tcl test files of the coroutine-heavy areas through the
-  prototype driver (`BOTLISH_NATIVE_BIN`; `results/tcl-test-files.txt`):
-  `tests/actor.test` **67 of 67** (std::actor over std::event_loop: every
-  actor and task a coroutine), `tests/event-loop.test` **109 of 109**,
-  `tests/dfa.test` **84 of 85** -- the failure,
-  `dfa-lowering-fused-no-allocation`, asserts that the recognizer is fused
-  and allocates nothing per symbol; the prototype is a fallback-roots
-  build, where fusion never runs, and what it allocates instead is the
-  frame per tail call of section 5.1 and the resume message, which the
-  stackful runtime unfused allocates too (`results/dfa-tail.txt`).
-  `tests/coroutines.test` had not finished when this was written.
+* The other Tcl test files through the prototype driver, and these four
+  under GC stress.
 * JSPI, browsers, workerd, Emscripten.
 * A Rust Wasmtime embedder (trap codes, epoch interruption from the host):
   the CLI's behavior stands in for it.
