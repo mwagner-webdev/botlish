@@ -599,8 +599,17 @@ suites): 675 Tcl tests on each pass and 975 golden tests on each backend,
 0 failed; `cargo test --release --lib enum` 8 passed;
 `tools/mutant-catalogs.tcl` 0 problems; `tools/compilerpedia.tcl check`,
 `tools/editor-grammars.tcl check` and `tools/unicode-lowercase.tcl check`
-clean. The branch was then merged into main (the user's go-ahead), whose
-push runs every test workflow on the merged commit.
+clean. Main then moved to a69ef997 (fold slots, the libc-free audit);
+merged again, its one conflict the generated test-name list (main's
+regenerated order, this milestone's 38 names re-added; the manifest
+regenerates unchanged), the narrowed run over this milestone's files and
+fold slots' (fold-loops, fold-virtual-struct-state, struct-scalar-
+replacement, value-transport, syntax-highlighting, ...) passed: 536 Tcl
+tests on each pass, the exhaustive-match, payload-enums,
+structs-and-enums, fold-loops and fold-virtual-struct-state golden suites
+on all four backends; `tools/mutant-catalogs.tcl` 110 catalogs, 3,763
+mutants, 0 problems. The branch was then merged into main (the user's
+go-ahead), whose push runs every test workflow on the merged commit.
 
 ## 16. The mid-end kernel with payload-bearing nodes
 
