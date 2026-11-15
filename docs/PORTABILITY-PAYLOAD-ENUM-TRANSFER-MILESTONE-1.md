@@ -430,8 +430,8 @@ Bytes stay untrusted; the existing declared refusals apply **[observed]**
 
 A thousand mutations of a rich encoding decode into the same outcome on
 every backend, none taken for another version or type, never a crash
-(`pet-refuse-mutations`); the fuzzer compares 10 752 mutated decodes per
-60 seeds with the oracle's prediction (section 14).
+(`pet-refuse-mutations`); the fuzzer compares 38 400 mutated decodes over
+60 seeds, on four backends, with the oracle's prediction (section 14).
 
 **Minimum sizes.** A count is admitted against its element's minimum
 size before any element is read, so the minimum must hold whatever case
@@ -553,17 +553,88 @@ oracle's; the oracle's bytes decoded by a receiver compiled from shuffled
 declarations (equal to the receiver's own construction, re-encoding to the
 same bytes); each mutation's outcome against the oracle's.
 
-FUZZ-RESULTS
+**[observed]**
+
+| Run | Seeds | Backends | Judgements | Encodings | Decodes | Mutated decodes | Disagreements |
+|---|---|---|---:|---:|---:|---:|---:|
+| `-cases 10 -mutations 16` | 1-60 | four | 541 | 2 400 | 2 400 | 38 400 | 0 |
+| `-gc-stress 1` | 100-109 | cranelift-generic, cranelift | 99 | 160 | 160 | 1 920 | 0 |
+
+Its first runs failed on two defects of the fuzzer itself (it took a
+standard-library function for one of the functions whose parameter type it
+judges, and wrote a typed binding Botlish has no syntax for); neither was a
+compiler disagreement. The oracle's prediction of every mutated decode -- value or
+refusal, which refusal -- matched every backend's in every seed, so the
+order of the format's checks is the same in the model, the Tcl codec and
+the native codec. Counterexamples are kept per seed (`-keep`); none was
+needed.
 
 ## 15. Mutation testing
 
 `audit/payload-enum-transfer/tools/mutate.tcl` with `mutants.txt`
-(MUTANT-COUNT mutants). A mutant names its detectors: tests, `rust:FILTER`, or
+(26 mutants). A mutant names its detectors: tests, `rust:FILTER`, or
 `fuzz:SEEDS` (the fuzzer against the oracle). A mutant is KILLED only by a
 named detector reporting a failure; a test file that does not complete is
 INCOMPLETE, never a kill.
 
-MUTATION-RESULTS
+**[observed]** All 26 are killed by a named detector. The first run of
+the whole catalog killed 24; the two survivors were detector gaps, fixed
+in the tests (not the mutants) and re-run (`-only`), both then killed:
+
+* `decoded-payload-shared` (the decoder hands out the payload of the
+  value last encoded in the process): sharing a payload's MutableVector
+  between a source and its decoded copies is unobservable under Botlish's
+  value semantics -- every read of a payload, a match's binding included,
+  is a logical copy -- so `pet-mutable-independent` passed. The mutant's
+  observable harm is a stale value: bytes decoded after another value was
+  encoded take that value's payload. The test now encodes a second value
+  between encoding and decoding the first, and kills it.
+* `native-plan-payload-unchecked` (the Rust plan reader accepts a payload
+  node that is no struct): the Rust test's bad plan was exercised by an
+  encode whose value check failed first. It now decodes bytes the bad plan
+  would turn into an `EnumCaseObj` with a non-struct payload, and kills it.
+
+| Mutant | The bug it plants | Killed by |
+|---|---|---|
+| **The judgement** | | |
+| `any-payload-sendable` | any payload-bearing enum is Sendable | `pet-class-function`, `pet-class-coroutine`, `pet-admit-encode`, `pet-admit-view`, fuzz |
+| `first-field-only` | an enum judged by its first payload field alone | `pet-class-any-case` |
+| `none-case-ignored` | a case with a non-sendable field ignored | `pet-class-function`, `pet-class-nested-enum`, `pet-class-opaque`, fuzz |
+| `recursion-total` | a self-recursive enum taken as sendable outright | `pet-class-recursive-leaf`, `pet-class-recursive-deep-leaf`, `pet-class-order` |
+| **The schema** | | |
+| `payload-field-dropped` | a payload's last field missing from the schema | `pet-schema-Shape`, `pet-vector-several-fields`, `pet-roundtrip-several`, fuzz |
+| `payload-declared-order` | payload fields in declared order: spelling becomes identity | `pet-vector-several-fields`, fuzz |
+| `cases-declared-order` | cases in declaration order: fingerprint and indices depend on spelling | `pet-schema-Message`, `pet-fingerprint-stable`, `pet-program-compatible`, fuzz |
+| `payload-free-cases-dropped` | only payload-bearing cases in the schema, as if one value's case decided it | `pet-schema-Message`, `pet-vector-payload-free-case`, `pet-vector-one-int`, `pet-fingerprint-changes-case-added`, fuzz |
+| `payload-free-penum` | a payload-free enum moves to the new form: its old encoding changes | `pet-schema-Color`, `pet-schema-payload-free-unchanged`, `pet-vector-fingerprints` |
+| `fingerprint-keeps-length` | the fingerprint keyed by the refined static type | `pet-fingerprint-literal`, `pet-gc-stress` |
+| **The Tcl codec** | | |
+| `payload-not-written` | the case written, its payload omitted | `pet-vector-one-int`, `pet-vector-list-payload`, `pet-roundtrip-text`, fuzz |
+| `other-case-payload-schema` | every payload written by another case's schema | `pet-vector-one-int`, `pet-roundtrip-list`, fuzz |
+| `payload-not-read` | every case decoded payload-free | `pet-roundtrip-text`, `pet-match-decoded`, `pet-vector-one-int`, fuzz |
+| `wrong-case-built` | the next case built around the payload read | `pet-roundtrip-text`, `pet-match-decoded`, `pet-vector-one-int`, fuzz |
+| `forged-index-accepted` | a case index not checked | `pet-refuse-case-index`, `-case-index-large`, `-recursive-index`, fuzz |
+| `trailing-accepted` | bytes after the value ignored | `pet-refuse-payload-free-extra`, `pet-refuse-payload-extra`, fuzz |
+| `min-size-largest-case` | a penum's minimum size its largest case's | `pet-roundtrip-payload-free-list`, fuzz |
+| `zero-budget-bypassed` | zero-size elements draw on no budget | `vt-refuse-zero-budget` |
+| `decoded-payload-shared` | the last encoded payload handed out by the decoder | `pet-mutable-independent` (after the fix above) |
+| **The native plan** | | |
+| `plan-unchecked` | a penum schema resolved without checking it against the declaration | `pet-plan-validated` |
+| **The native codec** | | |
+| `native-declaration-number` | the declaration's case number written for the sorted index | `pet-cross-backend`, `pet-vector-one-int`, `rust:transfer_payload` |
+| `native-payload-not-written` | the case written, its payload omitted | `pet-cross-backend`, `pet-vector-one-int`, `rust:transfer_payload` |
+| `native-payload-unrooted` | the payload popped off the roots before its object is allocated | `pet-gc-stress`, `rust:transfer_recursive_payload_enums`, `rust:transfer_payload_enums_between_independent_vms` |
+| `native-payload-free-default` | a payload-bearing case decoded as the first payload-free case | `pet-remote-messages`, `pet-cross-backend`, `rust:transfer_payload` |
+| `native-index-unchecked` | a forged case index clamped instead of refused | `pet-refuse-case-index`, `pet-refuse-recursive-index`, `rust:transfer_payload_enums_refuse_malformed_bytes` |
+| `native-plan-payload-unchecked` | a payload node that is no struct accepted | `rust:transfer_payload_enum_plans_are_checked` (after the fix above) |
+
+"fuzz" is `fuzz:1-4` (four seeds against the oracle). The existing
+catalogs: `tools/mutant-catalogs.tcl` applies every mutant of every
+catalog (114 catalogs, 3 866 mutants, 0 problems) **[observed]**;
+`audit/payload-enums/tools/mutants.txt`'s `payload-enums-sendable` --
+which planted "a payload enum is Sendable" against the old blanket
+refusal -- now plants "a payload enum is Sendable whatever its payloads
+hold" against the structural rule. VT-MUTANTS
 
 ## 16. Fixed vectors and compatibility checks
 

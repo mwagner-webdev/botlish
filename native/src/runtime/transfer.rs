@@ -1983,9 +1983,14 @@ mod tests {
             // No such enum.
             format!("plan 1 {FP} 0\n2 penum 5 2 1 1 0 3\n1 struct 1 1 1 0 2\n1 list 0 -1\n1 struct 2 1 1 0 4\n1 int 0"),
         ] {
+            // Refused when read, whatever the bytes: Leaf with an empty
+            // List where the first plan's list node is would otherwise
+            // decode into an EnumCaseObj whose payload is no struct.
             let plan = string(&mut vm, &bad);
-            assert_eq!(rt_transfer_encode(p, make_enum(0, 0), plan, fns), NO_VALUE, "{bad:?}");
+            let data = bytes_value(&mut vm, 0, &with_header(&[1, 0]));
+            assert_eq!(rt_transfer_decode(p, data, plan, fns), NO_VALUE, "{bad:?}");
             assert!(matches!(vm.error, Some(RtError::Bug(_))), "{bad:?}");
+            assert_eq!(vm.declared_error, 0, "{bad:?}");
             vm.error = None;
         }
         // Leaf's immediate word where its case carries a payload.

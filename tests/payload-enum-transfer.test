@@ -764,6 +764,12 @@ test pet-plan-validated {native lowering checks a payload enum's schema against 
     set out
 } -result {ok {NATIVE INVALID-HIR} {NATIVE INVALID-HIR} {NATIVE INVALID-HIR} {NATIVE INVALID-HIR}}
 
+test pet-interchange {a program transferring payload enums, written as HIR interchange text and read back (no build), runs as the program built: its schema constants are the transfer calls' own, re-validated by native lowering} -body {
+    set hir [surface::compile [petProgram "$::petDecls\nfn main() -> List\[any\] errors TransferMalformed, TransferVersion, TransferTypeMismatch, TransferInvalidValue, TransferLimit:\n    xs = \[Message::Ping, Message::Batch {items: \[1, 2\]}, Message::Text {body: \"é\"}\]\n    t = Tree::Branch {children: \[Tree::Leaf {value: 3}\]}\n    \[std::transfer::decode\[List\[Message\]\](std::transfer::encode(xs)) == xs, std::transfer::decode\[Tree\](std::transfer::encode(t)) == t, size(std::transfer::encode(xs))\]\n\nmain():\n    on TransferMalformed:\n        \[\]\n    on TransferVersion:\n        \[\]\n    on TransferTypeMismatch:\n        \[\]\n    on TransferInvalidValue:\n        \[\]\n    on TransferLimit:\n        \[\]\n"] t.bot -warnings off]
+    set read [hir::interchange::decode [hir::interchange::encode $hir]]
+    lsort -unique [lmap b [petBackends] {lrange [outcomeUnderHir $b $read] 0 1}]
+} -result {{value {[true, true, 25]}}}
+
 # ---------------------------------------------------------------------------
 # The format: fixed vectors, on every backend
 
