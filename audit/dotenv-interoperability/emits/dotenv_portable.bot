@@ -1,0 +1,97 @@
+# dotenv_portable.bot -- the census's portable dotenv profiles as declared
+# recognizers (EMISSION-DOTENV-INTEROPERABILITY-CENSUS-MILESTONE-1.md,
+# "Interaction with emits"). A feasibility probe, not a library: the
+# grammar every emitted line must belong to, derived from
+# results/portable/encodings.json.
+#
+#   document  = *assignment
+#   assignment = NAME "=" DQUOTE *VCHAR DQUOTE LF
+#   NAME      = (ALPHA / "_") *(ALPHA / DIGIT / "_")
+#   VCHAR     = any Unicode scalar value but " \ $ ` , the C0 controls
+#               other than TAB, DEL and the C1 controls
+#
+# What the grammar cannot say -- that no key is reserved by a shell or a
+# runtime, that keys differ case-insensitively, that a target reads the
+# meaning it intends -- is outside it: a property of the whole map, of the
+# targets, or not regular.
+
+import std::dfa
+
+class name_start = 0x41..0x5A 0x61..0x7A '_'
+class name_rest = name_start 0x30..0x39
+class vchar = '\t' 0x20..0x21 0x23 0x25..0x5B 0x5D..0x5F 0x61..0x7E 0xA0..0x10FFFF
+# The multiline extension (values holding LF): the characters that make a
+# value unportable once it also holds a LF (dotenv-java's line
+# accumulation; NEL, also marked there, is a C1 control vchar excludes).
+class marked = '#' 0x2028 0x2029
+class plain = '\t' 0x20..0x21 0x25..0x5B 0x5D..0x5F 0x61..0x7E 0xA0..0x2027 0x202A..0x10FFFF
+
+dfa assignment over unicode:
+    start:
+        name_start -> name
+    name:
+        name_rest -> name
+        '=' -> open
+    open:
+        '"' -> value
+    value:
+        vchar -> value
+        '"' -> close
+    close:
+        '\n' -> accept
+
+dfa document over unicode:
+    start:
+        name_start -> call assignment then start
+        end -> accept
+
+# The multiline extension: a LF is allowed in a value that does not start
+# with one and holds no marked character.
+dfa assignment_ml over unicode:
+    start:
+        name_start -> name
+    name:
+        name_rest -> name
+        '=' -> open
+    open:
+        '"' -> first
+    first:
+        plain -> plain_seen
+        marked -> marked_seen
+        '"' -> close
+    plain_seen:
+        plain -> plain_seen
+        marked -> marked_seen
+        '\n' -> multiline
+        '"' -> close
+    marked_seen:
+        vchar -> marked_seen
+        '"' -> close
+    multiline:
+        plain '\n' -> multiline
+        '"' -> close
+    close:
+        '\n' -> accept
+
+dfa document_ml over unicode:
+    start:
+        name_start -> call assignment_ml then start
+        end -> accept
+
+# Guards, as the CSV emitters use them: a recognizer none of whose
+# transitions suspends is an ordinary function of its one symbol.
+dfa name_start_char over unicode:
+    start:
+        name_start -> accept
+
+dfa name_char over unicode:
+    start:
+        name_rest -> accept
+
+dfa value_char over unicode:
+    start:
+        vchar -> accept
+
+dfa plain_char over unicode:
+    start:
+        plain -> accept

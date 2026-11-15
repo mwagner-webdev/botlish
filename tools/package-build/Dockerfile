@@ -81,6 +81,10 @@ RUN --mount=type=secret,id=build-ca,required=true \
     rm -rf /var/lib/apt/lists/*; \
     dpkg-query -W -f '${Package} ${Version} ${Architecture}\n' | sort > /etc/botlish-author-packages; \
     RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo /usr/local/cargo/bin/rustc --version >> /etc/botlish-author-environment
-ENV LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_CACHE_DIR=/cache \
+# RUSTUP_TOOLCHAIN: the image's own Rust (1.97.0, above) wins over the
+# checkout's rust-toolchain.toml, which names the development toolchain:
+# recorded releases reproduce with the toolchain that built them, and the
+# image fetches no other.
+ENV LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_CACHE_DIR=/cache RUSTUP_TOOLCHAIN=1.97.0 \
     RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WORKDIR /src

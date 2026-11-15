@@ -1,0 +1,5 @@
+# probe_fold.bot -- loads dotenv_emit_fold, whose claim the checker rejects
+# (a recorded precision limit, not a defect of the census's emitters).
+import dotenv_emit_fold
+
+1

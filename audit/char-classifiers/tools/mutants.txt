@@ -185,6 +185,19 @@ core::native::register std::char::is_tcl_alpha -arity 1 -impl core::tclcompat::c
 # ---------------------------------------------------------------------------
 # The runtime helpers (native/src/runtime/ops.rs)
 
+@@ rs-classes-unicode-15 the native classes are a Unicode version behind the reference: Ol Onal (U+1E5D0..U+1E5FF, letters since Unicode 16.0) unassigned, as a crate release of older tables would have them; no corpus character is one, only the every-scalar test (native-tcl-unicode-classes-all-scalars) sees it
+## native/src/runtime/ops.rs
+<<<<
+fn tcl_alpha_char(c: char) -> bool {
+    matches!(
+====
+fn tcl_alpha_char(c: char) -> bool {
+    if ('\u{1E5D0}'..='\u{1E5FF}').contains(&c) {
+        return false;
+    }
+    matches!(
+>>>>
+
 @@ rs-alpha-alphabetic the helper's alpha is Rust's is_alphabetic (letter numbers and marks too)
 ## native/src/runtime/ops.rs
 <<<<

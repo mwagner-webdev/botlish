@@ -130,7 +130,7 @@ jobs:
           echo "DIST=$RUNNER_TEMP/dist" >>"$GITHUB_ENV"
           echo "release $tag: version $version, commit $GITHUB_SHA"
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust)
         uses: ./.github/actions/setup-macos
 
       - name: Cache the Tcl.framework build
