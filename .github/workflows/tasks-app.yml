@@ -36,10 +36,8 @@ jobs:
       - name: Install project prerequisites
         run: bash .devcontainer/setup.sh
 
-      - name: Install Rust
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+      - name: Install Rust (the pinned toolchain, rust-toolchain.toml)
+        run: bash tools/rust-toolchain.sh install
 
       - name: Build native (Cranelift) backend
         uses: ./.github/actions/build-native

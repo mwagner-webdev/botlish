@@ -91,7 +91,7 @@ jobs:
 
       - uses: actions/checkout@v5
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust for x86_64-pc-windows-msvc)
         uses: ./.github/actions/setup-windows
 
       - name: Versions

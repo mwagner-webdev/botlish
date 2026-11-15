@@ -195,7 +195,7 @@ jobs:
         with:
           ref: ${{ env.CENSUS_REF }}
 
-      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+      - name: Install prerequisites (Tcl 9.0.1, the pinned Rust)
         uses: ./.github/actions/setup-macos
 
       - name: Build native (Cranelift) backend
