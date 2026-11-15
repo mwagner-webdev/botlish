@@ -37,6 +37,7 @@ on:
       - "packages/game2048_play/**"
       - "generated/c/sdl3/android-aarch64/**"
       - "audit/android-sdl3-2048/**"
+      - "!audit/android-sdl3-2048/evidence/**"
       - "audit/android-aarch64-target/tools/package.sh"
       - "native/library.tcl"
       - "tools/package-repository.tcl"

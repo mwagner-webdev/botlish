@@ -75,7 +75,8 @@ native ARM execution.
 ## 1. Executive result
 
 **Implemented** (on branch `claude/magical-johnson-gz47q2`, commits
-0d2f89d1, bc31909c, bbd5a750, 47a57871 and this report's):
+0d2f89d1, bc31909c, bbd5a750, 47a57871, da677e44, 609ce6b0, 112dc0a4,
+7235327a, e44f8760, a1256dd1 and this report's):
 
 * **SDL3's Android distribution**: `sdl3` 0.3.0's android-aarch64 view --
   the committed binding, SDL 3.4.18's libSDL3.so built from the pinned
@@ -126,7 +127,26 @@ killed), the regression files (470 tests on each of interp and compile).
 
 **CI** (section 18): the APKs in Android application processes on
 emulator images of 4 KiB and 16 KiB pages -- **translated** arm64-v8a
-code (x86_64 images, `libndk_translation`), never native ARM.
+code (x86_64 images, `libndk_translation`), never native ARM. Runs 6 (16
+KiB) and 7 (4 KiB) passed, on both APKs (build.sh's and the clean
+room's): SDLActivity, SDLThread and the shim
+starting `game_main`, the three libraries mapped from base.apk, seed 42's
+game and 24 swipes matching the interpreter move by move, a short gesture
+ignored, screenshots matching cell by cell, the pause and the resume
+(SDL's window events), no CPU while idle or hidden, saves restored in
+new processes (boards written one move from the win and from the end,
+then played), the Activity's recreation by SDL's
+contract (the process ends, the next launch restores), the back key's
+clean exit, no crash; and the counter passed every check on both images.
+What failed was the acceptance's own: the restart button's tap, which
+it sent off the screen (a `sed` `\10`, found in run 7 and fixed) -- and
+with it the restore check after `am force-stop`, which compares the
+restored game with the restart's (the game restored was the one saved
+before) -- and
+once, on run 7's clean-room APK, a race in a wait that saw the program's
+return a few milliseconds late (fixed). The final run with both fixes,
+run 9, passed every check of every script on both images, both APKs
+(section 18).
 
 **Deferred / projected**: execution on native ARM hardware, live tagged
 heap pointers in the application process (the translated process gets
@@ -756,8 +776,70 @@ the process, the next launch restores the game).
 
 ### The final run
 
-Run 9 (43760740709, at a1256dd1): **pending** -- queued for a runner when
-this was written.
+Run 9 (43760740709, at a1256dd1): **success** -- every check of every
+acceptance script on both images, nothing retried (no recreation at
+start; the SIM state settled before the first launch). The summaries and
+screenshots are kept in `../audit/android-sdl3-2048/evidence/`.
+
+| acceptance | 4 KiB, API 34 (`sdk_gphone64_x86_64`) | 16 KiB, API 35 (`sdk_gphone16k_x86_64`) |
+|---|---|---|
+| the counter (counter.apk) | 15 of 15 | 15 of 15 |
+| the 2048 game (build.sh's game-test.apk) | 33 of 33 | 33 of 33 |
+| the 2048 game (the clean room's game-test.apk) | 33 of 33 | 33 of 33 |
+
+What the 2048 game's 33 checks establish, on each image and each APK
+(**CI**, translated):
+
+* **Start**: installed; SDLActivity started SDLThread, and the shim
+  logged the API level, the heap pointer tag (0x00 under the bridge:
+  section 9), `libgame.so pinned yes` and `entering game_main with 4
+  argument(s)`; the program printed "ready ... drawn" after presenting its
+  first frame; its lines come from the thread named `SDLThread`; libgame.so,
+  libSDL3.so and libmain.so are mapped from base.apk at their entries'
+  16 KiB-aligned offsets (stored uncompressed, loaded in place).
+* **The game is the interpreter's**: seed 42's new game equals the
+  interpreter's first snapshot; 24 swipes through Android's real input
+  pipeline (`input swipe`), in three phases -- twelve, a burst of eight
+  with no wait between them, four after the background -- each applied
+  exactly once, every snapshot equal to the interpreter's
+  (`oracle-42.txt`); a short gesture moved nothing.
+* **The screen is the game**: four screenshots (the new game, the 12th
+  and 24th states, and the win and game-over boards) each show all 16
+  cells in the colors of their tiles (`screen.py`).
+* **Restart**: the NEW button, tapped in a fresh process and again after
+  a background and a foreground, makes a new game (two tiles of 2 or 4,
+  score 0).
+* **Lifecycle**: HOME is seen as the pause (`2048: background`, from
+  `SDL_EVENT_WINDOW_MINIMIZED`), the hidden process uses 0 ticks in 5 s,
+  the resume is seen (`2048: foreground`, `SDL_EVENT_WINDOW_RESTORED`) in
+  the same process with the same game; SDLThread uses 0 ticks in 5 idle
+  seconds in the foreground.
+* **Persistence**: after `am force-stop` the restarted game comes back;
+  boards written into the app's storage one move from 2048 and one move
+  from the end are restored, played, and equal the interpreter's next
+  snapshot (`won` and `over` set as game2048_play decides).
+* **Recreation**: a density change (160 to 200 dpi) destroys the
+  Activity; the program sees Quit, saves and returns (`game_main returned
+  0`); SDL's new `onCreate` ends the process ("activity finished"); the
+  save holds the game played last; the next launch, a new process,
+  restores it.
+* **Exit**: the back key -- `2048: back`, `2048: done ...`, `game_main
+  returned 0` -- and no crash of the application's process in the whole
+  run (other processes' crash reports, of Google Play services, are
+  recorded and not counted).
+
+The counter's 15: installed and started on SDLThread, its three libraries
+mapped from base.apk, a tap counted once and the screen changed, a swipe
+counted nothing, the hidden process idle (0 ticks) and alive, the count
+kept across the background (taps 2), SDLThread idle in the foreground (0
+ticks), the back key's clean exit (`counter_main returned 0`), no crash.
+
+Not observed on the emulators: native ARM execution, tagged heap pointers
+in the application process (the bridge's allocations carry no tag), an
+Activity recreation that keeps the process (not SDL's default), a
+low-memory kill of the hidden 2048 game in this run (the acceptance
+recognizes one by lmkd's own log line and then checks the restore
+instead; an earlier run on the 16 KiB image met it for the counter).
 
 ## 19. 2048 interpreter oracle
 
@@ -876,7 +958,10 @@ libSDL3.so and classes.dex are byte-identical.
 
 (The sdl3, android_io, sdlscreen and botlish_android releases are new
 versions; none is recorded in `packages/RELEASES.tsv` yet: a release is
-recorded once published, built in the pinned author image.)
+recorded once published, built in the pinned author image. CI's build of
+the same sources gives the same bytes for the packages of Botlish source
+and other bytes for those holding native files built on the runner:
+section 25.)
 
 The same clean room ran in CI's build job at bbd5a750 (**CI**, run
 43739295620): `ok the APK's facts (12 checked)`, `ok the acceptance's
@@ -1037,11 +1122,25 @@ Three repairs outside the milestone's own files, each found on the way:
 
 | workflow | run | commit | result |
 |---|---|---|---|
-| android sdl3 2048 | runs 1-7 | 0d2f89d1 .. 7235327a | section 18 |
+| android sdl3 2048 | runs 1-9 (43733678933 .. 43760740709) | 0d2f89d1 .. a1256dd1 | run 9 **success**: the build, the Linux host checks, the single-file compiler, the clean room, and every acceptance check on both emulator images (section 18); runs 1-7 found what section 18 lists |
 | c-bindgen (dispatched on the branch: it runs only on main, a pull request or a dispatch) | 43750835551 | 112dc0a4 | **success**: every committed binding checked with the pinned toolchain (Ubuntu 26.04, clang 21.1.8; sdl3's android-aarch64 with NDK r29), the generator's tests, the Raven package's tests, both fuzzers |
 | react-native 2048 | 43737218482 | bc31909c | **success**: the facade over game2048_play, the generated package, the APK on both emulators; no later commit changes what it builds |
 | package reproducibility | 43739295688 | bbd5a750 | both builds succeeded (they had failed on main since a3c32d66: section 24's first repair) |
-| package reproducibility | 43748311615 | 609ce6b0 | both builds succeeded; the comparison job was still waiting for a runner when this was written |
+| package reproducibility | 43748311615 | 609ce6b0 | **success**: both builds in the pinned author image and the comparison of their artifacts and provenance records (the recorded releases reproduce) |
+| tests (canary, Linux x86-64) | 43760740691 | a1256dd1 | **success** |
+| tests (linux arm64), canary | 43760740696 | a1256dd1 | **success** |
+| tests (macos arm64), smoke | 43760740707 | a1256dd1 | **success** |
+| tests (windows x86-64), canary | 43760740700 | a1256dd1 | **success** |
+
+A branch push runs only each test workflow's canary (the files and suites
+the push changes, then the recently failing ones); the full test
+workflows were not dispatched on the branch -- the runner pool held some
+thirty queued runs of several branches that evening -- so the full
+suites' verdict on this branch is the local regression set above, the
+canaries and the dedicated workflows, not tests.yml's whole matrix.
+Before a merge into main, AGENTS.md's dispatch of tests.yml,
+tests-arm64.yml, macos-arm64.yml and windows-x86_64.yml on the branch
+tip is still to be done.
 
 ## 25. Performance and footprint
 
@@ -1063,6 +1162,16 @@ Three repairs outside the milestone's own files, each found on the way:
 | the game's APK (`game.apk`, release, debug-signed) | 3,470,667 |
 | the counter's APK | 3,356,002 |
 | native libraries installed (stored uncompressed, loaded in place from the APK: nothing extracted) | 3,368,768 |
+
+Run 9's build job (another machine, at a1256dd1) gave `game.apk`
+3,470,674 bytes, `counter.apk` 3,356,007, `sdl3-0.3.0.botpkg` 2,857,326,
+`botlish_android-0.1.0.botpkg` 462,596 and the target support package
+9,845,445. The packages that hold native files built on the machine
+(SDL's library, the tool's program, the runtime archive) differ in bytes
+between machines -- they are development builds; a release is built in
+the pinned author image (`tools/package-build/`), as packages/RELEASES.tsv
+requires -- while the packages of Botlish source alone (android_io,
+game2048, game2048_play, sdlscreen) are byte-identical in both.
 
 The Botlish application library is about a quarter of the APK, SDL a
 little under three quarters; Java and resources are the rest. The React
@@ -1100,28 +1209,28 @@ wait); `as-2048-lifecycle` holds it under a tenth of the wall time.
 
 ### The emulators (**CI**, translated: x86_64 images running arm64-v8a code through `libndk_translation`)
 
-From the acceptance logs of run 7 (4 KiB image, API 34) and run 6 (16 KiB
-image, API 35), which played the same phases; build.sh's game-test.apk
-(the clean room's APK gives the same figures within a few tens of
-milliseconds). Times are logcat's and `am start -W`'s; a "tick" is a
+From the acceptance logs of run 9 (43760740709, at a1256dd1), the run in
+which every check passed on both images; build.sh's game-test.apk (the
+clean room's APK gives figures within the same ranges; runs 6 and 7 gave
+similar ones). Times are logcat's and `am start -W`'s; a "tick" is a
 hundredth of a second of CPU time (`/proc/PID/stat`).
 
 | measure | 4 KiB, API 34 | 16 KiB, API 35 |
 |---|---:|---:|
-| cold start, `am start -W` TotalTime (first launch after install) | 664 ms | 1020 ms |
-| cold start, later launches (restore, win, over, recreation) | 475-513 ms | 487-503 ms |
-| hot resume after the background, TotalTime | 39 ms | 56 ms |
-| process start to `game_main` entered (Zygote fork, ART, SDLActivity's `onCreate`, three libraries loaded, SDLThread) | 187-254 ms | 197-467 ms |
-| `game_main` entered to "ready ... drawn" (VM, module initialization, SDL's video, window, renderer, the save read, the first frame presented) | 455-667 ms | 1226-1596 ms |
+| cold start, `am start -W` TotalTime (first launch after install) | 936 ms | 1029 ms |
+| cold start, later launches (restore, recreation, win, over) | 489-539 ms | 574-939 ms |
+| hot resume after the background, TotalTime | 75 ms | 104 ms |
+| process start to `game_main` entered (Zygote fork, ART, SDLActivity's `onCreate`, three libraries loaded, SDLThread) | 231-609 ms | 252-515 ms |
+| `game_main` entered to "ready ... drawn" (VM, module initialization, SDL's video, window, renderer, the save read, the first frame presented) | 442-569 ms | 1276-1490 ms |
 | SDLThread while idle in the foreground, 5 s | 0 ticks | 0 ticks |
-| the whole process while idle in the foreground, 5 s | 1 tick | 1 tick |
+| the whole process while idle in the foreground, 5 s | 2 ticks | 2 ticks |
 | the whole process while hidden, 5 s | 0 ticks | 0 ticks |
-| the counter, cold start TotalTime / `counter_main` to ready | 1503 ms / 806 ms | 1404 ms / 1541 ms |
+| the counter, cold start TotalTime / `counter_main` to ready | 997 ms / 405 ms | 1410 ms / 1636 ms |
 
 What these are and are not:
 
 * The program's own start (`game_main` to its first frame) is 19 ms under
-  the Linux host and 0.5-1.6 s here. The difference is the emulator and
+  the Linux host and 0.4-1.5 s here. The difference is the emulator and
   the native bridge, not measured apart: `libndk_translation` translates
   arm64 code as it first runs (VM creation and module initialization run
   each function once), SDL's renderer goes through the bridge's proxies
@@ -1135,7 +1244,7 @@ What these are and are not:
 * Touch latency was not measured on the emulators. The only timestamps
   are logcat's, written by different processes: on the 4 KiB image the
   launcher's gesture monitor logs each finger-up, and the program's move
-  line follows it by a median 1 ms (n 24, max 465 ms: the burst) --
+  line follows it by a median 1 ms (n 23, max 433 ms: the burst) --
   evidence of order and of no queueing delay, not a latency figure. The
   Linux host's figure (0.8 ms median from the last finger event to the
   move line) is the program's own cost.
