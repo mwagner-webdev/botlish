@@ -938,6 +938,32 @@ class History(unittest.TestCase):
             ["cost", "macos-aarch64", "tests/lists.test", "1.0"]])
         self.assertIn("# cost HOST ITEM SECONDS", text)
 
+    def test_toolchains_from_the_newest_green_run(self):
+        api = FakeApi(*linear("a", "b", "c", "d"))
+        built = lambda name: stamped("##[group]Run info=$(rustc -vV)\\n\x1b[36;1m echo \"Rust toolchain: rustc-$release\"\x1b[0m\nRust toolchain: %s\n" % name)  # noqa: E731
+        api.run("tests.yml", "a", jobs=[("canary (linux x86-64)", "success", None, built("rustc-1.99.1-aaaaaaaaaaaa"))])
+        chosen = api.run("tests.yml", "b", jobs=[("tests (interp)", "success", None, built("rustc-1.100.0-0ef1bc386059")),
+                                                 ("canary (linux x86-64)", "success", None, built("rustc-1.100.0-0ef1bc386059"))])
+        # Newer runs that do not count: a failed one, a branch's.
+        api.run("tests.yml", "c", conclusion="failure", jobs=[("canary (linux x86-64)", "success", None, built("rustc-1.101.0-bbbbbbbbbbbb"))])
+        api.run("tests.yml", "d", branch="topic", jobs=[("canary (linux x86-64)", "success", None, built("rustc-1.101.0-bbbbbbbbbbbb"))])
+        # macOS: the smoke job on macOS, never its Linux control.
+        api.run("macos-arm64.yml", "b", jobs=[("linux control", "success", ["ubuntu-latest"], built("rustc-1.0.0-cccccccccccc")),
+                                              ("smoke (Tier A, macOS arm64)", "success", ["macos-15"], built("rustc-1.100.0-0ef1bc386059"))])
+        # A run whose logs name none gives none.
+        api.run("windows-x86_64.yml", "b", jobs=[("canary (Windows x86-64, MSVC)", "success", ["windows-2025"], stamped("nothing"))])
+        said = []
+        found = history.toolchains(api, said.append)
+        self.assertEqual(found, {"linux-x86_64": "rustc-1.100.0-0ef1bc386059", "macos-aarch64": "rustc-1.100.0-0ef1bc386059"})
+        self.assertEqual(said[0], "history: linux-x86_64 toolchain rustc-1.100.0-0ef1bc386059 from %s" % chosen["html_url"])
+        import datetime
+        today = datetime.datetime(2026, 11, 5, tzinfo=datetime.timezone.utc)
+        text = history.render([], {}, 21, today, toolchains=found)
+        body = [line.split("\t") for line in text.splitlines() if line and not line.startswith("#")]
+        self.assertEqual(body, [["toolchain", "linux-x86_64", "rustc-1.100.0-0ef1bc386059"],
+                                ["toolchain", "macos-aarch64", "rustc-1.100.0-0ef1bc386059"]])
+        self.assertIn("# toolchain HOST NAME", text)
+
     def api(self):
         api = FakeApi(*linear("a", "b", "c", "d"))
         fail = lambda files: stamped("Files with failing tests: %s" % files)  # noqa: E731
@@ -1276,6 +1302,48 @@ class Workflows(unittest.TestCase):
             for needle in req.jobs:
                 self.assertTrue([j for j in jobs.values() if needle in str(j.get("name"))],
                                 "%s has no %s job" % (req.workflow, needle))
+
+    # The pinned toolchain (AGENTS.md, "Building the native (Cranelift)
+    # backend"): stable Rust moved under main on 2026-11-13 with no commit
+    # (MAIN-CI-FAILURES-2026-11-13.md). Only the toolchain canary, which
+    # gates nothing, builds with a channel.
+    UNPINNED = re.compile(r"rustup\s+(?:toolchain\s+install|install|default|override\s+set)\s+(?:stable|beta)\b"
+                          r"|--default-toolchain[ =](?:stable|beta)\b|rust-toolchain@(?:stable|beta|master)\b"
+                          r"|RUSTUP_TOOLCHAIN[=:]\s*(?:stable|beta)\b")
+
+    def test_no_workflow_builds_with_an_unpinned_toolchain(self):
+        sources = [os.path.join(".github", "workflows", n) for n in sorted(all_workflows())]
+        sources += [os.path.join(".github", "actions", d, "action.yml")
+                    for d in sorted(os.listdir(os.path.join(ROOT, ".github", "actions")))]
+        sources += [".devcontainer/setup.sh", "tests/platform/setup-macos.sh", "tests/platform/setup-windows.ps1",
+                    "tools/rust-toolchain.sh"]
+        found = []
+        for path in sources:
+            if path.endswith("toolchain-canary.yml"):
+                continue
+            with open(os.path.join(ROOT, path), encoding="utf-8") as f:
+                for n, line in enumerate(f, 1):
+                    if not line.lstrip().startswith("#") and self.UNPINNED.search(line):
+                        found.append("%s:%d: %s" % (path, n, line.strip()))
+        self.assertEqual(found, [])
+        self.assertTrue(self.UNPINNED.search("rustup toolchain install stable --profile minimal"))
+        self.assertTrue(self.UNPINNED.search("sh rustup-init -y --default-toolchain stable"))
+        self.assertFalse(self.UNPINNED.search('rustup toolchain install "$toolchain" --profile minimal'))
+
+    def test_toolchain_canary_gates_nothing(self):
+        """The scheduled canary against the newest Rust (CI-RUNS.md, "The
+        toolchain canary") runs on a schedule and by hand only, runs the
+        toolchain-sensitive files without the history, and no release
+        requirement names it."""
+        w = workflow("toolchain-canary.yml")
+        self.assertEqual(set(triggers(w)), {"schedule", "workflow_dispatch"})
+        canary = w["jobs"]["canary"]
+        runs_canary = [st["run"] for st in canary["steps"] if "tests/canary.tcl" in (st.get("run") or "")]
+        self.assertEqual(runs_canary, ["tclsh9.0 tests/canary.tcl -base HEAD -budget 0 -history 0 -toolchain-changed 1"])
+        hosts = sorted(m["host"] for m in canary["strategy"]["matrix"]["include"])
+        self.assertEqual(hosts, sorted(history.HOSTS))
+        self.assertNotIn(w["name"], {workflow(req.workflow)["name"] for req in runs.CORE})
+        self.assertNotIn(w["name"], triggers(workflow("release-gate.yml"))["workflow_run"]["workflows"])
 
     # The canary (CI-RUNS.md, "The canary"): which job of each test workflow
     # runs it, and the jobs that need not wait for it.

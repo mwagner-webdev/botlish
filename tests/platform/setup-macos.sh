@@ -14,8 +14,8 @@
 # runtime keeps (native/src/runtime/ops.rs, `rt_str_lower`) -- the census
 # found tests/native-tcl-unicode.test failing that way. The build needs the
 # Xcode command-line tools, curl and shasum, which macOS has.
-# Rust: the stable toolchain, as on Linux (the pinned cranelift crates need
-# a recent rustc). With a file argument (a workflow's $GITHUB_PATH) the Tcl
+# Rust: the toolchain rust-toolchain.toml pins, made the default, as on
+# Linux (tools/rust-toolchain.sh install). With a file argument (a workflow's $GITHUB_PATH) the Tcl
 # and Cargo bin directories are appended to it for later steps.
 set -euo pipefail
 

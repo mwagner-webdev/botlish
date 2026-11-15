@@ -22,6 +22,10 @@
 # runs the one Botlish predicate, so the regex is checked here directly, and
 # a predicate defect that agrees with itself on all four backends but
 # disagrees with the grammar is still caught.
+#
+# canary: toolchain -- the native runtime's Unicode data is the reference's, never Rust's standard library's, which rustc 1.97 and 1.100 changed
+# canary: covers native/src/runtime/lower16.rs native/src/runtime/ops.rs tools/unicode-lowercase.tcl
+# canary: covers core/strings.tcl core/tclcompat.tcl
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 

@@ -1,0 +1,203 @@
+name: toolchain canary
+
+# The canary against the newest Rust (MAIN-CI-FAILURES-2026-11-13.md, C4;
+# CI-RUNS.md, "The toolchain canary"). The repository builds with the
+# toolchain rust-toolchain.toml pins, so a new stable Rust reaches it only
+# as a commit -- a bump, on a branch (AGENTS.md, "Building the native
+# (Cranelift) backend"). This workflow tells that bump what it will meet
+# before anyone writes it: once a day it reads the newest release of the
+# stable channel, and when that is not the pinned one, and this workflow has
+# not tested that release yet, it builds main with it on every host and runs
+# the toolchain-sensitive test files there (tests/canary.tcl
+# -toolchain-changed 1: the files that declare `# canary: toolchain`). A red
+# run is the report: the next bump fails those files, for the reason the
+# canary prints. It gates nothing: no release waits for it, no test
+# workflow reads it, and nothing else in the repository builds with an
+# unpinned toolchain (AGENTS.md's one exception, beside a tool that needs a
+# nightly feature).
+#
+# A manual run (workflow_dispatch) tests any channel or release
+# (`toolchain`: stable, beta, nightly, 1.101.0) whether or not it was tested.
+
+on:
+  schedule:
+    # Daily, outside the hours main's pushes crowd the runners.
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+    inputs:
+      toolchain:
+        description: "The channel or release to test (stable, beta, nightly, 1.101.0)"
+        type: string
+        default: stable
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toolchain-canary-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  newest:
+    name: the newest toolchain
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      toolchain: ${{ steps.newest.outputs.toolchain }}
+      release: ${{ steps.newest.outputs.release }}
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # The channel's manifest names its release (pkg.rust.version: "1.101.0
+      # (HASH DATE)"); infrastructure retries, as every download here does.
+      - name: The channel's newest release, and the pin
+        id: newest
+        env:
+          CHANNEL: ${{ inputs.toolchain || 'stable' }}
+        run: |
+          if ! [[ $CHANNEL =~ ^(stable|beta|nightly|[0-9]+\.[0-9]+(\.[0-9]+)?)$ ]]; then
+            echo "::error::not a channel or a release: $CHANNEL"
+            exit 2
+          fi
+          pinned=$(tools/rust-toolchain.sh)
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/channel.toml" \
+            "https://static.rust-lang.org/dist/channel-rust-$CHANNEL.toml"
+          release=$(python3 -I -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["pkg"]["rust"]["version"].split()[0])' "$RUNNER_TEMP/channel.toml")
+          echo "toolchain=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+          echo "The newest $CHANNEL release is $release; rust-toolchain.toml pins $pinned."
+
+      # A scheduled run tests each release once: a run that tested one (red
+      # or green) leaves this marker, and the report it made stands until
+      # the bump. Lookup only: nothing is downloaded.
+      - name: Tested already?
+        id: seen
+        if: github.event_name == 'schedule'
+        uses: actions/cache/restore@v4
+        with:
+          path: toolchain-canary.marker
+          key: toolchain-canary-${{ steps.newest.outputs.release }}
+          lookup-only: true
+
+      - name: Decide
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          RELEASE: ${{ steps.newest.outputs.release }}
+          PINNED: ${{ steps.newest.outputs.pinned }}
+          SEEN: ${{ steps.seen.outputs.cache-hit }}
+        run: |
+          if [[ $EVENT == workflow_dispatch ]]; then
+            run=true; why="asked for"
+          elif [[ $RELEASE == "$PINNED" ]]; then
+            run=false; why="$RELEASE is the pinned toolchain: main's own runs test it"
+          elif [[ $SEEN == true ]]; then
+            run=false; why="$RELEASE was tested already: its report stands until the bump"
+          else
+            run=true; why="$RELEASE is newer than the pinned $PINNED and untested"
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "Run the canary on every host: $run ($why)."
+          {
+            echo "### The newest toolchain"
+            echo
+            echo "$RELEASE (rust-toolchain.toml pins $PINNED): canary on every host: **$run** -- $why."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  canary:
+    name: canary on ${{ matrix.host }}, rustc ${{ needs.newest.outputs.release }}
+    needs: newest
+    if: needs.newest.outputs.run == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: linux-x86_64
+            os: ubuntu-latest
+          - host: linux-aarch64
+            os: ubuntu-24.04-arm
+          - host: macos-aarch64
+            os: macos-15
+          - host: windows-x86_64
+            os: windows-2025
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep the repository's bytes
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # Each host's own setup, as its test workflow's canary job has it: Tcl
+      # 9.0.1 and the pinned Rust, made the default.
+      - name: Install project prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          bash .devcontainer/setup.sh
+          echo "LANG=C.utf8" >> "$GITHUB_ENV"
+          echo "LC_ALL=C.utf8" >> "$GITHUB_ENV"
+
+      - name: Install prerequisites (macOS)
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/setup-macos
+
+      - name: Install prerequisites (Windows)
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-windows
+
+      # The C compiler of core::cabi's windows-x86_64 row, as
+      # windows-x86_64.yml sets it for every job.
+      - name: Windows' C compiler
+        if: runner.os == 'Windows'
+        run: echo "CC=clang" >> "$GITHUB_ENV"
+
+      # The newest toolchain beside the pinned one, made the default (the
+      # rustc linker compiles each startup crate outside the checkout) and
+      # put above rust-toolchain.toml for every later step (RUSTUP_TOOLCHAIN).
+      - name: Install the newest toolchain
+        env:
+          CHANNEL: ${{ needs.newest.outputs.toolchain }}
+        run: |
+          toolchain=$CHANNEL
+          if [[ $RUNNER_OS == Windows ]]; then toolchain=$CHANNEL-x86_64-pc-windows-msvc; fi
+          rustup toolchain install "$toolchain" --profile minimal
+          rustup default "$toolchain"
+          echo "RUSTUP_TOOLCHAIN=$toolchain" >> "$GITHUB_ENV"
+          RUSTUP_TOOLCHAIN=$toolchain rustc -vV
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      # The toolchain-sensitive files, every one (no budget), and nothing of
+      # the history: the question is what the newest toolchain changes.
+      - name: Canary with the newest toolchain
+        run: tclsh9.0 tests/canary.tcl -base HEAD -budget 0 -history 0 -toolchain-changed 1
+
+  # The marker of a tested release: a scheduled run whose canary jobs all
+  # finished, red or green, made its report.
+  tested:
+    name: record the tested release
+    needs: [newest, canary]
+    if: github.event_name == 'schedule' && (needs.canary.result == 'success' || needs.canary.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: The marker
+        env:
+          RELEASE: ${{ needs.newest.outputs.release }}
+        run: echo "$RELEASE" > toolchain-canary.marker
+
+      - uses: actions/cache/save@v4
+        with:
+          path: toolchain-canary.marker
+          key: toolchain-canary-${{ needs.newest.outputs.release }}

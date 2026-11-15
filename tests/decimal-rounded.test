@@ -13,6 +13,8 @@
 # text and interchange, target independence, the native representation, a
 # standalone executable, and parity of all four backends -- bit for bit (the
 # representation) and in every decision.
+#
+# canary: covers native/src/runtime/decimal.rs core/decimal.tcl
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
