@@ -47,9 +47,9 @@ namespace eval hir::transport {
     # pressure, code and backend time inside one function. Measured (the
     # report's width section): faster at run time at every width up to 256
     # fields; code smaller up to 8 fields and up to 15% larger beyond;
-    # Cranelift's compile time neutral up to 16 fields, up to +39% at 32-64,
-    # and more than doubled at 128-256 for a gain per iteration that stays
-    # near 1.2x. The
+    # Cranelift's compile time neutral up to 16 fields, +12-23% at 32 and
+    # +28-47% at 64 where most fields change, and 1.6-2.6 times at 128-256
+    # for a gain per iteration that stays near 1.2x. The
     # ceiling (64) is that compile-time bound -- not the local ceiling (16),
     # which would decline 17-64-field folds that run 1.2-1.5x faster (over
     # 20x when one field changes per iteration).

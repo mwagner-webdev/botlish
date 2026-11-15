@@ -6,10 +6,6 @@ loop's back edge, built as an object only where the whole value is
 observed. The completion report of the milestone FOLD-VIRTUAL-STRUCT-STATE-
 CENSUS-1.md recommended first (its section 14, stage 1).
 
-**Draft:** the cells marked `@...@` (compile time per width, the
-economics table, the full local suite, CI) are pending runs and are filled
-in by the next revision of this report.
-
 Evidence labels, as in the census: **Implementation fact** -- read from
 the code; **Observation** -- an executed test or measurement (section 17
 reproduces each); **Judgment** -- a reasoned design or policy decision.
@@ -98,6 +94,18 @@ node, core IR form, NIR instruction, runtime helper or heap object.**
   nested struct failed native lowering (NATIVE BUG) in the pushed commit
   `c5679581`; section 4 has the cause, `fvs-exact-call-nested-result` and
   a fuzzer template cover it.
+
+* **Regression and CI.** (*Observation.*) The full local suite passes
+  (292 Tcl test files on two backends, 121 golden suites on four); the
+  four test workflows on the branch fail only the two tests main fails at
+  `b0ae98fe` on every host (section 15).
+* **What is not met, or not measured.** (*Observation.*) Every stated
+  target is met. Beside them: the four-field narrow scanner's median is
+  120.6% of its recursion (111.8% in generated code; the 115% target is
+  the six-field scanner's); two neighbor fuzzers generate obsolete syntax
+  and tested nothing (section 15); x86-64's GC-stress CI job runs only on
+  main and did not run for the branch (the milestone's tests passed under
+  GC stress locally, and arm64's GC-stress jobs ran in CI).
 
 ## 2. Architecture verification against the census
 
@@ -748,7 +756,7 @@ fold-loops golden suite. `-/-/-`: no fold function reported.)
 | legacy parity (value-transport-materialization) | 28/28 NIR identical to base |
 | corpus (163 programs: every golden suite, `bench/`, the fold workloads; tools/corpus.tcl and corpus-compare.py) | `off` = base byte for byte, every program; default: 137 unchanged, 21 changed by fold slots, 3 by reference joins alone, 2 by both, none by neither; Struct allocations 105,061 -> 95,992, no program more |
 | full local suite (`tests/local.tcl`) | every Tcl test file on interp and compile (292 files) and every golden suite on interp, compile, cranelift-generic and cranelift (121 suites): all pass. One test, `syntax-highlighting.test`'s `sh-grammar-vim-corpus` on compile, failed once in the 4-job run (its vim child exited 1) and passed on all three reruns; the branch changes none of its files. (The run was split in two after a wrapper's time limit stopped the first at 410 of 705.) |
-| CI | @CI@ |
+| CI | the four test workflows dispatched on the branch at `2ffe5a98` (the code of this report; later commits change documentation, the transport comment and result files only): `tests` (run 43641108945), `tests (linux arm64)` (43641111770), `tests (macos arm64)` (43641114725), `tests (windows x86-64)` (43641117759). All four end `failure`, and every failing job fails only `argv.test`'s `argv-focused-valid-fuzz` and `native-tcl-unicode.test`'s `native-tcl-unicode-lowercase-all-scalars` -- the two tests that fail on main at `b0ae98fe` on every host, checked before branching. Every other job passed: the canaries, the native Rust unit tests (arm64 also under GC stress), every golden shard on x86-64 and arm64, the method-call oracle, the arm64 GC-stress runs (failing only the two), macOS acceptance shards 1-4, Botlish.app, main-thread startup and static SDL3, Windows acceptance shards 2-4. x86-64's GC-stress job runs on pushes to main only and was skipped; static-decisions.yml was not dispatched (fold slots are a native representation decision: no front-end check, scheduler or cross-function fact changed) |
 
 The required mutant kinds map to the catalog as: sequential back edge
 `back-edge-sequential`; candidates committed before `continue`
