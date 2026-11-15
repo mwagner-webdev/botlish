@@ -699,7 +699,10 @@ SIM's state final, ten quiet seconds: `lib.sh`'s `settle`):
 ### What the runs found
 
 The first runs were findings more than verdicts; each changed the code or
-the harness, never an expectation:
+the harness. One expectation changed: what an Activity recreation should
+do, which the first acceptance stated (the program started again in the
+same process) before I had read SDLActivity's `onCreate`, whose default
+ends the process (section 13). No check was weakened or dropped:
 
 * Run 1 (43733678933, at 0d2f89d1): the counter alone (the 2048 game did
   not exist yet); its acceptance failed on both images.
@@ -1278,10 +1281,10 @@ What these are and are not:
   Activity ends the process, and the next launch restores the saved game.
   A recreation that keeps the process (SDL_HINT_ANDROID_ALLOW_RECREATE_ACTIVITY
   and a second `SDL_main` in one process) is not designed. Android's
-  "don't keep activities" setting could not be enabled from a shell
-  (`settings put global always_finish_activities 1` changed nothing in run
-  4: the system reads it through the developer options' own call), so the
-  recreation tested is a density change.
+  "don't keep activities" setting did not take effect from a shell
+  (`settings put global always_finish_activities 1` destroyed nothing in
+  run 4; why was not investigated), so the recreation tested is a density
+  change.
 * **Low-memory notices** never reach a program that reads SDL's queue
   (SDL 3.4.18 hands SDL_EVENT_LOW_MEMORY to watchers only); the game saves
   after every change, so nothing depends on one.
