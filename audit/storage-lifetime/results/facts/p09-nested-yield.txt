@@ -34,7 +34,7 @@ unit outer<int>
     suspend at p09-nested-yield.bot:13:13: live seed
     suspend at p09-nested-yield.bot:14:14: live first
     result at p09-nested-yield.bot:12:9: live 
-unit block e36<generic>
+unit the coroutine of outer constructed at p09-nested-yield.bot:17:1
   summary: keeps nothing it is given
   suspension call (call of outer) at p09-nested-yield.bot:17:27
     live bindings: 

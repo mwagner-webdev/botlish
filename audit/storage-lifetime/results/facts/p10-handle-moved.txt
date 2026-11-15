@@ -25,7 +25,7 @@ unit advance<coroutine>
   summary: result may hold parameters h
   exits of activation:
     result at p10-handle-moved.bot:11:11: live 
-unit block e18<generic>
+unit the coroutine of gen constructed at p10-handle-moved.bot:15:1
   summary: keeps nothing it is given
   suspension call (call of gen) at p10-handle-moved.bot:15:27
     live bindings: 

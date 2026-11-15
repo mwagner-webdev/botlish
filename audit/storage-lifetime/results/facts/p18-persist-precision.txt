@@ -22,7 +22,7 @@ unit worker<int, bool>
   exits of activation:
     suspend at p18-persist-precision.bot:13:9: live 
     result at p18-persist-precision.bot:9:10: live 
-unit block e23<generic>
+unit the coroutine of worker constructed at p18-persist-precision.bot:18:1
   summary: keeps nothing it is given
   suspension call (call of worker) at p18-persist-precision.bot:18:34
     live bindings: 
@@ -30,7 +30,7 @@ unit block e23<generic>
   exits of activation:
     suspend at p18-persist-precision.bot:18:34: live 
     result at p18-persist-precision.bot:18:1: live 
-unit block e36<generic>
+unit the coroutine of worker constructed at p18-persist-precision.bot:19:1
   summary: keeps nothing it is given
   suspension call (call of worker) at p18-persist-precision.bot:19:34
     live bindings: 

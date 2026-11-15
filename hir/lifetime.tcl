@@ -1185,9 +1185,18 @@ proc hir::lifetime::Reach {contents set} {
 proc hir::lifetime::Contents {contents set} {
     set result {}
     dict for {o -} $set {
-        set result [dict merge $result [dict getdef $contents $o {}]]
+        Into result [dict getdef $contents $o {}]
     }
     return $result
+}
+
+# Adds the objects of SET to the set in variable ACCVAR, in place (a merge
+# in a loop would copy the growing set every time).
+proc hir::lifetime::Into {accVar set} {
+    upvar 1 $accVar acc
+    dict for {o -} $set {
+        dict set acc $o 1
+    }
 }
 
 # Adds SET to entry KEY of the dict variable TABLEVAR; 1 if it grew.
@@ -1385,8 +1394,9 @@ proc hir::lifetime::Reason {category at detail {definite ""}} {
 
 # The escape table of unit G: object -> {key -> reason}, everything a sink
 # reaches, what a caller-owned object or a context or module value holds,
-# and what callees and coroutines are summarized to keep. CHANNELS limits it
-# to the sinks of those categories ("" all), for the summaries.
+# and what callees and coroutines are summarized to keep. EXCLUDE names the
+# categories left out (a summary leaves out what reaches its caller through
+# the result, the error and the caller's own values).
 proc hir::lifetime::Escapes {hir g summaries pts contents {exclude {}}} {
     set esc [dict create]
     foreach con [dict get $g cons] {
@@ -1468,7 +1478,7 @@ proc hir::lifetime::Summary {hir g summaries pts contents} {
     foreach con [dict get $g cons] {
         set rest [lassign $con form]
         if {$form eq "sink" && [lindex $rest 0] in {result error}} {
-            set results [dict merge $results [Reach $contents [PtsOf $pts [lindex $rest 1]]]]
+            Into results [Reach $contents [PtsOf $pts [lindex $rest 1]]]
         }
     }
     set i 0
@@ -1760,11 +1770,19 @@ proc hir::lifetime::Decode {vars bits} {
     if {$bits == 0} {
         return $result
     }
-    set text [string reverse [format %llb $bits]]
-    set i [string first 1 $text]
-    while {$i >= 0} {
-        lappend result [lindex $vars $i]
-        set i [string first 1 $text [expr {$i + 1}]]
+    # Hexadecimal digits, the nonzero ones found by the regexp engine: the
+    # Tcl-level work is per variable in the set, not per bit.
+    set hex [format %llx $bits]
+    set top [expr {[string length $hex] - 1}]
+    foreach at [lreverse [regexp -all -inline -indices {[^0]} $hex]] {
+        set p [lindex $at 0]
+        set d [scan [string index $hex $p] %x]
+        set base [expr {($top - $p) * 4}]
+        foreach k {0 1 2 3} {
+            if {($d >> $k) & 1} {
+                lappend result [lindex $vars [expr {$base + $k}]]
+            }
+        }
     }
     return $result
 }
@@ -1807,7 +1825,7 @@ proc hir::lifetime::Facts {hir g summaries} {
     # (a call whose callee never returns a fresh one) makes none.
     set made [dict create]
     dict for {v set} $pts {
-        set made [dict merge $made $set]
+        Into made $set
     }
     set made [Reach $contents $made]
     set producers [dict create]
@@ -1840,16 +1858,16 @@ proc hir::lifetime::Facts {hir g summaries} {
         set across [Decode $vars [expr {[dict get $out $n] & ~[dict get $defs $n]}]]
         set objs {}
         foreach v $across {
-            set objs [dict merge $objs [PtsOf $pts $v]]
+            Into objs [PtsOf $pts $v]
         }
         set held {}
         if {$kind eq "call"} {
             foreach v $args {
-                set held [dict merge $held [PtsOf $pts $v]]
+                Into held [PtsOf $pts $v]
             }
         }
         set objs [Filter [Reach $contents [dict merge $objs $held]] $madeBits [dict get $madeIn $n]]
-        set crossing [dict merge $crossing $objs]
+        Into crossing $objs
         set e [dict get $node expr]
         lappend suspensions [dict create expr $e kind $kind origin [Origin $hir $e] what [What $hir $e] \
             bindings [lsort [lmap v $across {if {[string match b:* $v]} {set v} else continue}]] \
@@ -1921,7 +1939,7 @@ proc hir::lifetime::Facts {hir g summaries} {
         set n [dict get $p node]
         set objs {}
         foreach v [Decode $vars [expr {([dict get $in $n] | [dict get $out $n]) & $holdMask}]] {
-            set objs [dict merge $objs [PtsOf $pts $v]]
+            Into objs [PtsOf $pts $v]
         }
         set objs [Filter [Reach $contents $objs] $madeBits [dict get $madeIn $n]]
         set earlier 0
@@ -1930,7 +1948,7 @@ proc hir::lifetime::Facts {hir g summaries} {
             # still live when it makes the next.
             set before {}
             foreach v [Decode $vars [expr {[dict get $in $n] & $holdMask}]] {
-                set before [dict merge $before [PtsOf $pts $v]]
+                Into before [PtsOf $pts $v]
             }
             set earlier [dict exists [Reach $contents $before] $site]
         }
@@ -1964,7 +1982,7 @@ proc hir::lifetime::Facts {hir g summaries} {
         set live [Decode $vars [dict get $out $n]]
         set liveObjs {}
         foreach v [Decode $vars [expr {[dict get $out $n] & $holdMask}]] {
-            set liveObjs [dict merge $liveObjs [PtsOf $pts $v]]
+            Into liveObjs [PtsOf $pts $v]
         }
         set liveObjs [lsort [lmap o [dict keys [Filter [Reach $contents $liveObjs] $madeBits [dict get $madeOut $n]]] {
             if {[dict exists $producers $o]} {set o} else continue

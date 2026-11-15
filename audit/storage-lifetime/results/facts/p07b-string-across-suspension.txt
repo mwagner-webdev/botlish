@@ -47,7 +47,7 @@ unit drive<int>
     result at p07b-string-across-suspension.bot:15:9: live 
   exits of iteration of the fold at p07b-string-across-suspension.bot:16:5:
     next at p07b-string-across-suspension.bot:16:5: live n, acc, the position of the fold at p07b-string-across-suspension.bot:16:5
-unit block e115<generic>
+unit the coroutine of worker constructed at p07b-string-across-suspension.bot:17:9
   summary: keeps nothing it is given
   suspension call (call of worker) at p07b-string-across-suspension.bot:17:35
     live bindings: 

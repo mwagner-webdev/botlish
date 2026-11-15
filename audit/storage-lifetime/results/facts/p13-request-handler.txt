@@ -120,7 +120,7 @@ unit handle<int>
   producer call of respond (str) at p13-request-handler.bot:42:22
     activation: confined
     segment: confined
-    coexists with: call of parse at p13-request-handler.bot:39:9; call of raw at p13-request-handler.bot:39:15
+    coexists with: call of parse at p13-request-handler.bot:39:9
   exits of activation:
     return at p13-request-handler.bot:41:13: live 
     result at p13-request-handler.bot:38:10: live 

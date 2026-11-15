@@ -36,7 +36,7 @@ unit make<int>
     coexists with: closure at p10b-handle-returned.bot:13:5
   exits of activation:
     result at p10b-handle-returned.bot:12:8: live 
-unit block e17<generic>
+unit the coroutine of gen constructed at p10b-handle-returned.bot:13:5
   summary: keeps nothing it is given
   suspension call (call of gen) at p10b-handle-returned.bot:13:31
     live bindings: 

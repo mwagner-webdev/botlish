@@ -1,0 +1,15 @@
+# tclsh9.0 audit/storage-lifetime/tools/reachability.tcl (N = 6 and 30, BOTLISH_NATIVE_GC_STRESS=1)
+dropped              iteration confined  peak   1 ->   1  consistent
+iteration-vector     iteration confined  peak   3 ->   3  consistent
+outer-vector         iteration escapes   peak   7 ->  31  confirmed
+outer-vector-some    iteration escapes   peak   4 ->  12  confirmed
+carried              iteration escapes   peak   2 ->   2  conservative here
+struct-dropped       iteration confined  peak   1 ->   1  consistent
+helper-alias         iteration confined  peak   1 ->   1  consistent
+helper-place         iteration escapes   peak   7 ->  31  confirmed
+closure-dropped      iteration confined  peak   1 ->   1  consistent
+context-state        iteration escapes   peak   7 ->  31  confirmed
+coroutine-iteration  iteration confined  peak   3 ->   3  consistent
+returned-each        iteration confined  peak   1 ->   1  consistent
+contradictions 0
+exit 0

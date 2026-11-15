@@ -18,7 +18,8 @@
 #     function's own recursion is the call graph's one kind of cycle),
 #     exact callables, exits, pending operands;
 #   * determinism, isolation between compilations, no change to the HIR;
-#   * depth-safety at Tcl's default recursion limit;
+#   * depth-safety at Tcl's default recursion limit, and the same facts
+#     whatever the depth guard's segments;
 #   * the independent oracle (audit/storage-lifetime/tools/fuzz.tcl), the C
 #     backend's frame persistence (persist.tcl) and the native backend's
 #     reachability under GC stress (reachability.tcl), each in a small run.
@@ -264,8 +265,9 @@ test sl-p14-errors {p14: check's payload escapes through the error, its String d
     list [slVerdict $p check* 14 struct activation] [slReasons $p check* 14 struct activation] \
         [slVerdict $p check* 12 str activation] [slVerdict $p early* 18 str activation] \
         [lsort [lmap x [dict get $u exits activation] {dict get $x kind}]] \
-        [slVerdict $p <program>* 24 payload iteration@23]
-} -result {escapes error confined confined {fail result} confined}
+        [slVerdict $p <program>* 24 payload iteration@23] \
+        [lmap x [dict get [hir::lifetime::unit $facts [slUnit $facts <program>*]] exits activation] {dict get $x kind}]
+} -result {escapes error confined confined {fail result} confined result}
 
 test sl-p15-collections {p15: a collected List escapes the function that collects it and is confined to its caller's iteration -- a declared length changes nothing} -body {
     set p [slFacts {-case p15}]
@@ -372,6 +374,24 @@ f(3)()
 }
     list [slVerdict [slFacts $called] f* 6 str activation] [slVerdict [slFacts $returned] f* 6 str activation]
 } -result {confined escapes}
+
+test sl-closure-returns-capture {a closure called exactly that returns what it captures: the captured String escapes with the call's result} -body {
+    set m {
+import std::int
+import std::str
+
+fn f(n: int) -> str:
+    s = std::int::to_string(n)
+    fn g() -> str:
+        s
+    t = g()
+    t
+
+std::str::length(f(3))
+}
+    set p [slFacts $m]
+    list [slVerdict $p f* 6 str activation] [dict get [hir::lifetime::unit [lindex $p 1] [slUnit [lindex $p 1] g*]] summary capResult]
+} -result {escapes 1}
 
 test sl-mut-alias {an alias the caller keeps: keep(s) returned makes s escape; keep(s) dropped does not (a summary, not a name)} -body {
     set dropped {
@@ -681,6 +701,120 @@ x = M {text: std::int::to_string(7)}
     list [slVerdict [slFacts $reads] <program>* 14 struct activation] [slVerdict [slFacts $keeps] <program>* 14 struct activation]
 } -result {confined escapes}
 
+test sl-param-contents {a callee returning an element of its parameter: a caller's object stands for everything it holds, so the caller's String put in the List escapes through the callee's result} -body {
+    set m {
+import std::int
+import std::list
+import std::str
+
+fn first(xs: List[str]) -> str:
+    std::list::at(xs, 0):
+        on IndexNotFound:
+            ""
+
+fn f(n: int) -> str:
+    s = std::int::to_string(n)
+    first([s])
+
+std::str::length(f(3))
+}
+    set p [slFacts $m]
+    list [dict get [hir::lifetime::unit [lindex $p 1] [slUnit [lindex $p 1] first*]] summary resultParams] \
+        [slVerdict $p f<* 12 str activation]
+} -result {0 escapes}
+
+test sl-coroutine-capture {a value a coroutine is constructed with and yields escapes the constructing activation (through the coroutine's code)} -body {
+    set m {
+import std::coroutine
+import std::int
+import std::str
+
+fn w(s: str) -> str:
+    yield s
+    ""
+
+fn f(n: int) -> int:
+    s = std::int::to_string(n)
+    coroutine {step, first} = w(s)
+    std::str::length(first) + std::str::length(step())
+
+f(3)
+}
+    set p [slFacts $m]
+    list [slVerdict $p f* 11 str activation] [slReasons $p f* 11 str activation]
+} -result {escapes callee}
+
+test sl-kind-precision {a value of one kind is never an object of another: a MutableVector made from a String is not that String, so what is pushed into the vector does not escape with the String (found by the oracle)} -body {
+    set m {
+import std::int
+import std::str
+import std::mutable_vector
+
+fn keep(x: str) -> str:
+    x
+
+fn f(n: int) -> str:
+    a = std::int::to_string(n)
+    b = std::int::to_string(n + 1)
+    v = std::mutable_vector::from_list([keep(a)])
+    v.push(b)
+    a
+
+std::str::length(f(3))
+}
+    set p [slFacts $m]
+    list [slVerdict $p f* 10 str activation] [slVerdict $p f* 11 str activation]
+} -result {escapes confined}
+
+test sl-message-kept {a resume message the coroutine stores into context state, its result unused: the message escapes through the coroutine's code (message), not through the result} -body {
+    set m {
+import std::coroutine
+import std::int
+import std::mutable_vector
+
+struct M:
+    text: str
+
+context struct Log:
+    lines: MutableVector[str]
+
+fn w(seed: int, context l: Log, resume M) -> int:
+    m = yield seed
+    l.lines.push(m.text)
+    0
+
+with context Log {lines: std::mutable_vector::from_list([""])}
+coroutine {step, first} = w(3)
+x = M {text: std::int::to_string(7)}
+r = step(x)
+first + r
+}
+    set p [slFacts $m]
+    list [slVerdict $p <program>* 19 struct activation] [slReasons $p <program>* 19 struct activation]
+} -result {unknown message}
+
+test sl-recursion-swapped {a recursion whose result holds its second parameter only through its own recursive call (the arguments swapped): the fixpoint needs a second round, and the caller's String escapes} -body {
+    set m {
+import std::int
+import std::str
+
+fn pick(x: str, y: str, n: int) -> str:
+    if n > 0:
+        pick(y, x, n - 1)
+    else:
+        x
+
+fn f(n: int) -> str:
+    s = std::int::to_string(n)
+    pick("a", s, n)
+
+std::str::length(f(3))
+}
+    set p [slFacts $m]
+    list [dict get [hir::lifetime::unit [lindex $p 1] [slUnit [lindex $p 1] pick*]] summary resultParams] \
+        [slVerdict $p f<* 12 str activation]
+} -result {{0 1} escapes}
+
 # ---------------------------------------------------------------------------
 # Calls, specialization, recursion
 
@@ -703,7 +837,7 @@ std::str::length(f(3))
 }
     set p [slFacts $m]
     list [dict get [hir::lifetime::unit [lindex $p 1] [slUnit [lindex $p 1] down*]] summary resultParams] \
-        [slVerdict $p f* 12 str activation]
+        [slVerdict $p f<* 12 str activation]
 } -result {0 escapes}
 
 test sl-specialization {instances of one function: the String instance's summary holds its parameter; the Int instance has no object to hold} -body {
@@ -924,6 +1058,32 @@ test sl-depth {programs nested 300 deep analyze at Tcl's default recursion limit
     }
     set out
 } -result {1 1 1 1 1 1 1 1}
+
+test sl-segment-invariance {segments change where frames live, nothing else: every specimen 40 deep and the census's p12 give the same report with a segment every 3 frames as with the default} -body {
+    source [file join $::projectRoot audit depth-safe-nesting tools specimens.tcl]
+    set hirs {}
+    foreach kind [dsn::kinds] {
+        lappend hirs [surface::compile [dict get [dsn::specimen $kind 40] source] -warnings off]
+    }
+    lappend hirs [surface::readProgramFile [lindex [glob [file join $::slCases p12*.bot]] 0] -warnings off]
+    set differ {}
+    set i 0
+    foreach hir $hirs {
+        set plain [hir::lifetime::report $hir [hir::lifetime::analyze $hir]]
+        set saved [list $core::deep::segment $core::deep::outside $core::deep::bound]
+        lassign {3 3 3} core::deep::segment core::deep::outside core::deep::bound
+        try {
+            set segmented [hir::lifetime::report $hir [hir::lifetime::analyze $hir]]
+        } finally {
+            lassign $saved core::deep::segment core::deep::outside core::deep::bound
+        }
+        if {$plain ne $segmented} {
+            lappend differ $i
+        }
+        incr i
+    }
+    set differ
+} -result {}
 
 # ---------------------------------------------------------------------------
 # The independent evidence, in small runs

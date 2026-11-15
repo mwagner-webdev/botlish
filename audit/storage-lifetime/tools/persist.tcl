@@ -23,9 +23,10 @@
 #     j<k>, a constant loop bound hi<k>, a call result r<k>), which the
 #     HIR has no binding for.
 #
-# Pending operands (a value evaluated before a suspending call and consumed
-# after it) are counted but not mapped: C holds them in temporaries of its
-# own naming. Prints one line per frame and a total.
+# A pending operand (a value evaluated before a suspending call and consumed
+# after it) is held by a C temporary of a result (r<k>, n<k>): as many must
+# be frame fields as one suspension point has pending operands. Prints one
+# line per frame and a total.
 set here [file dirname [file normalize [info script]]]
 set root [file dirname [file dirname [file dirname $here]]]
 set options [dict create -quiet 0]
@@ -175,6 +176,16 @@ foreach file $files {
             lappend problems "$positions counted loops' positions live across a suspension, [llength $counters] counter fields"
         }
         lappend used {*}[lrange $accs 0 [expr {$folds - 1}]] {*}[lrange $counters 0 [expr {$positions - 1}]]
+        # A pending operand is a C temporary of a result (r<k>, n<k>).
+        set temps [lsearch -all -inline -regexp $fields {^[rn][0-9]+$}]
+        set maxPending 0
+        foreach s [dict get $u suspensions] {
+            set maxPending [expr {max($maxPending, [llength [dict get $s pending]])}]
+        }
+        if {$maxPending > [llength $temps]} {
+            lappend problems "$maxPending pending operands live across a suspension, [llength $temps] result temporaries"
+        }
+        lappend used {*}[lrange $temps 0 [expr {$maxPending - 1}]]
         set extra [lmap f $fields {if {$f in $used} continue; set f}]
         incr violations [llength $problems]
         incr extras [llength $extra]
@@ -182,7 +193,7 @@ foreach file $files {
         append text " ([join [lmap v $required {dict get $u vars $v}] {, }])"
         append text "; C keeps [llength $fields] ([join $fields {, }])"
         if {$pending} {
-            append text "; $pending pending operands (unmapped)"
+            append text "; $pending pending operands (result temporaries)"
         }
         if {$extra ne {}} {
             append text "; extra: [join $extra {, }]"

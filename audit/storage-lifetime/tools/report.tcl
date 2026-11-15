@@ -53,7 +53,7 @@ if {$out ne ""} {
 foreach file $files {
     set name [file rootname [file tail $file]]
     if {[catch {surface::readProgramFile $file -warnings off} hir]} {
-        set text "$name: does not compile: [lindex [split $hir \n] 0]\n"
+        set text "$name: does not compile: [string map [list [file dirname [file normalize $file]]/ "" $root/ ""] [lindex [split $hir \n] 0]]\n"
     } else {
         set facts [hir::lifetime::analyze $hir -specialize [dict get $options -specialize]]
         set only [if {[dict get $options -all]} {list} else {hir::lifetime::unitsIn $hir $facts $file}]

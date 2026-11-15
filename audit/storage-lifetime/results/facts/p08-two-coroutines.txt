@@ -41,7 +41,7 @@ unit counter<int>
     result at p08-two-coroutines.bot:9:11: live 
   exits of iteration of the fold at p08-two-coroutines.bot:10:13:
     next at p08-two-coroutines.bot:10:13: live acc, the position of the fold at p08-two-coroutines.bot:10:13
-unit block e21<generic>
+unit the coroutine of counter constructed at p08-two-coroutines.bot:15:1
   summary: keeps nothing it is given
   suspension call (call of counter) at p08-two-coroutines.bot:15:34
     live bindings: 
@@ -49,7 +49,7 @@ unit block e21<generic>
   exits of activation:
     suspend at p08-two-coroutines.bot:15:34: live 
     result at p08-two-coroutines.bot:15:1: live 
-unit block e33<generic>
+unit the coroutine of counter constructed at p08-two-coroutines.bot:16:1
   summary: keeps nothing it is given
   suspension call (call of counter) at p08-two-coroutines.bot:16:34
     live bindings: 

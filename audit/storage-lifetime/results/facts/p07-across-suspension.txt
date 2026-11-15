@@ -22,7 +22,7 @@ unit worker<int>
   exits of activation:
     suspend at p07-across-suspension.bot:13:9: live kept
     result at p07-across-suspension.bot:10:10: live 
-unit block e30<generic>
+unit the coroutine of worker constructed at p07-across-suspension.bot:17:1
   summary: keeps nothing it is given
   suspension call (call of worker) at p07-across-suspension.bot:17:27
     live bindings: 

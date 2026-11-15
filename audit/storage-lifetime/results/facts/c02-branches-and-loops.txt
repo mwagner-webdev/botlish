@@ -1,0 +1,31 @@
+unit <program>
+  summary: result may be fresh
+  producer call of coroutine#create (coroutine) at c02-branches-and-loops.bot:17:1
+    activation: confined
+    segment: confined
+  producer call of list (list) at c02-branches-and-loops.bot:20:1
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at the end: live 
+unit worker<int, bool>
+  summary: keeps nothing it is given
+  suspension yield (call of coroutine#yield) at c02-branches-and-loops.bot:11:13
+    live bindings: seed, near, i, acc
+    loop positions: the position of the fold at c02-branches-and-loops.bot:10:17
+    objects kept: 
+  exits of activation:
+    suspend at c02-branches-and-loops.bot:11:13: live seed, near, acc, the position of the fold at c02-branches-and-loops.bot:10:17, i
+    result at c02-branches-and-loops.bot:6:10: live 
+  exits of iteration of the fold at c02-branches-and-loops.bot:10:17:
+    next at c02-branches-and-loops.bot:10:17: live seed, near, acc, the position of the fold at c02-branches-and-loops.bot:10:17
+unit the coroutine of worker constructed at c02-branches-and-loops.bot:17:1
+  summary: keeps nothing it is given
+  suspension call (call of worker) at c02-branches-and-loops.bot:17:27
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    suspend at c02-branches-and-loops.bot:17:27: live 
+    result at c02-branches-and-loops.bot:17:1: live 
