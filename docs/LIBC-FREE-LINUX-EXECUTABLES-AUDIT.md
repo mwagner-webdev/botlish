@@ -10,8 +10,10 @@ subsystem. It ends with a roadmap.
 
 It is an audit, not a milestone: nothing in the compiler or the runtime was
 changed. Every experiment ran in a scratch directory, at `b0ae98fe`
-(2026-11-14), with rustc 1.97.0 on Linux x86-64, kernel 6.18. Appendix A
-reproduces the measurements. COROUTINE-PREREQUISITES.md's Appendix B was the
+(2026-11-14), with rustc 1.97.0 on Linux x86-64, kernel 6.18. The
+repository pinned rustc 1.100.0 right after that commit
+(`rust-toolchain.toml`). The experiments have not been rerun with it.
+Appendix A reproduces the measurements. COROUTINE-PREREQUISITES.md's Appendix B was the
 first such measurement. Appendix B below says what changed since then.
 
 ## Summary
@@ -787,10 +789,12 @@ transports, which needs no C.
   feature. `rep movsb` is good on recent x86-64 and poor on some older
   processors.
 * **Toolchain drift.** The stubs in 6.1 exist because of how the prebuilt
-  `liballoc` is compiled, which can change between Rust releases. CI's
-  runners moved from Rust 1.99.1 to 1.100.0 on 2026-11-14 and two tests
-  changed results. A test that links the kernel runtime with the toolchain
-  in use must catch such a change at once.
+  `liballoc` is compiled, which can change between Rust releases.
+  * Stable Rust moved from 1.99.1 to 1.100.0 under main with no commit, and
+    tests changed results (MAIN-CI-FAILURES-2026-11-13.md).
+  * Since then the repository pins its toolchain (`rust-toolchain.toml`,
+    1.100.0), so a change arrives only with a deliberate bump.
+  * A test that links the kernel runtime must run at every bump.
 * **Two system layers to maintain.** Every OS service the runtime adds
   later needs both. This is the cost of keeping the JIT and libraries on
   `std`, and it is lower than moving them.
