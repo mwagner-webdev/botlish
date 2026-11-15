@@ -1,0 +1,22 @@
+# tools/fallback-leaf.sh, rerun in a fresh scratch directory: corpus/leaf-reentry.bot
+# (correct value 340) on the stock stack-map driver, stock main built --features
+# fallback-roots, and the prototype (shadow-only storage); five runs per row.
+# 'storage:' is the driver's `roots` report per function; a Segmentation fault line
+# is the shell's report of a run that died (the tally counts it as (exit 139)).
+    Finished `release` profile [optimized + debuginfo] target(s) in 2m 44s
+stack-maps: storage: native frame storage: native frame storage: native frame
+   gc-stress=0:       5 value {int 340}
+   gc-stress=1:       5 value {int 340}
+stock-fallback-roots: storage: runtime stack storage: native frame storage: native frame
+   gc-stress=0:       5 value {int 340}
+REPO/audit/wasm-architecture/tools/fallback-leaf.sh: line 13:  3558 Segmentation fault      BOTLISH_NATIVE_GC_STRESS=$st "$2" run "$SCRATCH/leaf-reentry.nir" 2>&1
+      3559 Done                    | head -1
+REPO/audit/wasm-architecture/tools/fallback-leaf.sh: line 13:  3561 Segmentation fault      BOTLISH_NATIVE_GC_STRESS=$st "$2" run "$SCRATCH/leaf-reentry.nir" 2>&1
+      3562 Done                    | head -1
+REPO/audit/wasm-architecture/tools/fallback-leaf.sh: line 13:  3567 Segmentation fault      BOTLISH_NATIVE_GC_STRESS=$st "$2" run "$SCRATCH/leaf-reentry.nir" 2>&1
+      3568 Done                    | head -1
+   gc-stress=1:       3 (exit 139)
+   gc-stress=1:       2 value {int 50}
+prototype-shadow-only: storage: runtime stack storage: runtime stack storage: runtime stack
+   gc-stress=0:       5 value {int 340}
+   gc-stress=1:       5 value {int 340}

@@ -1,0 +1,40 @@
+# Corpus case 6 and the precision case 8, native x86-64 (one run each, the
+# session's 4-core container): tools/allocsum.py over the drivers' --alloc summary.
+# stackful = stock main's driver (stack switching); resumable = the prototype
+# (fallback roots, resumable lowering). Indicative only.
+== c6a-generator stackful-fused
+value {int 499999499999}
+wall 0.016s user 0.00s maxrss 13092 KiB gc-cycles 0
+coroutines -
+allocs 
+== c6a-generator stackful-unfused
+value {int 499999499999}
+wall 0.069s user 0.06s maxrss 13072 KiB gc-cycles 0
+coroutines {stacksMapped 1 stacksReused 0 released 1 releasedSuspended 0 sweptSuspended 0}
+allocs total=2/144B Block=1/48B Coroutine=1/96B
+== c6a-generator resumable
+value {int 499999499999}
+wall 0.053s user 0.05s maxrss 13124 KiB gc-cycles 0
+coroutines {stacksMapped 0 stacksReused 0 released 1 releasedSuspended 0 sweptSuspended 0}
+allocs total=4/344B Block=1/48B Coroutine=1/104B
+== c6b-many stackful-fused
+value {int 50025000}
+wall 0.253s user 0.16s maxrss 53616 KiB gc-cycles 96
+coroutines {stacksMapped 10000 stacksReused 0 released 10000 releasedSuspended 0 sweptSuspended 0}
+allocs total=30005/2000160B List=10003/560072B Block=10000/480000B ListPlan=1/72B Coroutine=10000/960000B MutableVector=1/16B
+== c6b-many stackful-unfused
+value {int 50025000}
+wall 0.253s user 0.16s maxrss 53416 KiB gc-cycles 96
+coroutines {stacksMapped 10000 stacksReused 0 released 10000 releasedSuspended 0 sweptSuspended 0}
+allocs total=30005/2000160B List=10003/560072B Block=10000/480000B ListPlan=1/72B Coroutine=10000/960000B MutableVector=1/16B
+== c6b-many resumable
+value {int 50025000}
+wall 0.020s user 0.02s maxrss 16432 KiB gc-cycles 3
+coroutines {stacksMapped 0 stacksReused 0 released 10000 releasedSuspended 0 sweptSuspended 0}
+allocs total=50005/3840160B List=10003/560072B Block=10000/480000B ListPlan=1/72B Coroutine=10000/1040000B MutableVector=1/16B
+== c8-precision stackful-unfused
+value ['{list {{int 200000} {int 300000} {int 200001}}}']
+collections 19 live objects after each: ['15137', '32309', '65539', '147426', '1', '32', '62', '89', '8', '35', '67', '102', '19', '50', '76', '1', '32', '62', '89']
+== c8-precision resumable
+value ['{list {{int 200000} {int 300000} {int 200001}}}']
+collections 17 live objects after each: ['15401', '32771', '74313', '164556', '14', '42', '69', '104', '21', '52', '78', '5', '34', '64', '91', '10', '37']

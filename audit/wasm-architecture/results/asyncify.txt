@@ -1,0 +1,30 @@
+co-base.wasm: 78321 bytes stripped
+co-whole.wasm: 129049 bytes stripped
+co-only.wasm: 82653 bytes stripped
+== onlylist without co_yield (case 1):
+Error: failed to run main module `co-only-yielding.wasm`
+    2: wasm trap: wasm `unreachable` instruction executed
+case 1: [0, 100, 1, 110, 120, 2, 3, 130, false]
+case 1, GC stress: [0, 100, 1, 110, 120, 2, 3, 130, false]
+case 2: [30, 61, 183, 306, 430, 555, 555, 555, true]
+case 2, GC stress: [30, 61, 183, 306, 430, 555, 555, 555, true]
+case 3: [1, 2, 2003, 2006, 3, 1002, 3004, 3008, 4, 3012]
+case 3, GC stress: [1, 2, 2003, 2006, 3, 1002, 3004, 3008, 4, 3012]
+case 4: [0, 20000, 18411, 20000, 10, true] collections 10
+case 4, GC stress: [0, 20000, 18411, 20000, 10, true] collections 42802
+case 5: [101, 102, 100, 111, 119, 110, 600, 601] live coroutines 1 -> 0
+case 5, GC stress: [101, 102, 100, 111, 119, 110, 600, 601] live coroutines 1 -> 0
+case 7: [7, 8, -7, -1007, true]
+case 7, GC stress: [7, 8, -7, -1007, true]
+case 6a: 499999500000 exit 0 wall 0.03s user 0.03s maxrss 20480 KiB 
+case 6b: 50025000 coroutine bytes at peak 819200000 linear memory 785 MiB exit 0 wall 0.46s user 0.09s maxrss 823632 KiB 
+case 8 (a coroutine's linear stack overflows):
+victim segment at 0x195c10, deep stack [0x199ca0, 0x1a9ca0)
+deep returned 250216 without a trap
+victim stack at 0x0; nonzero words now in the victim's root segment: 0
+
+thread 'main' (1) panicked at SCRATCH/asyncify/co.rs:289:18:
+bad resume
+case 9 (the same recursion on the main stack):
+recurse(2000) = 250216
+    2: wasm trap: call stack exhausted

@@ -1,0 +1,4 @@
+# Tcl test files run with BOTLISH_NATIVE_BIN=<the prototype driver> (fallback roots,
+# resumable lowering), each with a private -tmpdir. A file not listed here had not
+# finished when the report was written.
+actor.test:	Total	67	Passed	67	Skipped	0	Failed	0

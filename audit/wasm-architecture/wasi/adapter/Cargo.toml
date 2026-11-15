@@ -1,0 +1,6 @@
+[package]
+name = "adapter-dump"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+wasi-preview1-component-adapter-provider = "=50.0.1"

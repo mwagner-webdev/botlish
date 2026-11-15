@@ -1,0 +1,12 @@
+# The 32-bit index hazard: std::list::at with an index of 2^32 on a
+# three-element List. Natively IndexNotFound; a 32-bit runtime that casts
+# before comparing reads element 0.
+import std::list
+
+fn probe(xs: List[int], i: int) -> int:
+    std::list::at(xs, i):
+        on IndexNotFound:
+            -1
+
+xs = [10, 20, 30]
+[probe(xs, 2), probe(xs, 3), probe(xs, 4294967296), probe(xs, 4294967298)]

@@ -1,0 +1,184 @@
+diff -ruN a/native/Cargo.lock b/native/Cargo.lock
+--- a/native/Cargo.lock	2026-11-14 16:03:38.000000000 +0000
++++ b/native/Cargo.lock	2026-11-15 18:43:03.000000000 +0000
+@@ -52,13 +52,6 @@
+ ]
+ 
+ [[package]]
+-name = "botlish-runtime"
+-version = "0.1.0"
+-dependencies = [
+- "botlish-native",
+-]
+-
+-[[package]]
+ name = "bumpalo"
+ version = "3.20.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+diff -ruN a/native/Cargo.toml b/native/Cargo.toml
+--- a/native/Cargo.toml	2026-11-15 18:34:53.000000000 +0000
++++ b/native/Cargo.toml	2026-11-15 18:42:57.000000000 +0000
+@@ -17,14 +17,7 @@
+ # native library's object for another target than its own
+ # (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md: android-aarch64 from a
+ # Linux x86-64 host), and Cranelift's default builds only the host's.
+-cranelift-codegen = { version = "0.135", features = ["trace-log", "x86", "arm64"] }
+-cranelift-frontend = "0.135"
+-cranelift-module = "0.135"
+ # The JIT (codegen's CraneliftJit): the `jit` feature, on by default.
+-cranelift-jit = { version = "0.135", optional = true }
+-cranelift-object = "0.135"
+-cranelift-native = "0.135"
+-log = "0.4"
+ num-bigint = "0.4"
+ num-traits = "0.2"
+ # Exactly 1.1.0: its tables are Unicode 16.0, the Tcl reference's (Tcl
+@@ -36,7 +29,6 @@
+ libc = "0.2"
+ # The compilation target's triple (codegen/target.rs): the same version
+ # Cranelift resolves.
+-target-lexicon = "0.13"
+ 
+ # Windows' unwinder (RtlVirtualUnwind and the JIT's function tables), the
+ # JIT's code range and the thread's stack bounds
+@@ -45,6 +37,16 @@
+ # the standard handles, the exception record's flags); coroutine fibers
+ # (WINDOWS-X86-64-MILESTONE-5.md: FIBER_FLAG_FLOAT_SWITCH is
+ # WindowsProgramming's).
++[target.'cfg(not(target_family = "wasm"))'.dependencies]
++cranelift-codegen = { version = "0.135", features = ["trace-log", "x86", "arm64"] }
++cranelift-frontend = "0.135"
++cranelift-module = "0.135"
++cranelift-jit = { version = "0.135", optional = true }
++cranelift-object = "0.135"
++cranelift-native = "0.135"
++log = "0.4"
++target-lexicon = "0.13"
++
+ [target.'cfg(windows)'.dependencies]
+ windows-sys = { version = "0.61", features = [
+     "Win32_Foundation",
+@@ -63,8 +65,8 @@
+ # driver: one `cargo build` makes botlish-native, botlish-aot-stub and the
+ # archive the system linker links (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
+ [workspace]
+-members = [".", "runtime-archive"]
+-default-members = [".", "runtime-archive"]
++members = ["."]
++default-members = ["."]
+ 
+ # The native stack test's threads of CreateThread's own (tests/native_stack/
+ # windows.rs): Rust's runtime set no stack guarantee for them.
+@@ -82,7 +84,7 @@
+ # application's, which ships no code that makes executable memory) that
+ # refuses every in-process run ({NATIVE UNSUPPORTED jit}) and compiles,
+ # links and runs executables as any other. The driver's own tests need it.
+-default = ["jit"]
++default = []
+ jit = ["dep:cranelift-jit"]
+ # The GC root plan of a host without native-frame roots -- the shadow stack,
+ # leaf frames published through Vm::native_roots_ptr, no frame walk
+diff -ruN a/native/src/runtime/aot.rs b/native/src/runtime/aot.rs
+--- a/native/src/runtime/aot.rs	2026-11-14 16:03:38.000000000 +0000
++++ b/native/src/runtime/aot.rs	2026-11-15 18:44:03.000000000 +0000
+@@ -75,6 +75,10 @@
+         use std::os::unix::ffi::OsStringExt;
+         std::env::args_os().map(|a| a.into_vec()).collect()
+     }
++    #[cfg(target_family = "wasm")]
++    {
++        std::env::args().map(|a| a.into_bytes()).collect()
++    }
+     #[cfg(windows)]
+     {
+         use std::os::windows::ffi::OsStrExt;
+diff -ruN a/native/src/runtime/bytesobj.rs b/native/src/runtime/bytesobj.rs
+--- a/native/src/runtime/bytesobj.rs	2026-11-14 16:03:38.000000000 +0000
++++ b/native/src/runtime/bytesobj.rs	2026-11-15 18:44:03.000000000 +0000
+@@ -71,7 +71,10 @@
+ 
+ pub const BYTES_LEN_OFFSET: i32 = offset_of!(BytesObj, len) as i32;
+ 
++#[cfg(target_pointer_width = "64")]
+ const _: () = assert!(std::mem::size_of::<BytesObj>() == BYTES_PAYLOAD_OFFSET);
++#[cfg(target_pointer_width = "32")]
++const _: () = assert!(std::mem::size_of::<BytesObj>() <= BYTES_PAYLOAD_OFFSET);
+ const _: () = assert!(BYTES_PAYLOAD_OFFSET % BYTES_ALIGN == 0);
+ const _: () = assert!(offset_of!(BytesObj, hdr) == 0);
+ 
+diff -ruN a/native/src/runtime/library.rs b/native/src/runtime/library.rs
+--- a/native/src/runtime/library.rs	2026-11-14 16:03:38.000000000 +0000
++++ b/native/src/runtime/library.rs	2026-11-15 18:44:03.000000000 +0000
+@@ -559,7 +559,7 @@
+ /// NULs are kept: LEN is authoritative), registered as live.
+ fn owned_buffer(text: &[u8]) -> Bytes {
+     // SAFETY: a fresh allocation of len + 1 bytes, filled before use.
+-    let ptr = unsafe { libc::malloc(text.len() + 1) } as *mut u8;
++    let ptr = unsafe { proto_malloc(text.len() + 1) } as *mut u8;
+     if ptr.is_null() {
+         std::alloc::handle_alloc_error(std::alloc::Layout::array::<u8>(text.len() + 1).unwrap());
+     }
+@@ -845,7 +845,7 @@
+         return STATUS_INVOCATION;
+     }
+     // SAFETY: removed from the live set: this is its one release.
+-    unsafe { libc::free(b.ptr as *mut c_void) };
++    unsafe { proto_free(b.ptr as *mut c_void) };
+     b.ptr = std::ptr::null_mut();
+     b.len = 0;
+     STATUS_OK
+@@ -1077,3 +1077,13 @@
+         assert!(ENTRY_INDEX_INITIALIZE_ONLY < 0);
+     }
+ }
++
++#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
++unsafe fn proto_malloc(n: usize) -> *mut c_void { unsafe { libc::malloc(n) as *mut c_void } }
++#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
++unsafe fn proto_free(p: *mut c_void) { unsafe { libc::free(p as _) } }
++// WASM-ARCH PROTOTYPE: wasm32-unknown-unknown has no C allocator; an 8-byte length prefix over Rust's.
++#[cfg(all(target_family = "wasm", target_os = "unknown"))]
++unsafe fn proto_malloc(n: usize) -> *mut c_void { unsafe { let l = std::alloc::Layout::from_size_align(n + 8, 8).unwrap(); let p = std::alloc::alloc(l); *(p as *mut usize) = n; p.add(8) as *mut c_void } }
++#[cfg(all(target_family = "wasm", target_os = "unknown"))]
++unsafe fn proto_free(p: *mut c_void) { unsafe { let b = (p as *mut u8).sub(8); let n = *(b as *mut usize); std::alloc::dealloc(b, std::alloc::Layout::from_size_align(n + 8, 8).unwrap()) } }
+diff -ruN a/native/src/runtime/mod.rs b/native/src/runtime/mod.rs
+--- a/native/src/runtime/mod.rs	2026-11-15 18:34:53.000000000 +0000
++++ b/native/src/runtime/mod.rs	2026-11-15 18:44:39.000000000 +0000
+@@ -25,6 +25,18 @@
+ pub mod nview;
+ #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+ pub mod platform;
++#[cfg(target_family = "wasm")]
++pub mod platform {
++    //! WASM-ARCH PROTOTYPE STUB: no guard records, so std::thread::start is refused (ThreadLimit).
++    pub struct OverflowGuard;
++    pub fn reserve_guard() -> Option<usize> { None }
++    pub fn unreserve_guard(_index: usize) {}
++    pub fn free_guards() -> usize { 0 }
++    pub fn guard_mode() -> (bool, usize) { (true, 2) }
++    pub fn install_reserved_guard(_r: usize, _e: bool, _d: usize, _l: &[u8]) -> std::io::Result<OverflowGuard> {
++        Err(std::io::Error::other("no guard on wasm"))
++    }
++}
+ pub mod ops;
+ pub mod program;
+ pub mod show;
+diff -ruN a/native/src/runtime/strobj.rs b/native/src/runtime/strobj.rs
+--- a/native/src/runtime/strobj.rs	2026-11-14 16:03:38.000000000 +0000
++++ b/native/src/runtime/strobj.rs	2026-11-15 18:44:03.000000000 +0000
+@@ -80,9 +80,15 @@
+ use std::ptr;
+ 
+ /// Size of the sized prefix (header + metadata); also where the text starts.
++#[cfg(target_pointer_width = "64")]
+ pub const STR_HEADER_SIZE: usize = 25;
++#[cfg(target_pointer_width = "32")]
++pub const STR_HEADER_SIZE: usize = 17;
+ /// Offset of the UTF-8 bytes within the object.
++#[cfg(target_pointer_width = "64")]
+ pub const STR_TEXT_OFFSET: usize = 25;
++#[cfg(target_pointer_width = "32")]
++pub const STR_TEXT_OFFSET: usize = 17;
+ /// Alignment of the allocation (the header's; the text needs none).
+ pub const STR_ALIGN: usize = 8;
+ /// The smallest a String allocation can be: the header, no text.

@@ -1,0 +1,31 @@
+== W1
+timer 0: [1] at 700 ms
+timer 1: [1] at 1400 ms
+timer 2: [1] at 2101 ms
+stdin ready [2] at 2933 ms: "hello-from-host"
+exit 0 wall 2.98s user 0.10s maxrss 31000 KiB
+== W2
+ok: status 0: ok
+exit3: status 3: 
+stack: status 134:     2: wasm trap: call stack exhausted
+oob: status 134:     2: memory fault at wasm address 0xfffffff0 in linear memory of size 0x110000
+unreachable: status 134:     2: wasm trap: wasm `unreachable` instruction executed
+oom: status 134: memory allocation of 16777216 bytes failed
+spin: status 134:     2: wasm trap: interrupt
+== W3
+serve (defaults):
+requests seen by this instance: 1
+requests seen by this instance: 1
+requests seen by this instance: 1
+serve --max-instance-reuse-count 10:
+requests seen by this instance: 1
+requests seen by this instance: 2
+requests seen by this instance: 3
+== W4
+e2-fib component: 13 imports, export wasi:cli/run@0.2.12;; value [6765, 95853241822852445765625]
+c2-nested component: 13 imports, export wasi:cli/run@0.2.12;; value [30, 61, 183, 306, 430, 555, 555, 555, true]
+c5-cancel component: 13 imports, export wasi:cli/run@0.2.12;; value [101, 102, 100, 111, 119, 110, 300, 401, 400, 500, 599, 600, 601]
+c2-nested linked for wasm32-wasip2: export wasi:cli/run@0.2.12;; value [30, 61, 183, 306, 430, 555, 555, 555, true]
+== core stack switching
+    cannot define continuation types when stack switching is disabled (at offset 0xe)
+000 100 101 001 102 002 
