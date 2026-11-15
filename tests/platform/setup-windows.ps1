@@ -64,9 +64,14 @@ if (-not (Test-Path "$Prefix\bin\tclsh9.0.exe")) {
 'puts "Tcl [info patchlevel], tcltest [package require tcltest 2.5], [encoding system], $tcl_platform(os) $tcl_platform(machine)"' | & "$Prefix\bin\tclsh90.exe"
 if ($LASTEXITCODE -ne 0) { throw "the installed tclsh does not run" }
 
-rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal
+# The pinned toolchain (rust-toolchain.toml, which tools/rust-toolchain.sh
+# reads the same way), MSVC's build, installed and made the default: the
+# rustc linker compiles startup crates outside the checkout.
+$channel = (Select-String -Path (Join-Path $PSScriptRoot "..\..\rust-toolchain.toml") -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+if (-not $channel) { throw "no channel in rust-toolchain.toml" }
+rustup toolchain install "$channel-x86_64-pc-windows-msvc" --profile minimal
 if ($LASTEXITCODE -ne 0) { throw "rustup failed" }
-rustup default stable-x86_64-pc-windows-msvc
+rustup default "$channel-x86_64-pc-windows-msvc"
 if ($LASTEXITCODE -ne 0) { throw "rustup failed" }
 $hostTriple = (rustc -vV | Select-String '^host: ').ToString().Substring(6)
 if ($hostTriple -ne "x86_64-pc-windows-msvc") { throw "rustc's host is $hostTriple, not x86_64-pc-windows-msvc" }

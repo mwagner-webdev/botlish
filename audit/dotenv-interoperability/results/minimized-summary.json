@@ -1,0 +1,3089 @@
+{
+ "fixtures": {
+  "min-000": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "python",
+       "ruby",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "python",
+       "ruby",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-001": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "K": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     },
+     {
+      "map": {
+       "K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "K": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     },
+     {
+      "map": {
+       "K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-002": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {
+       "1K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "1K:": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {
+       "1K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "1K:": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-003": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my-key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "export\tmy-key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my-key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "export\tmy-key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-004": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my-key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "bun",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "python",
+       "ruby",
+       "java"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "my-key": "\"\"`"
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my-key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "bun",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "python",
+       "ruby",
+       "java"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "my-key": "\"\"`"
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-005": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "export\tK\u00c9": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": {
+       "K\u00c9": ""
+      },
+      "status": "ok",
+      "targets": [
+       "python",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "export\tK\u00c9": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": {
+       "K\u00c9": ""
+      },
+      "status": "ok",
+      "targets": [
+       "python",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-006": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "ruby",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "\\": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "ruby",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "\\": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-007": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "K\u00c9": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "python",
+       "dotenvnet",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "K\u00c9": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "python",
+       "dotenvnet",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-008": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "python",
+       "ruby",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "export KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "python",
+       "ruby",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "export KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   }
+  },
+  "min-009": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "export\t1K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {
+       "1K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "python"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "ruby",
+       "dotnetenv",
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "export\t1K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {
+       "1K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "python"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "ruby",
+       "dotnetenv",
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-010": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY:": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY:": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-011": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": "$X"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "python",
+       "dotenvnet",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "bun",
+       "ruby",
+       "dotnetenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {}
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": "$X"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "python",
+       "dotenvnet",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "bun",
+       "ruby",
+       "dotnetenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {}
+   }
+  },
+  "min-012": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "_": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     },
+     {
+      "map": {
+       "_": ""
+      },
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "_": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     },
+     {
+      "map": {
+       "_": ""
+      },
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-013": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my-key": "\u00e9"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "export my-key": "\u00e9"
+      },
+      "status": "ok",
+      "targets": [
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my-key": "\u00e9"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "export my-key": "\u00e9"
+      },
+      "status": "ok",
+      "targets": [
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-014": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "_K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "export\t_K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "ruby",
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "_K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "export\t_K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "ruby",
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   }
+  },
+  "min-015": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "y": "'"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "ruby",
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "bash",
+       "python"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotenvnet",
+       "dotnetenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "y": "'"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "ruby",
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "bash",
+       "python"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotenvnet",
+       "dotnetenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   }
+  },
+  "min-016": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my-key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my-key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-017": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "key": "$d"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "python",
+       "dotenvnet",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "bun",
+       "ruby",
+       "dotnetenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {}
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "key": "$d"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "python",
+       "dotenvnet",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "bun",
+       "ruby",
+       "dotnetenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {}
+   }
+  },
+  "min-018": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "export KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "ruby",
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "export KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "ruby",
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   }
+  },
+  "min-019": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my.key": "\""
+      },
+      "status": "ok",
+      "targets": [
+       "python",
+       "ruby",
+       "dotenvnet",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "my.key": "\\\""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "my.key": "\\"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my.key": "\""
+      },
+      "status": "ok",
+      "targets": [
+       "python",
+       "ruby",
+       "dotenvnet",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "my.key": "\\\""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "my.key": "\\"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-020": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my-key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotenvnet",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "my-key": "''"
+      },
+      "status": "ok",
+      "targets": [
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my-key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotenvnet",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "my-key": "''"
+      },
+      "status": "ok",
+      "targets": [
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-021": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": "${}"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "ruby",
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bun",
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": "${}"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "ruby",
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bun",
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-022": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "ruby",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": "#"
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "python",
+       "dotenvnet"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {}
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "ruby",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": "#"
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "python",
+       "dotenvnet"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {}
+   }
+  },
+  "min-023": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "_K": "``"
+      },
+      "status": "ok",
+      "targets": [
+       "python",
+       "ruby",
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "_K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "_K": "``"
+      },
+      "status": "ok",
+      "targets": [
+       "python",
+       "ruby",
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "_K": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-024": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "m": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     },
+     {
+      "map": {
+       "m": ""
+      },
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "m": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     },
+     {
+      "map": {
+       "m": ""
+      },
+      "status": "ok",
+      "targets": [
+       "ruby"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-025": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY:": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY:": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-026": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "bun",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {
+       "key": "\"\"c"
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "ruby"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "python",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "key": "c"
+      },
+      "status": "ok",
+      "targets": [
+       "bash"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "bun",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": {
+       "key": "\"\"c"
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "ruby"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "python",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "key": "c"
+      },
+      "status": "ok",
+      "targets": [
+       "bash"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   }
+  },
+  "min-027": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": "$X"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "python",
+       "dotenvnet",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "bun",
+       "ruby",
+       "dotnetenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {}
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": "$X"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "python",
+       "dotenvnet",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "bash",
+       "bun",
+       "ruby",
+       "dotnetenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {}
+   }
+  },
+  "min-028": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "y": "\""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "bash",
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "y": "\""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "bash",
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   }
+  },
+  "min-029": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": "`"
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "python",
+       "ruby",
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": "`\t#"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": "`"
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "python",
+       "ruby",
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": "`\t#"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-030": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": "\""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "bash",
+       "python"
+      ]
+     },
+     {
+      "map": {
+       "KEY": "\"#"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": "\""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "ruby"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "bash",
+       "python"
+      ]
+     },
+     {
+      "map": {
+       "KEY": "\"#"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   }
+  },
+  "min-031": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my.key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "export\tmy.key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "ruby",
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "my.key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-dotenv",
+       "bun",
+       "python",
+       "dotnetenv"
+      ]
+     },
+     {
+      "map": {
+       "export\tmy.key": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "ruby",
+       "java"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-032": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": "``"
+      },
+      "status": "ok",
+      "targets": [
+       "python",
+       "ruby",
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "KEY": "``"
+      },
+      "status": "ok",
+      "targets": [
+       "python",
+       "ruby",
+       "dotenvnet",
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "KEY": ""
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun"
+      ]
+     }
+    ],
+    "kinds": [
+     "value decoding"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  },
+  "min-033": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "K": "'"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "ruby",
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "bash",
+       "python"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotenvnet",
+       "dotnetenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {
+       "K": "'"
+      },
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "ruby",
+       "java"
+      ]
+     },
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "bash",
+       "python"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotenvnet",
+       "dotnetenv"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {}
+   }
+  },
+  "min-034": {
+   "clean": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "ruby",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "K\u00c9": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   },
+   "conflict": {
+    "agree": false,
+    "classes": [
+     {
+      "map": {},
+      "status": "ok",
+      "targets": [
+       "node-builtin",
+       "node-envfile",
+       "node-dotenv",
+       "bun",
+       "ruby",
+       "dotenvnet"
+      ]
+     },
+     {
+      "map": null,
+      "status": "error",
+      "targets": [
+       "dotnetenv",
+       "java"
+      ]
+     },
+     {
+      "map": {
+       "K\u00c9": null
+      },
+      "status": "ok",
+      "targets": [
+       "python"
+      ]
+     }
+    ],
+    "kinds": [
+     "error behavior",
+     "syntax acceptance"
+    ],
+    "unobserved": {
+     "bash": "not-run"
+    }
+   }
+  }
+ },
+ "stats": {
+  "by_category": {
+   "minimized": {
+    "agree": 0,
+    "classes": 109,
+    "fixtures": 35
+   }
+  },
+  "by_kind": {
+   "error behavior": 24,
+   "syntax acceptance": 26,
+   "value decoding": 9
+  },
+  "fixtures": 35
+ },
+ "targets": [
+  "bash",
+  "node-builtin",
+  "node-envfile",
+  "node-dotenv",
+  "bun",
+  "python",
+  "ruby",
+  "dotenvnet",
+  "dotnetenv",
+  "java"
+ ]
+}

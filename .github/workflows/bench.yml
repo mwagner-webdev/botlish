@@ -84,7 +84,7 @@ jobs:
           go-version: "1.24"
           cache: false
 
-      # Tcl 9.0.1 and stable Rust: .devcontainer/setup.sh on Linux (the
+      # Tcl 9.0.1 and the pinned Rust: .devcontainer/setup.sh on Linux (the
       # devcontainer's own prerequisites), the Windows workflow's action on
       # Windows.
       - name: Install project prerequisites (Linux)

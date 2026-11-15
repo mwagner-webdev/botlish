@@ -5,6 +5,10 @@
 !/bench/equivalents/rust/*.rs
 /bench/equivalents/go/*
 !/bench/equivalents/go/*.go
+# The Go programs' shared timing (bench/equivalents/go/clock/best.go).
+!/bench/equivalents/go/clock/
+/bench/equivalents/go/clock/*
+!/bench/equivalents/go/clock/*.go
 /bench/experimental/equivalents/rust/*
 !/bench/experimental/equivalents/rust/*.rs
 /bench/experimental/equivalents/go/*

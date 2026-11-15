@@ -1,0 +1,17 @@
+# The emits probe's negative controls: each mutant edits dotenv_emit.bot
+# (OLD => NEW, exact text, first occurrence) and names the claims it must
+# break. tools/emits.py applies each to a private copy and reads every
+# claim's verdict (audit/csv-emission/tools/claims.tcl).
+#
+# (<nothing> as NEW deletes OLD.)
+# NAME | OLD | NEW | CLAIMS THAT MUST NOT BE PROVEN (function:recognizer, comma-separated)
+unguarded-value | dotenv_portable::value_char(c): | dotenv_portable::plain_char(65): | assignment:dotenv_portable::assignment,document:dotenv_portable::document
+no-terminator | yield 34\n    yield 10\n    unit\n\nfn document | yield 34\n    unit\n\nfn document | assignment:dotenv_portable::assignment,document:dotenv_portable::document
+no-closing-quote | yield 34\n    yield 10\n    unit\n\nfn document | yield 10\n    unit\n\nfn document | assignment:dotenv_portable::assignment
+dollar-yielded | yield 61\n    yield 34\n    loop | yield 61\n    yield 34\n    yield 36\n    loop | assignment:dotenv_portable::assignment,assignment:dotenv_portable::assignment_ml
+empty-key-written | fail UnsupportedDotenv {at: 0, value: -1} | return unit | assignment:dotenv_portable::assignment,document:dotenv_portable::document
+key-first-digit | dotenv_portable::name_start_char(first): | dotenv_portable::name_char(first): | assignment:dotenv_portable::assignment
+first-line-may-be-empty | n = first.length()\n        if n == 0:\n            fail UnsupportedDotenv {at: 0, value: 10}\n | n = first.length()\n | assignment_lines:dotenv_portable::assignment_ml
+hash-after-lf | dotenv_portable::plain_char(c):\n            on std::dfa::UnrecognizedInput:\n                fail UnsupportedDotenv {at: i, value: c}\n            on std::dfa::UnexpectedEnd:\n                fail UnsupportedDotenv {at: i, value: c}\n        yield c\n        continue\n    unit | dotenv_portable::value_char(c):\n            on std::dfa::UnrecognizedInput:\n                fail UnsupportedDotenv {at: i, value: c}\n            on std::dfa::UnexpectedEnd:\n                fail UnsupportedDotenv {at: i, value: c}\n        yield c\n        continue\n    unit | assignment_lines:dotenv_portable::assignment_ml
+lf-in-single-line-claim | emits dotenv_portable::assignment_ml:\n    key(name) | emits dotenv_portable::assignment:\n    key(name) | assignment_lines:dotenv_portable::assignment
+lf-yielded-first | yield 34\n    if lines.length() == 1: | yield 34\n    yield 10\n    if lines.length() == 1: | assignment_lines:dotenv_portable::assignment_ml
