@@ -1,0 +1,283 @@
+# Mutants of the storage lifetime facts (hir/lifetime.tcl,
+# STORAGE-LIFETIME-FACTS-MILESTONE-1.md; audit/storage-lifetime/tools/
+# mutate.tcl): deliberate breaks of one rule each -- an edge of the control-
+# flow graph, a liveness use, a containment constraint, an escape sink, a
+# summary's field, a region's test. Each must be killed by
+# tests/storage-lifetime.test, by one of the tests its `!!` line names (the
+# test that states the rule it breaks), or, where `!!` names `fuzz`, by the
+# independent oracle (fuzz.tcl, two seeds). Most are unsound breaks (a fact
+# claimed that does not hold); the precision ones say so.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# The control-flow graph and liveness
+
+@@ handler-edge-dropped a handled call has no edge to its handlers: a binding only a handler reads is dead at the call
+!! sl-mut-handler
+## hir/lifetime.tcl
+<<<<
+        ExcEdge g $cnode $h
+====
+>>>>
+
+@@ exceptional-successors-ignored a node's live-out joins its normal successors only: what a handler needs is dead at the handled call
+!! sl-mut-handler
+## hir/lifetime.tcl
+<<<<
+        foreach s [concat [dict get $node succ] [dict get $node exc]] {
+            set o [expr {$o | [dict get $in $s]}]
+        }
+====
+        foreach s [dict get $node succ] {
+            set o [expr {$o | [dict get $in $s]}]
+        }
+>>>>
+
+@@ error-edge-dropped a call that may fail has no error edge: its error is no exit of the activation or of the iteration
+!! sl-mut-failing-call
+## hir/lifetime.tcl
+<<<<
+    if {$names ne {}} {
+        dict set g nodes $n errors $names
+        ExcEdge g $n [dict get $g exitxNode]
+    }
+====
+>>>>
+
+@@ handled-errors-kept a handled call's handled errors still leave the activation (precision: an exit no path takes)
+!! sl-p14-errors
+## hir/lifetime.tcl
+<<<<
+            if {$name in [dict get $g handledNames]} continue
+====
+>>>>
+
+@@ fold-back-edge-dropped a fold's body never returns to its head: nothing an iteration reads of the next one is live across a yield in it
+!! sl-p08-independent sl-loop-position fuzz
+## hir/lifetime.tcl
+<<<<
+            set next [NewNode g foldnext $e [list $bval] [list $carried] $bout]
+            Con g copy $carried $bval
+            Edge g $next $head
+====
+            set next [NewNode g foldnext $e [list $bval] [list $carried] $bout]
+            Con g copy $carried $bval
+>>>>
+
+@@ position-unread a counted loop's position is never read by its test: it is dead across a yield in the body
+!! sl-loop-position sl-p08-independent sl-p10-handle fuzz
+## hir/lifetime.tcl
+<<<<
+        set test [NewNode g test $e [concat $persistent [list $position]] {} $head]
+====
+        set test [NewNode g test $e $persistent {} $head]
+>>>>
+
+@@ pending-unreported a pending operand is not reported among what a suspension keeps
+!! sl-pending-operand
+## hir/lifetime.tcl
+<<<<
+            pending [lsort [lmap v $across {if {[string match t:* $v]} {set v} else continue}]] \
+====
+            pending {} \
+>>>>
+
+@@ callee-held-ignored what a suspended callee holds (its arguments) is not kept across its suspension
+!! sl-held-by-callee
+## hir/lifetime.tcl
+<<<<
+        set held {}
+        if {$kind eq "call"} {
+            foreach v $args {
+                Into held [PtsOf $pts $v]
+            }
+        }
+====
+        set held {}
+>>>>
+
+# ---------------------------------------------------------------------------
+# Containment and escape
+
+@@ return-not-a-sink an explicit return lets nothing escape
+!! sl-mut-return sl-p17-spelling sl-spelling-return
+## hir/lifetime.tcl
+<<<<
+            Con g sink result $val $e "returned"
+====
+>>>>
+
+@@ fail-not-a-sink a fail's payload lets nothing escape
+!! sl-p14-errors sl-mut-failing-call
+## hir/lifetime.tcl
+<<<<
+            Con g sink error $val $e "the payload of [dict get $node name]"
+====
+>>>>
+
+@@ yield-not-a-sink a yielded value does not escape
+!! sl-mut-yield sl-coroutine-capture
+## hir/lifetime.tcl
+<<<<
+                Con g sink yield $v $e "yielded to the resumer"
+====
+>>>>
+
+@@ struct-holds-nothing a struct construction holds none of its fields' objects
+!! sl-mut-aggregate sl-p06-retained
+## hir/lifetime.tcl
+<<<<
+            set n [NewNode g struct $e $vals [list t:$e] $out]
+            Producer $hir g $e struct $n
+            Con g alloc t:$e o:$e
+            foreach v $vals {
+                Con g contain o:$e $v
+            }
+====
+            set n [NewNode g struct $e $vals [list t:$e] $out]
+            Producer $hir g $e struct $n
+            Con g alloc t:$e o:$e
+>>>>
+
+@@ closure-holds-nothing a closure holds none of the bindings it captures
+!! sl-mut-closure
+## hir/lifetime.tcl
+<<<<
+            set n [NewNode g closure $e $uses [list t:$e] $cur]
+            Producer $hir g $e closure $n
+            Con g alloc t:$e o:$e
+            foreach v $uses {
+                Con g contain o:$e $v
+            }
+====
+            set n [NewNode g closure $e $uses [list t:$e] $cur]
+            Producer $hir g $e closure $n
+            Con g alloc t:$e o:$e
+>>>>
+
+@@ result-params-ignored a callee's result never holds its parameters: an alias the caller keeps is missed
+!! sl-mut-alias sl-recursion sl-param-contents sl-specialization
+## hir/lifetime.tcl
+<<<<
+            dict lappend s resultParams $i
+====
+>>>>
+
+@@ place-store-dropped a mutating collection operation stores nothing into its place
+!! sl-p06-retained sl-mut-place-param sl-mut-context
+## hir/lifetime.tcl
+<<<<
+                            Con g storereach $root $other
+====
+>>>>
+
+@@ unknown-call-trusted a call through a function value keeps nothing
+!! sl-mut-unknown-call sl-mut-erased
+## hir/lifetime.tcl
+<<<<
+        Con g sink unknown $v $e "passed to a call through a function value"
+====
+>>>>
+
+@@ context-state-local what a context holds does not escape
+!! sl-mut-context sl-p11-context sl-p19-context-vector
+## hir/lifetime.tcl
+<<<<
+        Escape esc [Reach $contents {CTX 1}] [Reason context "" "context-owned state (installed for the run)"]
+====
+>>>>
+
+@@ caller-values-local what is stored into a caller-owned value (a place parameter's) does not escape the callee
+!! sl-mut-place-param
+## hir/lifetime.tcl
+<<<<
+            Escape esc $held [Reason caller "" "stored into a value the caller owns ([hir::semantic::SourceName $hir $b])"]
+====
+>>>>
+
+@@ caller-object-empty a caller's object stands for itself only, not for what it holds: an element read out of a parameter carries nothing of the caller's
+!! sl-param-contents
+## hir/lifetime.tcl
+<<<<
+                # The caller's object: it stands for everything the caller
+                # passed, contents included.
+                Con g alloc b:$b p:$b
+                Con g containobj p:$b p:$b
+====
+                Con g alloc b:$b p:$b
+>>>>
+
+@@ messages-trusted a resume message is never kept by the coroutine
+!! sl-message-kept
+## hir/lifetime.tcl
+<<<<
+                    if {[dict size [dict get $s msg]]} {
+                        Escape esc [Reach $contents [PtsOf $pts $v]] [Reason message $e \
+====
+                    if {0} {
+                        Escape esc [Reach $contents [PtsOf $pts $v]] [Reason message $e \
+>>>>
+
+@@ thunk-captures-trusted what a coroutine is constructed with is never kept by its code
+!! sl-coroutine-capture
+## hir/lifetime.tcl
+<<<<
+                    Con g thunk $e $unit $thunk [lindex $vals 0] o:$e
+====
+>>>>
+
+@@ recursion-one-round a self-recursive function's summary is taken after one round, from the empty summary of its own call
+!! sl-recursion-swapped sl-recursion
+## hir/lifetime.tcl
+<<<<
+            if {!$changed || [llength $component] == 1 && ![SelfCalling $graphs [lindex $component 0]]} {
+====
+            if {1} {
+>>>>
+
+@@ kind-filter-off a value may be an object of any kind (precision: a MutableVector made from a String is that String)
+!! sl-kind-precision
+## hir/lifetime.tcl
+<<<<
+        if {$k eq "" || $k in {value payload fresh} || $k eq $kind} {
+====
+        if {1} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Regions
+
+@@ iteration-escape-unchecked an object reaching a value made outside the loop is still confined to the iteration
+!! sl-mut-loop-carried sl-mut-place-param fuzz
+## hir/lifetime.tcl
+<<<<
+            } elseif {[dict exists $escapeDepth $site] && $depth > [dict get $escapeDepth $site]} {
+====
+            } elseif {0} {
+>>>>
+
+@@ made-filter-everything the may-have-been-made filter removes every object of the unit: nothing coexists, nothing crosses a suspension
+!! sl-p02-simultaneous sl-mut-overlap sl-mut-across-suspension sl-p07b-string
+## hir/lifetime.tcl
+<<<<
+        if {![dict exists $bits $o] || ($made >> [dict get $bits $o]) & 1} {
+====
+        if {![dict exists $bits $o]} {
+>>>>
+
+@@ static-closure a closure capturing a value is taken for a static function at its exact calls: what it returns of its captures is lost
+!! sl-closure-returns-capture
+## hir/lifetime.tcl
+<<<<
+    } elseif {$tkind eq "block" && ![Capturing $hir $g $tid]} {
+====
+    } elseif {$tkind eq "block"} {
+>>>>

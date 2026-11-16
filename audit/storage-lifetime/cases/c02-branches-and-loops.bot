@@ -1,0 +1,20 @@
+# c02 -- yields in branches and in a counted loop: `far` is read only on the
+# path that never suspends, `near` after the loop, the loop's bound and
+# position on every iteration.
+import std::coroutine
+
+fn worker(seed: int, flag: bool) -> int:
+    far = seed * 7
+    near = seed + 2
+    if flag:
+        total = fold i from 0 to seed with intermediate acc 0:
+            yield acc
+            acc + i
+        total + near
+    else:
+        far
+
+coroutine {step, first} = worker(3, true)
+r1 = step()
+r2 = step()
+[first, r1, r2]

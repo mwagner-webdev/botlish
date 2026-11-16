@@ -1,0 +1,39 @@
+unit <program>
+  summary: keeps nothing it is given
+  producer call of list (list) at p11-context-state.bot:21:63
+    activation: escapes
+      - context: kept by context#install (at p11-context-state.bot:21:1)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of std::mutable_vector::from_list (mutvec) at p11-context-state.bot:21:32
+    activation: escapes
+      - context: kept by context#install (at p11-context-state.bot:21:1)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of list at p11-context-state.bot:21:63
+  producer Journal {entries} (struct) at p11-context-state.bot:21:14
+    activation: confined
+    segment: confined
+    coexists with: call of std::mutable_vector::from_list at p11-context-state.bot:21:32; call of list at p11-context-state.bot:21:63
+  producer call of mutable_vector#share (struct) at p11-context-state.bot:21:1
+    activation: escapes
+      - context: kept by context#install (at p11-context-state.bot:21:1)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: Journal {entries} at p11-context-state.bot:21:14; call of std::mutable_vector::from_list at p11-context-state.bot:21:32; call of list at p11-context-state.bot:21:63
+  exits of activation:
+    result at the end: live 
+unit note<int>
+  summary: keeps nothing it is given
+  exits of activation:
+    result at p11-context-state.bot:10:8: live 
+unit count<generic>
+  summary: keeps nothing it is given
+  exits of activation:
+    result at p11-context-state.bot:13:9: live 
+unit record<int>
+  summary: keeps nothing it is given
+  exits of activation:
+    result at p11-context-state.bot:16:10: live 
+  exits of iteration of the loop at p11-context-state.bot:17:5:
+    next at p11-context-state.bot:17:5: live n, the position of the loop at p11-context-state.bot:17:5

@@ -227,4 +227,9 @@
 ::hir::mutvec::FoldWalkSequence	logical copies	a consumed fold intermediate's exits: the fold body's nested expressions (hir/mutvec.tcl, "Consumed fold intermediates")
 ::hir::discarded::ExitSequence	warnings	the DISCARDED-MUTATION fold-exit walk: the fold body's nested expressions (hir/discarded.tcl, "Fold exits")
 ::hir::discarded::ExitWalk	warnings	the DISCARDED-MUTATION fold-exit walk: the fold body's nested expressions (hir/discarded.tcl, "Fold exits")
+::hir::lifetime::Call	storage lifetime facts	the control-flow graph of a unit: one node per operation after its operands, every nested expression, branch, loop and handler (hir/lifetime.tcl)
+::hir::lifetime::Eval	storage lifetime facts	the control-flow graph of a unit: one node per operation after its operands, every nested expression, branch, loop and handler (hir/lifetime.tcl)
+::hir::lifetime::Handle	storage lifetime facts	the control-flow graph of a unit: one node per operation after its operands, every nested expression, branch, loop and handler (hir/lifetime.tcl)
+::hir::lifetime::Loop	storage lifetime facts	the control-flow graph of a unit: one node per operation after its operands, every nested expression, branch, loop and handler (hir/lifetime.tcl)
+::hir::lifetime::Seq	storage lifetime facts	the control-flow graph of a unit: one node per operation after its operands, every nested expression, branch, loop and handler (hir/lifetime.tcl)
 ::native::lower::LoopBody	native lowering	HIR to NIR, one call per nested expression

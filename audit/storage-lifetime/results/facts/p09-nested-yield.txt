@@ -1,0 +1,44 @@
+unit <program>
+  summary: result may be fresh
+  producer call of coroutine#create (coroutine) at p09-nested-yield.bot:17:1
+    activation: confined
+    segment: confined
+  producer call of list (list) at p09-nested-yield.bot:22:1
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at the end: live 
+unit inner<int>
+  summary: keeps nothing it is given
+  suspension yield (call of coroutine#yield) at p09-nested-yield.bot:8:5
+    live bindings: base
+    objects kept: 
+  suspension yield (call of coroutine#yield) at p09-nested-yield.bot:9:5
+    live bindings: base
+    objects kept: 
+  exits of activation:
+    suspend at p09-nested-yield.bot:8:5: live base
+    suspend at p09-nested-yield.bot:9:5: live base
+    result at p09-nested-yield.bot:7:9: live 
+unit outer<int>
+  summary: keeps nothing it is given
+  suspension call (call of inner) at p09-nested-yield.bot:13:13
+    live bindings: seed
+    objects kept: 
+  suspension call (call of inner) at p09-nested-yield.bot:14:14
+    live bindings: first
+    objects kept: 
+  exits of activation:
+    suspend at p09-nested-yield.bot:13:13: live seed
+    suspend at p09-nested-yield.bot:14:14: live first
+    result at p09-nested-yield.bot:12:9: live 
+unit the coroutine of outer constructed at p09-nested-yield.bot:17:1
+  summary: keeps nothing it is given
+  suspension call (call of outer) at p09-nested-yield.bot:17:27
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    suspend at p09-nested-yield.bot:17:27: live 
+    result at p09-nested-yield.bot:17:1: live 

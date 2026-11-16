@@ -1,0 +1,36 @@
+# tclsh9.0 audit/storage-lifetime/tools/persist.tcl audit/storage-static-reuse/cases/*.bot audit/storage-lifetime/cases/*.bot examples/c-freestanding/kiosk/*.bot
+p01-sequential-temps: C UNSUPPORTED
+p02-simultaneous-temps: C UNSUPPORTED
+p03-exclusive-branches: C UNSUPPORTED
+p04-loop-reuse: C UNSUPPORTED
+p05-escape-result: C UNSUPPORTED
+p06-retained-aggregate: C UNSUPPORTED
+p07-across-suspension: worker (i2): HIR requires 1 (kept); C keeps 1 (v_kept_4)
+p07b-string-across-suspension: C UNSUPPORTED
+p08-two-coroutines: counter (i3): HIR requires 2 (acc, the position of the fold at p08-two-coroutines.bot:10:13); C keeps 3 (hi2, acc3, i4); extra: hi2
+p09-nested-yield: inner (i3): HIR requires 1 (base); C keeps 0 ()
+p09-nested-yield: outer (i2): HIR requires 2 (seed, first); C keeps 1 (v_first_8)
+p10-handle-moved: gen (i3): HIR requires 2 (n, the position of the loop at p10-handle-moved.bot:7:5); C keeps 2 (hi2, i3); extra: hi2
+p10b-handle-returned: C UNSUPPORTED
+p11-context-state: C UNSUPPORTED
+p12-actor-messages: C UNSUPPORTED
+p13-request-handler: C UNSUPPORTED
+p14-errors-early-exit: C UNSUPPORTED
+p15-bounded-collections: C UNSUPPORTED
+p16-foreign-noescape: C UNSUPPORTED
+p16b-foreign-captures: does not compile: audit/storage-static-reuse/cases/p16b-foreign-captures.bot:14:13: argument 2 of c_submit: byte storage (std::abi::bytes::Bytes) is exposed to C only for a call that cannot keep the pointer, but parameter "buf" may retain it (escape captures): a pointer C keeps after the call needs storage that outlives the call, which nothing provides yet, and only a contract that says noescape -- never a const, a name or a guess -- admits temporary exposure
+p18-persist-precision: worker (i3): HIR requires 0 (); C keeps 2 (v_x_5, j1); extra: v_x_5, j1
+p19-context-scratch-vector: C UNSUPPORTED
+c01-pending-operand: inner (i4): HIR requires 1 (n); C keeps 0 ()
+c01-pending-operand: outer (i2): HIR requires 0 (); C keeps 1 (r1); 1 pending operands (result temporaries)
+c02-branches-and-loops: worker (i2): HIR requires 5 (seed, near, i, acc, the position of the fold at c02-branches-and-loops.bot:10:17); C keeps 6 (v_far_5, v_near_7, j1, hi3, acc4, i5); extra: v_far_5, j1, hi3
+bench: does not compile: examples/c-freestanding/kiosk/bench.bot:18:13: function authorize requires context BenchTerminal, devices::Clock, so it can only be called (or bound to another name as a statement): it cannot be passed, returned or stored as a value, because a call through an unknown function value could not prove that context installed
+field: does not compile: examples/c-freestanding/kiosk/field.bot:22:13: function authorize requires context FieldTerminal, devices::Clock, so it can only be called (or bound to another name as a statement): it cannot be passed, returned or stored as a value, because a call through an unknown function value could not prove that context installed
+kiosk_bench: meter::keypad (i13): HIR requires 3 (z1, zone, m1); C keeps 3 (v_z1_6, v_zone_10, v_m1_11)
+kiosk_bench: meter::housekeeping<devices::Clock=bench::SimClock> (i12): HIR requires 1 (the position of the loop at meter.bot:73:5); C keeps 2 (hi2, i3); extra: hi2
+kiosk_bench: meter::payment<devices::Payment=bench::BenchTerminal> (i7): HIR requires 1 (price); C keeps 1 (v_price_30)
+kiosk_field: meter::keypad (i13): HIR requires 3 (z1, zone, m1); C keeps 3 (v_z1_8, v_zone_10, v_m1_11)
+kiosk_field: meter::housekeeping<devices::Clock=field::Rtc> (i12): HIR requires 1 (the position of the loop at meter.bot:73:5); C keeps 2 (hi2, i3); extra: hi2
+kiosk_field: meter::payment<devices::Payment=field::FieldTerminal> (i7): HIR requires 1 (price); C keeps 1 (v_price_30)
+meter: does not compile: examples/c-freestanding/kiosk/meter.bot:125:7: function day requires context devices::Clock, devices::Payment, so it can only be called (or bound to another name as a statement): it cannot be passed, returned or stored as a value, because a call through an unknown function value could not prove that context installed
+frames 15, violations 0, extra fields 9, pending operands 1

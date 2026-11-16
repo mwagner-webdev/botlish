@@ -1,0 +1,54 @@
+unit <program>
+  summary: result may be fresh
+  producer call of fixed (list) at p15-bounded-collections.bot:24:29
+    activation: confined
+    iteration of the fold at p15-bounded-collections.bot:23:9: confined
+    segment: confined
+  producer call of dynamic (list) at p15-bounded-collections.bot:24:59
+    activation: confined
+    iteration of the fold at p15-bounded-collections.bot:23:9: confined
+    segment: confined
+  producer call of list (list) at p15-bounded-collections.bot:25:1
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at the end: live 
+  exits of iteration of the fold at p15-bounded-collections.bot:23:9:
+    next at p15-bounded-collections.bot:23:9: live acc, the position of the fold at p15-bounded-collections.bot:23:9
+unit fixed<int>
+  summary: result may be fresh
+  producer loop (list) at p15-bounded-collections.bot:10:5
+    activation: escapes
+      - result: the unit's value (at p15-bounded-collections.bot:9:9)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at p15-bounded-collections.bot:9:9: live 
+  exits of iteration of the loop at p15-bounded-collections.bot:10:5:
+    next at p15-bounded-collections.bot:10:5: live i, the List loop at p15-bounded-collections.bot:10:5 collects, the position of the loop at p15-bounded-collections.bot:10:5
+unit dynamic<int>
+  summary: result may be fresh
+  producer loop (list) at p15-bounded-collections.bot:14:5
+    activation: escapes
+      - result: the unit's value (at p15-bounded-collections.bot:13:11)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at p15-bounded-collections.bot:13:11: live 
+  exits of iteration of the loop at p15-bounded-collections.bot:14:5:
+    next at p15-bounded-collections.bot:14:5: live the pending value of call of mod at p15-bounded-collections.bot:14:22, the List loop at p15-bounded-collections.bot:14:5 collects, the position of the loop at p15-bounded-collections.bot:14:5
+unit grow<int>
+  summary: keeps nothing it is given
+  producer call of list (list) at p15-bounded-collections.bot:18:40
+    activation: confined
+    segment: confined
+  producer call of std::mutable_vector::from_list (mutvec) at p15-bounded-collections.bot:18:9
+    activation: confined
+    segment: confined
+    coexists with: call of list at p15-bounded-collections.bot:18:40
+  exits of activation:
+    result at p15-bounded-collections.bot:17:8: live 
+  exits of iteration of the loop at p15-bounded-collections.bot:19:5:
+    next at p15-bounded-collections.bot:19:5: live n, v, the position of the loop at p15-bounded-collections.bot:19:5

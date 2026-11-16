@@ -1,0 +1,46 @@
+unit <program>
+  summary: result may be fresh
+  producer call of make (coroutine) at p10b-handle-returned.bot:16:5
+    activation: confined
+    segment: confined
+  producer call of list (list) at p10b-handle-returned.bot:17:1
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at the end: live 
+unit gen<int>
+  summary: keeps nothing it is given
+  suspension yield (call of coroutine#yield) at p10b-handle-returned.bot:9:9
+    live bindings: n
+    loop positions: the position of the loop at p10b-handle-returned.bot:8:5
+    objects kept: 
+  exits of activation:
+    suspend at p10b-handle-returned.bot:9:9: live n, the position of the loop at p10b-handle-returned.bot:8:5
+    result at p10b-handle-returned.bot:7:7: live 
+  exits of iteration of the loop at p10b-handle-returned.bot:8:5:
+    next at p10b-handle-returned.bot:8:5: live n, the position of the loop at p10b-handle-returned.bot:8:5
+unit make<int>
+  summary: result may be fresh
+  producer closure (closure) at p10b-handle-returned.bot:13:5
+    activation: escapes
+      - result: the unit's value (at p10b-handle-returned.bot:12:8)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of coroutine#create (coroutine) at p10b-handle-returned.bot:13:5
+    activation: escapes
+      - result: the unit's value (at p10b-handle-returned.bot:12:8)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: closure at p10b-handle-returned.bot:13:5
+  exits of activation:
+    result at p10b-handle-returned.bot:12:8: live 
+unit the coroutine of gen constructed at p10b-handle-returned.bot:13:5
+  summary: keeps nothing it is given
+  suspension call (call of gen) at p10b-handle-returned.bot:13:31
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    suspend at p10b-handle-returned.bot:13:31: live 
+    result at p10b-handle-returned.bot:13:5: live 

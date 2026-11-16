@@ -1,0 +1,8 @@
+# tclsh9.0 audit/storage-lifetime/tools/fuzz.tcl -seeds 1-12 -count 40
+programs 480, invalid 0, suspensions 1087, unsound 0, livePrecise 1087, liveExtra 0, verdicts 6061, verdictPrecise 6061, verdictImprecise 0, missingProducer 0
+exit 0
+
+# tclsh9.0 audit/storage-lifetime/tools/fuzz.tcl -seeds 1-6 -count 40 -strings 0
+C differential: frames 240, violations 0, extra fields 338, pending operands 0
+programs 240, invalid 0, suspensions 1696, unsound 0, livePrecise 1696, liveExtra 0, verdicts 0, verdictPrecise 0, verdictImprecise 0, missingProducer 0
+exit 0

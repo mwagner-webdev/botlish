@@ -1,0 +1,33 @@
+unit <program>
+  summary: keeps nothing it is given
+  producer call of list (list) at p19-context-scratch-vector.bot:17:61
+    activation: escapes
+      - context: kept by context#install (at p19-context-scratch-vector.bot:17:1)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of std::mutable_vector::from_list (mutvec) at p19-context-scratch-vector.bot:17:30
+    activation: escapes
+      - context: kept by context#install (at p19-context-scratch-vector.bot:17:1)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of list at p19-context-scratch-vector.bot:17:61
+  producer Scratch {cells} (struct) at p19-context-scratch-vector.bot:17:14
+    activation: confined
+    segment: confined
+    coexists with: call of std::mutable_vector::from_list at p19-context-scratch-vector.bot:17:30; call of list at p19-context-scratch-vector.bot:17:61
+  producer call of mutable_vector#share (struct) at p19-context-scratch-vector.bot:17:1
+    activation: escapes
+      - context: kept by context#install (at p19-context-scratch-vector.bot:17:1)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: Scratch {cells} at p19-context-scratch-vector.bot:17:14; call of std::mutable_vector::from_list at p19-context-scratch-vector.bot:17:30; call of list at p19-context-scratch-vector.bot:17:61
+  exits of activation:
+    result at the end: live 
+  exits of iteration of the fold at p19-context-scratch-vector.bot:18:1:
+    next at p19-context-scratch-vector.bot:18:1: live acc, the position of the fold at p19-context-scratch-vector.bot:18:1
+unit handle<int>
+  summary: keeps nothing it is given
+  exits of activation:
+    result at p19-context-scratch-vector.bot:11:10: live 
+  exits of iteration of the loop at p19-context-scratch-vector.bot:13:5:
+    next at p19-context-scratch-vector.bot:13:5: live i, s, the position of the loop at p19-context-scratch-vector.bot:13:5

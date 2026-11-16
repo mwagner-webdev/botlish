@@ -1,0 +1,11 @@
+unit <program>
+  summary: keeps nothing it is given
+  producer call of std::str::encode_utf8 (list) at p16-foreign-noescape.bot:12:35
+    activation: confined
+    segment: confined
+  producer call of std::abi::bytes::from_list (struct) at p16-foreign-noescape.bot:12:8
+    activation: confined
+    segment: confined
+    coexists with: call of std::str::encode_utf8 at p16-foreign-noescape.bot:12:35
+  exits of activation:
+    result at the end: live 

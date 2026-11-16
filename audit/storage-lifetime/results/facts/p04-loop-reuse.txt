@@ -1,0 +1,18 @@
+unit <program>
+  summary: keeps nothing it is given
+  exits of activation:
+    result at the end: live 
+unit work<int>
+  summary: keeps nothing it is given
+  producer Pair {left, right} (struct) at p04-loop-reuse.bot:14:13
+    activation: confined
+    iteration of the fold at p04-loop-reuse.bot:13:5: confined
+    segment: confined
+  producer call of std::int::to_string (str) at p04-loop-reuse.bot:15:13
+    activation: confined
+    iteration of the fold at p04-loop-reuse.bot:13:5: confined
+    segment: confined
+  exits of activation:
+    result at p04-loop-reuse.bot:12:8: live 
+  exits of iteration of the fold at p04-loop-reuse.bot:13:5:
+    next at p04-loop-reuse.bot:13:5: live n, acc, the position of the fold at p04-loop-reuse.bot:13:5

@@ -1,0 +1,20 @@
+# c01 -- a pending operand: `twice(seed)` is evaluated before the yielding
+# call `inner(seed)` and consumed after it, so its value must survive the
+# callee's suspensions though no binding names it.
+import std::coroutine
+
+fn twice(n: int) -> int:
+    n * 2
+
+fn inner(n: int) -> int:
+    yield n
+    yield n + 1
+    n
+
+fn outer(seed: int) -> int:
+    twice(seed) + inner(seed)
+
+coroutine {step, first} = outer(3)
+r1 = step()
+r2 = step()
+[first, r1, r2]
