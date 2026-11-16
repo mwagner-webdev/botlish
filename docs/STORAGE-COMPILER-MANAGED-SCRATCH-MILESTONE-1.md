@@ -905,7 +905,20 @@ for a lowering that would defer across a loop.
 
 **The lifetime oracle** is not an oracle of the storage mechanism, but the
 fixes of section 5 changed the analysis, so its checks were rerun.
-**[measurement]** «SLAUDIT»
+**[measurement]** Every result matches the committed record of
+STORAGE-LIFETIME-FACTS-MILESTONE-1 (`audit/storage-lifetime/results/`):
+`oracle.py selftest` passes; `fuzz.tcl -seeds 1-12 -count 40` gives 480
+programs, 1,087 suspensions and 6,061 verdicts, every one precise and none
+unsound; `-strings 0` gives 240 programs, 240 C frames and no violation;
+`persist.tcl` over the census, the audit's cases and the kiosk gives 15 frames
+and no violation; `reachability.tcl` (run with scratch storage off, since it
+checks the facts against the heap's own reachability: `-scratch-opt 0` is
+its one change) gives the same twelve shapes and no contradiction; and
+`mutate.tcl` kills all 26 of its mutants of `hir/lifetime.tcl`, each by the
+same tests as before. The three fixes therefore changed no verdict of the
+oracle's corpus; they change what the corpus did not reach (a let-through
+error's payload, a fresh result holding a parameter, a recursive
+component's reasons), which the three new tests pin.
 
 ## 20. GC-stress results
 
