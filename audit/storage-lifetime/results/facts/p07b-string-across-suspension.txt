@@ -1,0 +1,57 @@
+unit <program>
+  summary: keeps nothing it is given
+  exits of activation:
+    result at the end: live 
+unit worker<int>
+  summary: keeps nothing it is given
+  producer call of std::int::to_string (str) at p07b-string-across-suspension.bot:10:12
+    activation: confined
+    segment: escapes
+      - suspension: it is live across a suspension point
+  producer call of std::str::concat (str) at p07b-string-across-suspension.bot:10:12
+    activation: confined
+    segment: escapes
+      - suspension: it is live across a suspension point
+    coexists with: call of std::int::to_string at p07b-string-across-suspension.bot:10:12
+  producer call of std::int::to_string (str) at p07b-string-across-suspension.bot:11:12
+    activation: confined
+    segment: confined
+    coexists with: call of std::str::concat at p07b-string-across-suspension.bot:10:12; call of std::int::to_string at p07b-string-across-suspension.bot:10:12
+  producer call of std::str::concat (str) at p07b-string-across-suspension.bot:11:12
+    activation: confined
+    segment: confined
+    coexists with: call of std::str::concat at p07b-string-across-suspension.bot:10:12; call of std::int::to_string at p07b-string-across-suspension.bot:10:12; call of std::int::to_string at p07b-string-across-suspension.bot:11:12
+  suspension yield (call of coroutine#yield) at p07b-string-across-suspension.bot:12:5
+    live bindings: kept
+    objects kept: call of std::str::concat at p07b-string-across-suspension.bot:10:12; call of std::int::to_string at p07b-string-across-suspension.bot:10:12
+  exits of activation:
+    suspend at p07b-string-across-suspension.bot:12:5: live kept
+    result at p07b-string-across-suspension.bot:9:10: live 
+unit drive<int>
+  summary: keeps nothing it is given
+  producer closure (closure) at p07b-string-across-suspension.bot:17:9
+    activation: confined
+    iteration of the fold at p07b-string-across-suspension.bot:16:5: confined
+    segment: confined
+  producer call of coroutine#create (coroutine) at p07b-string-across-suspension.bot:17:9
+    activation: confined
+    iteration of the fold at p07b-string-across-suspension.bot:16:5: confined
+    segment: confined
+    coexists with: closure at p07b-string-across-suspension.bot:17:9
+  producer call of std::int::to_string (str) at p07b-string-across-suspension.bot:18:17
+    activation: confined
+    iteration of the fold at p07b-string-across-suspension.bot:16:5: confined
+    segment: confined
+    coexists with: call of coroutine#create at p07b-string-across-suspension.bot:17:9; closure at p07b-string-across-suspension.bot:17:9
+  exits of activation:
+    result at p07b-string-across-suspension.bot:15:9: live 
+  exits of iteration of the fold at p07b-string-across-suspension.bot:16:5:
+    next at p07b-string-across-suspension.bot:16:5: live n, acc, the position of the fold at p07b-string-across-suspension.bot:16:5
+unit the coroutine of worker constructed at p07b-string-across-suspension.bot:17:9
+  summary: keeps nothing it is given
+  suspension call (call of worker) at p07b-string-across-suspension.bot:17:35
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    suspend at p07b-string-across-suspension.bot:17:35: live 
+    result at p07b-string-across-suspension.bot:17:9: live 

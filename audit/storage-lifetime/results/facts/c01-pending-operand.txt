@@ -1,0 +1,45 @@
+unit <program>
+  summary: result may be fresh
+  producer call of coroutine#create (coroutine) at c01-pending-operand.bot:17:1
+    activation: confined
+    segment: confined
+  producer call of list (list) at c01-pending-operand.bot:20:1
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  exits of activation:
+    result at the end: live 
+unit twice<int>
+  summary: keeps nothing it is given
+  exits of activation:
+    result at c01-pending-operand.bot:6:9: live 
+unit inner<int>
+  summary: keeps nothing it is given
+  suspension yield (call of coroutine#yield) at c01-pending-operand.bot:10:5
+    live bindings: n
+    objects kept: 
+  suspension yield (call of coroutine#yield) at c01-pending-operand.bot:11:5
+    live bindings: n
+    objects kept: 
+  exits of activation:
+    suspend at c01-pending-operand.bot:10:5: live n
+    suspend at c01-pending-operand.bot:11:5: live n
+    result at c01-pending-operand.bot:9:9: live 
+unit outer<int>
+  summary: keeps nothing it is given
+  suspension call (call of inner) at c01-pending-operand.bot:15:19
+    live bindings: 
+    pending: the pending value of call of twice at c01-pending-operand.bot:15:5
+    objects kept: 
+  exits of activation:
+    suspend at c01-pending-operand.bot:15:19: live the pending value of call of twice at c01-pending-operand.bot:15:5
+    result at c01-pending-operand.bot:14:9: live 
+unit the coroutine of outer constructed at c01-pending-operand.bot:17:1
+  summary: keeps nothing it is given
+  suspension call (call of outer) at c01-pending-operand.bot:17:27
+    live bindings: 
+    objects kept: 
+  exits of activation:
+    suspend at c01-pending-operand.bot:17:27: live 
+    result at c01-pending-operand.bot:17:1: live 

@@ -1,0 +1,126 @@
+unit <program>
+  summary: keeps nothing it is given
+  exits of activation:
+    result at the end: live 
+  exits of iteration of the fold at p13-request-handler.bot:44:1:
+    next at p13-request-handler.bot:44:1: live sent, the position of the fold at p13-request-handler.bot:44:1
+unit raw<int>
+  summary: result may be fresh
+  producer call of std::int::to_string (str) at p13-request-handler.bot:16:26
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:15:7)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of std::str::concat (str) at p13-request-handler.bot:16:5
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:15:7)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::int::to_string at p13-request-handler.bot:16:26
+  producer call of std::str::concat (str) at p13-request-handler.bot:16:5
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:15:7)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::str::concat at p13-request-handler.bot:16:5; call of std::int::to_string at p13-request-handler.bot:16:26
+  exits of activation:
+    result at p13-request-handler.bot:15:7: live 
+unit parse<str, int>
+  summary: result may hold parameters line; result may be fresh
+  producer call of std::str::substring (str) at p13-request-handler.bot:22:12
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:18:9)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of std::str::substring (str) at p13-request-handler.bot:27:12
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:18:9)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::str::substring at p13-request-handler.bot:22:12
+  producer Request {verb, path, id} (struct) at p13-request-handler.bot:32:5
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:18:9)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::str::substring at p13-request-handler.bot:22:12; call of std::str::substring at p13-request-handler.bot:27:12
+  exits of activation:
+    fail at p13-request-handler.bot:21:9: live 
+    fail at p13-request-handler.bot:24:13: live 
+    fail at p13-request-handler.bot:26:13: live 
+    fail at p13-request-handler.bot:29:13: live 
+    fail at p13-request-handler.bot:31:13: live 
+    result at p13-request-handler.bot:18:9: live 
+unit respond<Request>
+  summary: result may hold parameters r; result may be fresh
+  producer call of std::str::concat (str) at p13-request-handler.bot:35:12
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:34:11)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of std::str::concat (str) at p13-request-handler.bot:35:12
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:34:11)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::str::concat at p13-request-handler.bot:35:12
+  producer call of std::int::to_string (str) at p13-request-handler.bot:35:77
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:34:11)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12
+  producer call of std::str::concat (str) at p13-request-handler.bot:35:12
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:34:11)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::int::to_string at p13-request-handler.bot:35:77
+  producer call of std::str::concat (str) at p13-request-handler.bot:35:12
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:34:11)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::int::to_string at p13-request-handler.bot:35:77
+  producer call of std::int::to_string (str) at p13-request-handler.bot:36:50
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:34:11)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::int::to_string at p13-request-handler.bot:35:77
+  producer call of std::str::concat (str) at p13-request-handler.bot:36:5
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:34:11)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::int::to_string at p13-request-handler.bot:35:77; call of std::int::to_string at p13-request-handler.bot:36:50
+  producer call of std::str::concat (str) at p13-request-handler.bot:36:5
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:34:11)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::int::to_string at p13-request-handler.bot:35:77; call of std::str::concat at p13-request-handler.bot:36:5; call of std::int::to_string at p13-request-handler.bot:36:50
+  producer call of std::str::concat (str) at p13-request-handler.bot:36:5
+    activation: escapes
+      - result: the unit's value (at p13-request-handler.bot:34:11)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::str::concat at p13-request-handler.bot:35:12; call of std::int::to_string at p13-request-handler.bot:35:77; call of std::str::concat at p13-request-handler.bot:36:5; call of std::str::concat at p13-request-handler.bot:36:5; call of std::int::to_string at p13-request-handler.bot:36:50
+  exits of activation:
+    result at p13-request-handler.bot:34:11: live 
+unit handle<int>
+  summary: keeps nothing it is given
+  producer call of raw (str) at p13-request-handler.bot:39:15
+    activation: confined
+    segment: confined
+  producer call of parse (struct) at p13-request-handler.bot:39:9
+    activation: confined
+    segment: confined
+    coexists with: call of raw at p13-request-handler.bot:39:15
+  producer call of respond (str) at p13-request-handler.bot:42:22
+    activation: confined
+    segment: confined
+    coexists with: call of parse at p13-request-handler.bot:39:9
+  exits of activation:
+    return at p13-request-handler.bot:41:13: live 
+    result at p13-request-handler.bot:38:10: live 

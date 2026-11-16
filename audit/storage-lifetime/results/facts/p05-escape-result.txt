@@ -1,0 +1,32 @@
+unit <program>
+  summary: keeps nothing it is given
+  exits of activation:
+    result at the end: live 
+  exits of iteration of the fold at p05-escape-result.bot:15:1:
+    next at p05-escape-result.bot:15:1: live acc, the position of the fold at p05-escape-result.bot:15:1
+unit make<int>
+  summary: result may be fresh
+  producer call of std::int::to_string (str) at p05-escape-result.bot:8:5
+    activation: escapes
+      - result: the unit's value (at p05-escape-result.bot:7:8)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of std::str::concat (str) at p05-escape-result.bot:8:5
+    activation: escapes
+      - result: the unit's value (at p05-escape-result.bot:7:8)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::int::to_string at p05-escape-result.bot:8:5
+  exits of activation:
+    result at p05-escape-result.bot:7:8: live 
+unit use_it<int>
+  summary: keeps nothing it is given
+  producer call of make (str) at p05-escape-result.bot:11:12
+    activation: confined
+    segment: confined
+  producer call of make (str) at p05-escape-result.bot:12:13
+    activation: confined
+    segment: confined
+    coexists with: call of make at p05-escape-result.bot:11:12
+  exits of activation:
+    result at p05-escape-result.bot:10:10: live 

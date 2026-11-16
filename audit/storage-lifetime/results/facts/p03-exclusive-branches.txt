@@ -1,0 +1,24 @@
+unit <program>
+  summary: keeps nothing it is given
+  exits of activation:
+    result at the end: live 
+  exits of iteration of the fold at p03-exclusive-branches.bot:13:1:
+    next at p03-exclusive-branches.bot:13:1: live acc, the position of the fold at p03-exclusive-branches.bot:13:1
+unit label<int>
+  summary: keeps nothing it is given
+  producer call of std::int::to_string (str) at p03-exclusive-branches.bot:8:9
+    activation: confined
+    segment: confined
+  producer call of std::str::concat (str) at p03-exclusive-branches.bot:8:9
+    activation: confined
+    segment: confined
+    coexists with: call of std::int::to_string at p03-exclusive-branches.bot:8:9
+  producer call of std::int::to_string (str) at p03-exclusive-branches.bot:10:9
+    activation: confined
+    segment: confined
+  producer call of std::str::concat (str) at p03-exclusive-branches.bot:10:9
+    activation: confined
+    segment: confined
+    coexists with: call of std::int::to_string at p03-exclusive-branches.bot:10:9
+  exits of activation:
+    result at p03-exclusive-branches.bot:6:9: live 

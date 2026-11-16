@@ -1,0 +1,46 @@
+unit <program>
+  summary: result may be fresh
+  producer call of collect (struct) at p06-retained-aggregate.bot:23:5
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of list (list) at p06-retained-aggregate.bot:24:1
+    activation: escapes
+      - result: the unit's value (at the end)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of collect at p06-retained-aggregate.bot:23:5
+  exits of activation:
+    result at the end: live 
+unit collect<int>
+  summary: result may be fresh
+  producer call of list (list) at p06-retained-aggregate.bot:14:40
+    activation: escapes
+      - result: the unit's value (at p06-retained-aggregate.bot:13:11)
+    segment: escapes
+      - inherited: it is not confined to the activation
+  producer call of std::mutable_vector::from_list (mutvec) at p06-retained-aggregate.bot:14:9
+    activation: escapes
+      - result: the unit's value (at p06-retained-aggregate.bot:13:11)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of list at p06-retained-aggregate.bot:14:40
+  producer call of std::int::to_string (str) at p06-retained-aggregate.bot:17:16
+    activation: escapes
+      - result: the unit's value (at p06-retained-aggregate.bot:13:11)
+    iteration of the loop at p06-retained-aggregate.bot:16:5: escapes
+      - inherited: it is not confined to the activation
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::mutable_vector::from_list at p06-retained-aggregate.bot:14:9; call of list at p06-retained-aggregate.bot:14:40; call of std::int::to_string at p06-retained-aggregate.bot:17:16
+  producer Kept {first, count} (struct) at p06-retained-aggregate.bot:21:5
+    activation: escapes
+      - result: the unit's value (at p06-retained-aggregate.bot:13:11)
+    segment: escapes
+      - inherited: it is not confined to the activation
+    coexists with: call of std::mutable_vector::from_list at p06-retained-aggregate.bot:14:9; call of list at p06-retained-aggregate.bot:14:40; call of std::int::to_string at p06-retained-aggregate.bot:17:16
+  exits of activation:
+    result at p06-retained-aggregate.bot:13:11: live 
+  exits of iteration of the loop at p06-retained-aggregate.bot:16:5:
+    next at p06-retained-aggregate.bot:16:5: live n, v, the position of the loop at p06-retained-aggregate.bot:16:5

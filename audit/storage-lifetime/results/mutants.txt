@@ -1,0 +1,28 @@
+# tclsh9.0 audit/storage-lifetime/tools/mutate.tcl
+handler-edge-dropped               killed by sl-mut-handler
+exceptional-successors-ignored     killed by sl-mut-handler
+error-edge-dropped                 killed by sl-mut-failing-call
+handled-errors-kept                killed by sl-p14-errors
+fold-back-edge-dropped             killed by sl-p08-independent, fuzz
+position-unread                    killed by sl-loop-position, sl-p08-independent, sl-p10-handle, fuzz
+pending-unreported                 killed by sl-pending-operand
+callee-held-ignored                killed by sl-held-by-callee
+return-not-a-sink                  killed by sl-p17-spelling, sl-spelling-return
+fail-not-a-sink                    killed by sl-mut-failing-call, sl-p14-errors
+yield-not-a-sink                   killed by sl-coroutine-capture, sl-mut-yield
+struct-holds-nothing               killed by sl-mut-aggregate, sl-p06-retained
+closure-holds-nothing              killed by sl-mut-closure
+result-params-ignored              killed by sl-mut-alias, sl-param-contents, sl-recursion, sl-specialization
+place-store-dropped                killed by sl-mut-context, sl-mut-place-param, sl-p06-retained
+unknown-call-trusted               killed by sl-mut-erased, sl-mut-unknown-call
+context-state-local                killed by sl-mut-context
+caller-values-local                killed by sl-mut-place-param
+caller-object-empty                killed by sl-param-contents
+messages-trusted                   killed by sl-message-kept
+thunk-captures-trusted             killed by sl-coroutine-capture
+recursion-one-round                killed by sl-recursion-swapped
+kind-filter-off                    killed by sl-kind-precision
+iteration-escape-unchecked         killed by sl-mut-loop-carried, sl-mut-place-param
+made-filter-everything             killed by sl-mut-across-suspension, sl-mut-overlap, sl-p02-simultaneous, sl-p07b-string
+static-closure                     killed by sl-closure-returns-capture
+exit 0

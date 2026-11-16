@@ -1954,6 +1954,61 @@ never touch x18. A Tcl test that needs coroutines, the collector around
 them or native counters carries `nativeCoroutines` (tests/helpers.tcl), a
 capability of the host target, not `nativeLinux`.
 
+## Storage lifetime facts (hir/lifetime.tcl)
+
+`hir::lifetime::analyze` (STORAGE-LIFETIME-FACTS-MILESTONE-1.md) computes,
+per used specialization instance, every producer's identity confinement
+-- `confined`, `escapes` or `unknown`, with reasons -- for its activation,
+each enclosing loop's iteration and its non-suspending segment; the
+liveness of every binding, pending operand, accumulator and loop position;
+and what every suspension point keeps. Keep it so:
+
+* Facts, not decisions: no backend, lowering or HIR field reads or holds
+  them today, and none may read them as a side channel; it is computed on
+  demand from the HIR and the specialization analysis, stored nowhere (no
+  registry, memo or process state). A consumer (a storage planner) asks for
+  it and decides placement, size and policy itself: never put a width,
+  budget, size, profitability cutoff or backend representation into a
+  verdict, and never let a fact depend on `hir/escape.tcl`, STRUCTOPTS or
+  `hir/transport.tcl`.
+* Unknown is an answer: a call through a function value, a C argument
+  without a borrowing contract, a resume message a coroutine may keep stay
+  `unknown`, never `confined`. No budget decides a fact; the solver's and
+  the summaries' guards raise an internal error, never answer.
+* One control flow: evaluation order is `hir::children`'s; a `handle`
+  protects exactly its own call; a call's error edge is the affine
+  analysis's rule (`calleeErrors`, `hir::completions::erasureFacts`,
+  `mayLetErasedThrough`); undeclared run-time failures have no edge (they
+  end the run). Places are `hir::mutvec::PlaceArgument`/`Path`'s; a
+  native's behavior comes from its registration (`resultShape`, `foreign`,
+  `extern`), and only the coroutine and context natives, `list`,
+  `mutable_vector#share` and `affine#register_cleanup` by identity.
+* The representation contract is conservative on purpose: a native's
+  result may be, or hold, any object its operands reach (plans and
+  substring regions keep their operands), narrowed only by kind (a value
+  of one kind is never an object of another). A caller's, a context's and a
+  message's objects stand for everything they hold (they contain
+  themselves). Containment is flow-insensitive; the may-have-been-made
+  filter only removes objects that cannot exist yet.
+* The walks over the program's nesting (`Eval`, `Seq`, `Call`, `Loop`,
+  `Handle`) carry the depth guard and are in
+  audit/depth-safe-nesting/census.tsv; every other walk is iterative.
+
+If you change hir/lifetime.tcl, or what it reads (the HIR node kinds, the
+specialization analysis's instances, error edges, places, the coroutine
+natives, a native's registration), run `tests/storage-lifetime.test`,
+`python3 -I audit/storage-lifetime/tools/oracle.py selftest`,
+`audit/storage-lifetime/tools/fuzz.tcl` (several seeds, and once with
+`-strings 0`: the C differential), `audit/storage-lifetime/tools/
+persist.tcl` over the census corpus, this audit's cases and the kiosk,
+`audit/storage-lifetime/tools/reachability.tcl` (native, GC stress) and
+`audit/storage-lifetime/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a detector its `!!` line
+names: update a mutant's text when you change the code it mutates, keeping
+it a mutant of the same rule), plus `tests/depth-safe-nesting.test` for a
+change to the guarded walks. `bench/storage-lifetime.tcl` regenerates the
+costs; `audit/storage-lifetime/tools/report.tcl` the corpus's fact reports.
+
 ## Coroutine fusion
 
 The native driver fuses coroutines (COROUTINE-FUSION-MILESTONE-1.md,

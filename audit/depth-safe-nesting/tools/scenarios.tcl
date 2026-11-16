@@ -21,6 +21,10 @@ set dsn::scenarios {
         set hir [surface::compile $source -warnings off]
         hir::interchange::decode [hir::interchange::encode $hir]
     }
+    lifetime {
+        set hir [surface::compile $source -warnings off]
+        hir::lifetime::analyze $hir
+    }
     lowerings {
         set hir [surface::compile $source -warnings off]
         core::ir::check [list block {} {*}[hir::lower $hir]]
