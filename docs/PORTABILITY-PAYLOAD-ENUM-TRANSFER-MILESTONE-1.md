@@ -792,6 +792,16 @@ the transfer tests on all four backends by `sourceAgree`):
 | tests/golden.test, tests/golden-duplicates.test (the regenerated manifest) | 9 of 9, 4 of 4 |
 | `cargo test --release --lib` (the whole native crate) | 359 of 359 |
 | `tests/local.tcl` narrowed to payload-enum-transfer, payload-enums, value-transfer, sendability, exhaustive-match and enums (both passes, the golden suites holding their ports on four backends, through the front-end cache) | 396 passed on interp and on compile; golden collections, exhaustive-match, structs-and-enums, representation, payload-enums: 208 of 208 on each backend |
+| `tests/local.tcl`, whole (296 Tcl test files on both passes, 122 golden suites on four backends; 6 580 s with 4 jobs) | Tcl tests: interp 9 904 passed, compile 9 899 passed, 2 failed on each; golden suites: 122 run, 0 failed (interp 5 763, compile 5 763, cranelift-generic 5 671, cranelift 5 773 tests) |
+| the 2 failures of that run (c-ffi.test's cf-link-directories, one test of external-tools.test), run again | c-ffi.test 123 of 123 on both passes, external-tools.test 49 of 49 on both |
+
+The two failures were this container's, not the change's: a test that
+runs main.tcl from outside the checkout links its startup crate with
+rustup's *default* toolchain, which here was `stable` (rustc 1.97.0)
+rather than the pinned 1.100.0 (E0514, "compiled by an incompatible
+version of rustc"). `bash tools/rust-toolchain.sh install` makes the pin
+the default, as AGENTS.md asks of a setup ("The default matters as much
+as the file"); run after it, both files pass whole.
 
 CI-RESULTS
 
