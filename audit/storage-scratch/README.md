@@ -60,4 +60,4 @@ native/Cargo.toml`. Each keeps its scratch files in a temporary directory.
 * `results/measurements.md` -- the measurements (`tools/measure.tcl`).
 * `results/costs.md`, `results/compile-cost.md`, `results/sysalloc.md`,
   `results/memcheck.txt`,
-  `results/fuzz.txt`, `results/mutants.txt` -- the runs the report cites.
+  `results/fuzz.txt`, `results/mutants.md` -- the runs the report cites.

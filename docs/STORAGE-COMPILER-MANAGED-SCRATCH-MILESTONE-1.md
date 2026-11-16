@@ -852,7 +852,34 @@ is now in every generated program.
 (the native ones rebuilt), and must be killed by a detector its `!!` line
 names -- a test of behavior, a GC-stress or poisoned run, an instrumented
 count, the fuzzer or a Rust test, never a comparison of generated text.
-**[test]** «MUTANTS»
+**[test]** `tclsh9.0 audit/storage-scratch/tools/mutate.tcl` (`results/mutants.md`):
+the unmutated copy passes every detector, and all 22 mutants apply, build
+and are killed by a detector their line names:
+
+| mutant | the broken rule | killed by |
+|---|---|---|
+| plan-any-verdict | every site taken as confined, whatever its verdict | ss-plan-escapes, ss-run-dest-stale, the fuzzer |
+| plan-result-any-reason | any escape taken as an escape through the result | ss-run-context-escape |
+| plan-outermost-region | a site placed in its outermost loop's region | ss-run-nested-loops-steady |
+| plan-suspending-unit | a unit that may suspend gets regions | ss-plan-p07b-suspension |
+| plan-recursive-destination | a recursive unit takes a destination | ss-plan-recursive |
+| lower-no-exit-reset | a frame's `ret` keeps its region | ss-nir-frame, ss-run-steady-state |
+| lower-no-error-exit-reset | a frame's error exit keeps its region | ss-run-error-steady |
+| lower-no-head-reset | a loop's head does not reset its region | ss-nir-loop, ss-run-steady-state, ss-run-nested-loops-steady |
+| lower-inner-reset-outer-mark | an inner loop resets to its enclosing loop's mark | ss-run-inner-region |
+| lower-dest-as-one | a result-only site always placed, destination or not | ss-run-dest-stale |
+| rt-reset-ignored | a reset moves the position nowhere | ss-run-steady-state, six Rust tests |
+| rt-bump-no-advance | an allocation does not advance the position | ss-run-census, ss-run-heap-reduction, six Rust tests |
+| rt-exit-ignores-dest | a frame's exit resets even with a destination | ss-run-census, ss-run-nested, the fuzzer |
+| rt-grow-replaces-live | a growth replaces the chunk holding live objects | two Rust tests |
+| rt-stress-no-collect | a placement under GC stress does not collect | ss-run-stress-collects |
+| rt-collector-reads-scratch | the collector marks scratch objects as heap ones | two Rust tests |
+| clif-request-not-cleared | a request outlives its helper | ss-run-request-cleared |
+| clif-dest-not-cleared | a destination outlives its call | ss-run-dest-stale |
+| nir-protocol-unchecked | the NIR validator accepts any request or destination | ss-nir-validator, a Rust test |
+| lifetime-error-let-through | an error a call lets through carries nothing out | sl-error-let-through, the fuzzer |
+| lifetime-fresh-holds-nothing | a callee's fresh result holds nothing it was given | sl-fresh-holds-parameter, the fuzzer |
+| lifetime-reasons-grow | a recursive component's reasons are the latest found | sl-recursive-reasons-converge |
 
 The brief's runtime mutants map onto these: reset one region too early
 (`lower-inner-reset-outer-mark`: an inner loop resets its enclosing loop's
