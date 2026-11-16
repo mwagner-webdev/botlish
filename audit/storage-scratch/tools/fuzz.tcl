@@ -430,6 +430,6 @@ dict for {reason n} $missed {
     incr recorded $n
 }
 if {[dict get $totals selected] > $recorded} {
-    puts "    not lowered, [expr {[dict get $totals selected] - $recorded}]: no function of the site's instance was lowered (inlined, or never compiled)"
+    puts "    not lowered, [expr {[dict get $totals selected] - $recorded}]: the site's instance has no canonical function (it is lowered only as a companion, its struct result in registers, or as an internal variant, its captures parameters: neither is framed)"
 }
 exit [expr {$failures || $invalid ? 1 : 0}]

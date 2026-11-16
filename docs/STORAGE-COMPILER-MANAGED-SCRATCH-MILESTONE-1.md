@@ -20,9 +20,81 @@ repository's pin), cranelift-codegen 0.135.2. Every command below runs
 from the checkout's root with `LANG=C.utf8 LC_ALL=C.utf8`, after
 `cargo build --release --manifest-path native/Cargo.toml`.
 
-«SEC1»
+## 1. Executive outcome and acceptance status
 
-«SEC2»
+**[measurement]** The native backend now places confined temporary Strings
+in compiler-managed scratch storage. On the census's positive workloads,
+at N = 10,000, scratch storage off and on:
+
+| workload | heap allocations off / on | heap bytes off / on | collections off / on | scratch reservations | peak in use | time on/off (best) |
+|---|---:|---:|---:|---:|---:|---:|
+| p01 sequential temporaries | 40,000 / 0 | 1,206,670 / 0 | 1 / 0 | 1 (16 KiB) | 128 B | 0.47 |
+| p04 loop-local temporary | 10,000 / 0 | 294,445 / 0 | 0 / 0 | 1 | 32 B | 1.25 (0.73 in three other runs; section 22) |
+| p13 request handler | 90,000 / 10,000 | 4,217,785 / 560,000 | 4 / 0 | 1 | 400 B | 0.56 |
+| p14 errors and early exits | 36,666 / 0 | 1,145,912 / 0 | 1 / 0 | 1 | 72 B | 0.61 |
+| p05 returned result | 40,000 / 0 | 1,255,568 / 0 | 1 / 0 | 1 | 144 B | 0.53 |
+| p12 actor messages (control) | 120,161 / 120,161 | 7,185,650 / 7,185,650 | 7 / 7 | 0 | -- | 1.01 |
+
+p13's remaining heap allocation is its `Request` struct, one per request;
+every String of a request is placed. p12 places nothing: every actor unit
+suspends (section 18). One 16 KiB chunk is reserved at the first placement
+and reused for every later one: no reservation and no growth after the
+first region, at every N.
+
+**[test]** Every census program gives the same outcome with and without
+scratch storage and on the interpreter, plain and under GC stress with
+released storage poisoned, with no root into released storage and no
+protocol error (`tests/scratch-storage.test`'s `ss-run-census`; the
+positive workloads also on the Tcl compiler, `ss-run-tcl-backends`; 40
+tests in all), and 240 generated programs agree on the interpreter, the
+Tcl compiler and four native configurations (section 19).
+Three defects of the lifetime facts the integration exposed were fixed
+in `hir/lifetime.tcl` (section 5).
+
+Acceptance criteria (brief section 25):
+
+| # | criterion | status | where |
+|---|---|---|---|
+| 1 | a storage-use plan consumes the HIR lifetime facts | met | section 4 |
+| 2 | semantic eligibility, representability and policy kept apart | met | sections 4, 15 |
+| 3 | a meaningful subset of confined temporary Strings placed natively | met | sections 6, 17 |
+| 4 | backing storage genuinely reused | met: one chunk, every later placement in reused bytes | sections 17, 23 |
+| 5 | fewer heap allocations on p01 and p04 | met: to zero | section 21 |
+| 6 | p13 reduced, remaining sites identified | met: 9 to 1 per request, the `Request` struct | section 17 |
+| 7 | sound across nested calls and overlapping values | met | sections 7, 13, 18 |
+| 8 | normal, early and exceptional exits | met | section 8 |
+| 9 | no premature reuse across suspension | met: suspending units get no region | sections 7, 18 |
+| 10 | GC tracing, marking and sweeping correct | met | sections 11, 20 |
+| 11 | aggressive GC stress passes | met | section 20 |
+| 12 | escaping values, aliases, aggregates, contexts, messages, foreign calls safe | met | section 18 |
+| 13 | growth and fallback never invalidate live objects | met | section 10 |
+| 14 | backing reservations measured apart from suballocations | met | sections 17, 23 |
+| 15 | value, error, ownership and context semantics unchanged | met: no front-end decision changes; outcomes equal | sections 14, 18, 19 |
+| 16 | interp, Tcl compiler, unoptimized and optimized native agree | met | sections 18, 19 |
+| 17 | independent tests and mutants detect unsafe reuse | met: 22 mutants killed, 240 fuzzed programs | section 19 |
+| 18 | compatible with strict bounded storage and execution owners | met by design: policy and placement are the provider's, regions are the plan's | sections 10, 26 |
+| 19 | no backend or language behavior weakened | met | sections 14, 24 |
+| 20 | regression and CI checks pass | «CI» | section 24 |
+
+## 2. Baseline allocation evidence
+
+**[measurement]** The baseline is rerun at the integration commit, as the
+brief asks: `audit/storage-scratch/tools/measure.tcl`'s "off" columns are the
+same programs with `-scratch-opt 0`, which compiles exactly as before this
+milestone (frames, requests and destinations are emitted only with scratch
+storage on). Per unit, between N = 1,000 and 10,000:
+
+| workload | census (STORAGE-STATIC-REUSE-CENSUS-1.md) | rerun, scratch off | rerun, scratch on |
+|---|---:|---:|---:|
+| p13 request handler | 9.00 allocations, 422.7 bytes | 9.00 allocations, 422.7 bytes | 1.00 allocation, 56.0 bytes |
+| p01 sequential temporaries | 4.00 allocations, 121.1 bytes | 4.00 allocations, 121.1 bytes | 0 |
+| p04 loop-local temporary | 1 allocation, about 28 bytes | 1.00 allocation, 29.6 bytes | 0 |
+| p12 actor round trip | 12.00 allocations, 718.1 bytes | 12.00 allocations, 718.1 bytes | 12.00, 718.1 bytes |
+
+The census's numbers reproduce exactly with scratch storage off. Its
+measurement tool (`audit/storage-static-reuse/tools/measure.tcl`) is a
+record of the census and is not changed; run today it measures the default,
+scratch storage on.
 
 ## 3. Current native allocation and GC architecture
 
@@ -40,8 +112,9 @@ from the checkout's root with `LANG=C.utf8 LC_ALL=C.utf8`, after
   (runtime/framewalk.rs; Windows' unwinder on Windows). Every object is
   found from a root by pointer.
 * Strings are flat leaves: `strobj.rs`'s header and UTF-8 text in one
-  block (`str_layout`), allocated by `Vm::alloc_str` and nothing else; the
-  collector never scans a String's text. Every String-producing helper the
+  block (`str_layout`); every String made at run time is allocated by
+  `Vm::alloc_str`; the collector never scans a String's text (no String
+  holds a reference). Every String-producing helper the
   plan targets (`inttostr`, `strcat`, `construct str flat`, `substr`,
   `substrproven`, `strappendchar`) allocates at most one String, its result,
   through `alloc_str`.
@@ -363,11 +436,14 @@ numbers and two fallback paths, all in one place (`Scratch::alloc`,
    for a construction, a heap kind the runtime refuses: "NATIVE BUG"), never
    its old text; the collector counts roots into released storage.
 
-**[probe]** The instruments detect a premature reset: each of the
-lifetime defects of section 5, reintroduced, gives a NATIVE BUG or EILSEQ
-under poisoning in 8 of 8 generated programs (the fuzzer's positive
-control); every surviving-candidate mutant of section 19 that releases a
-live String fails a test this way.
+**[probe]** The instruments detect a premature reset: each of the two
+unsound lifetime facts of section 5, reintroduced, gives a NATIVE BUG or
+EILSEQ under poisoning in 8 of 8 generated programs (the fuzzer's positive
+control). **[test]** The mutants of section 19 that release a live String
+(`plan-any-verdict`, `lower-dest-as-one`, `lower-inner-reset-outer-mark`,
+`rt-exit-ignores-dest`, `lifetime-error-let-through`,
+`lifetime-fresh-holds-nothing`) are killed by exactly this: a wrong value in
+a plain run, a NATIVE BUG or EILSEQ in a poisoned one.
 
 ## 13. Cross-function placement findings
 
@@ -595,7 +671,370 @@ after. `scratchtake` is a load, a store of 0 and a tag. `scratchmark`,
 `scratchreset` and `scratchexit` are runtime calls (`rt_scratch_mark`,
 `rt_scratch_reset`, `rt_scratch_exit`).
 
-«SEC17-24»
+## 17. Positive-workload results
+
+Reproduce: `tclsh9.0 audit/storage-scratch/tools/measure.tcl`
+(`results/measurements.md`, every N); per-site reports with
+`native::allocationReport HIR sites 1 ?-scratch-opt 0?`.
+
+**A. p01, sequential temporaries.** **[probe]** `label` has one activation
+region and four placed sites (two `to_string`s and two concatenations;
+section 16). **[measurement]** 4 heap allocations per call without scratch
+storage, 0 with it; 4 Strings placed per call, every one after the first
+call in reused bytes (39,996 of 40,000 at N = 10,000); one reservation; the
+peak in use 128 bytes at every N (a call's four Strings, side by side, then
+released at its exit). **[test]** `ss-plan-p01`, `ss-nir-frame`,
+`ss-run-heap-reduction`, `ss-run-steady-state` (the same reservation and peak
+at N = 10 and N = 2,000), `ss-run-census` (the value, also under GC stress).
+
+**B. p04, loop-local temporary.** **[probe]** `work`'s fold has a loop
+region (marked before its head, reset at its head and exit) and the frame's
+error exit releases it if an error leaves the loop. **[measurement]** 1 heap
+allocation per iteration without, 0 with; 2 regions per run (the frame and
+the loop) whatever N; 9,999 of 10,000 placements in reused bytes; peak in
+use 32 bytes at every N. The `Pair` struct beside the String is
+scalar-replaced, as before.
+
+**C. p13, request handler.** **[measurement]** Per request, without and with
+scratch storage (each site 200 times at N = 200; `allocationReport sites`):
+
+| site | operation | heap (off) | with scratch storage |
+|---|---|---:|---|
+| `raw`: `std::int::to_string(i)` (16:26) | `inttostr` | 27 B | placed, caller's region |
+| `raw`: the request line, `"GET /items/".concat(...).concat(" HTTP/1.1")` (16:5) | `construct str flat` (one fused chain) | 47 B | placed, caller's region |
+| `parse`: `substring(line, 0, 3)` (22:12) | `substr` | 28 B | placed, caller's region |
+| `parse`: `substring(line, 4, n - 9)` (27:12) | `substr` | 34 B | placed, caller's region |
+| `parse`: `Request {verb, path, id}` (32:5) | `structnew` | 56 B | **heap**: a struct (not representable; its `verb` and `path` fields hold placed Strings, which the confinement proof says it does not outlive) |
+| `respond`: `std::int::to_string(r.id * 2)` (35:77) | `inttostr` | 28 B | placed, caller's region |
+| `respond`: the body, a fused chain of four concatenations (35:12) | `construct str flat` | 61 B | placed, caller's region |
+| `respond`: `std::int::to_string(length(body))` (36:50) | `inttostr` | 27 B | placed, caller's region |
+| `respond`: the response, a fused chain (36:5) | `construct str flat` | 100 B | placed, caller's region |
+
+Every String is placed through a destination: `handle` confines each
+callee's result to its activation and passes 1, so a request's eight Strings
+(and its `Request`'s fields) live in `handle`'s region and are released when
+it returns, including the early `return 0` of the BadRequest handler. The
+remaining allocation per request is the struct: **not representable** (only
+Strings are placed). None remains because of an interprocedural return
+(every returned String is placed in the caller's region), an unsupported
+String operation, a construction plan (each fused chain is one placed
+`construct`), an unknown size (sizes are the provider's, at run time) or
+another backend limitation. Peak in use: 384 bytes per request (400 at
+N = 10,000, whose Strings have more digits); one reservation at every N;
+79,990 of 80,000 placements in reused bytes. **[inference]** A zero-heap
+steady state for p13 needs structs placed (section 26); this milestone does
+not claim one.
+
+**D. p14, errors and early exits.** **[measurement]** 3.67 heap allocations
+per unit without, 0 with; 2 regions per unit (the frames of `check` and
+`early`), peak in use 72 bytes at every N. **[test]** p14 covers normal
+return, early `return`, a declared failure carrying a payload computed from
+a placed String (`fail TooBig {limit: std::str::length(s)}`: the payload is
+an Int, so the String dies at the `fail`) and its handling in the caller;
+`ss-run-exits` adds `break`, `continue` and a propagated failure, and
+`ss-run-error-steady` shows no storage left occupied after failing calls
+(the same peak at N = 40 and N = 400). A payload String that a handler
+needs is never placed in the failing unit's region: an error a call lets
+through escapes the unit (section 5's first fix, `sl-error-let-through`).
+
+## 18. Negative-workload results
+
+**[test]** `tests/scratch-storage.test` holds the census's negative cases
+and the brief's additional ones; **[measurement]** the census rows below are
+heap allocations without and with scratch storage at the cases' own sizes,
+Strings placed, and the stale roots and protocol errors of a GC-stress run
+(`ss-run-census` asserts the zeros and that every outcome equals interp's
+and the native run without scratch storage, plain and under GC stress):
+
+| case | required behavior | how it holds | heap off / on | placed | stale / protocol |
+|---|---|---|---:|---:|---:|
+| p02 simultaneous temporaries | never overlay live storage | both selected for one activation region: bump allocation gives each its own bytes (`ss-plan-p02-simultaneous`) | 3,000 / 0 | 3,000 | 0 / 0 |
+| p05 returned result | never reset the callee's storage while the caller needs it | `make` places its result in `use_it`'s region through a destination; `make`'s exit leaves it there (`ss-plan-p05-returned`) | 4,000 / 0 | 4,000 | 0 / 0 |
+| p06 retained aggregate | never recycle what the vector holds | the pushed Strings escape the loop: rejected (`ss-plan-p06-retained`) | 1,003 / 1,003 | 0 | 0 / 0 |
+| p07b suspended String | never reset a value needed after resumption | the worker may suspend: no region at all; the driver's own loop keeps its region (`ss-plan-p07b-suspension`) | 5,000 / 4,000 | 1,000 | 0 / 0 |
+| p08 independent coroutines | never overlap persistent state | both coroutines' units suspend: no region; nothing placed | 1 / 1 | 0 | 0 / 0 |
+| p11, p19 context-owned state | context data is never scratch | nothing reaching an installed context is selected (`ss-plan-p11-p19-context`) | 5 / 5, 5 / 5 | 0 | 0 / 0 |
+| p12 actor messages | never recycle what a mailbox or host retains | every actor unit suspends; no message is selected (`ss-plan-p12-actors`) | 2,561 / 2,561 | 0 | 0 / 0 |
+| p16 foreign noescape | keep the noescape contract | the bytes lent to C are byte storage, never placed (the plan: "not representable"); the exposure is the C FFI's, unchanged; outcome unchanged on both native runs (interp refuses the C call) | 0 / 0 | 0 | 0 / 0 |
+| p16b foreign captures | FOREIGN-BORROW stays a rejection | still rejected by the compiler, with the same diagnostic (no plan) | -- | -- | -- |
+| p03 exclusive branches | (positive in the census; a limitation here) | the branches' concatenations are materialized at the join: not matched (section 25) | 3,000 / 2,000 | 1,000 | 0 / 0 |
+
+p07, p09, p10, p10b, p15, p17 and p18 place nothing and agree likewise.
+
+**[test]** The brief's additional negative cases:
+
+| case | test |
+|---|---|
+| immutable aliases | `ss-run-nested` (an outer String bound twice, read after the callees' resets), `ss-plan-program-mutations` |
+| nested regions | `ss-run-inner-region`, `ss-run-nested-loops-steady` |
+| recursive calls | `ss-plan-recursive`, `ss-run-nested` |
+| closure captures | `ss-run-closures`, `ss-plan-escapes`, `ss-plan-program-mutations` (`closure`) |
+| unknown function values | `ss-plan-escapes`, `ss-plan-program-mutations` (`unresolved`), `ss-run-dest-stale` |
+| a returned String that shares or retains an operand | `ss-plan-program-mutations` (`retained`: a callee that may return its argument) |
+| an outer region surviving an inner failure | `ss-run-exits`, `ss-run-error-steady`, `ss-run-stress-variety` |
+| a String read after a collection | every GC-stress run (a collection before every allocation, placements included: `ss-run-stress-collects`) |
+| repeated grow and fallback cycles | `ss-run-growth`, `ss-run-fallback-large`, `ss-run-fallback-capacity`, `ss-run-stress-variety` |
+| several native threads with separate Vms | `ss-run-vms` |
+| suspension | `ss-run-coroutines`, `ss-plan-p07b-suspension` |
+| a standalone executable | `ss-run-executable` |
+
+**[test]** Allocation-path mutations (brief section 17): `ss-plan-program-mutations`
+takes one placed String (`t = std::int::to_string(k).concat("x")` in a
+fold) and changes only how it is used. The plan's decision and verdict for
+the concatenation, and the agreement of every run:
+
+| mutation | decision | verdict |
+|---|---|---|
+| (the base) | selected, its iteration's region | confined |
+| returned through the fold | rejected | escapes |
+| pushed into a vector that outlives the loop | rejected | escapes |
+| captured by a closure the fold carries out | rejected | unknown |
+| retained through a call that may return it | rejected | escapes |
+| read after a yield | rejected (the unit may suspend) | confined |
+| beside a second String | both selected, one region | confined |
+| passed to a function value | rejected | unknown |
+| stored into a context | rejected | escapes |
+
+Every one of the nine programs gives the same value natively with and
+without scratch storage and on interp. Nothing that does not compile
+compiles, or the reverse: scratch storage is a lowering of an accepted
+program only.
+
+## 19. Independent and mutation-testing evidence
+
+**The differential fuzzer** (`audit/storage-scratch/tools/fuzz.tcl`): its
+own generator (no compiler code) writes programs whose helpers build,
+return, box, list, fail with, relay, recurse over and pass Strings through
+function values, with loops left by `continue`, nested loops, handled and
+let-through failures, closures, and Strings kept in vectors that outlive
+their loops; every kept String is folded into the value. Each runs on
+interp (the oracle), on the Tcl compiler and natively in four modes: scratch
+storage on, under GC stress (released storage poisoned), with 48-byte
+chunks (growth on every path), and with scratch storage off.
+**[measurement]** «FUZZ»
+
+**[probe]** Positive control: with each of the two unsound lifetime facts of
+section 5 reintroduced, 8 of 8 generated programs fail (NATIVE BUG or
+EILSEQ under poisoning). Before the fuzzer called a helper through a
+function value no specialization makes exact, it missed the fresh-result
+defect (the companion and exact-callable specialization hid it): that call
+is now in every generated program.
+
+**The mutants** (`audit/storage-scratch/tools/mutate.tcl`,
+`tools/mutants.txt`): each breaks one rule in a private copy of the tree
+(the native ones rebuilt), and must be killed by a detector its `!!` line
+names -- a test of behavior, a GC-stress or poisoned run, an instrumented
+count, the fuzzer or a Rust test, never a comparison of generated text.
+**[test]** «MUTANTS»
+
+The brief's runtime mutants map onto these: reset one region too early
+(`lower-inner-reset-outer-mark`: an inner loop resets its enclosing loop's
+region; `plan-any-verdict`: a String released with a region it outlives),
+omit a reset on an error edge
+(`lower-no-error-exit-reset`), reuse an overlapping region
+(`rt-bump-no-advance`), free backing during a live alias
+(`plan-any-verdict`, `lower-dest-as-one`, `rt-exit-ignores-dest`), permit
+relocation of live backing (`rt-grow-replaces-live`), miscount active region
+ownership (`rt-exit-ignores-dest`, `clif-dest-not-cleared`), suppress
+collection at an optimized site (`rt-stress-no-collect`). "Fail to trace an
+outgoing pointer" has no counterpart: a placed object is a String, which
+has none; the collector's own scratch rule is `rt-collector-reads-scratch`.
+
+**[inspection]** One mutant considered is not in the catalog, because no
+program we could write kills it: taking an instruction matched through a
+binding's use as the site's even where the use runs in a deeper loop.
+Lowering materializes a binding that a deeper loop reads before that loop (eagerly,
+at the binding: **[probe]** the NIR of a binding read only inside an inner
+loop with its own region has the concatenation before the inner loop's
+mark), so the check never rejects an instruction today; it stays as a guard
+for a lowering that would defer across a loop.
+
+**The lifetime oracle** is not an oracle of the storage mechanism, but the
+fixes of section 5 changed the analysis, so its checks were rerun.
+**[measurement]** «SLAUDIT»
+
+## 20. GC-stress results
+
+**[test]** Under `BOTLISH_NATIVE_GC_STRESS=1` (a collection before every
+allocation, scratch placements included; released scratch storage
+poisoned): every census program (`ss-run-census`), the exits
+(`ss-run-exits`), nested regions and destinations (`ss-run-nested`,
+`ss-run-inner-region`, `ss-run-dest-stale`, `ss-run-context-escape`),
+closures, coroutines (fused and unfused), growth, and a long mixed run
+(`ss-run-stress-variety`: short Strings and Strings over a 32-byte object
+limit alternating, so every other one falls back; empty Strings; heap
+Strings kept across the loop between placed ones; nested calls; a failure
+handled every fifth call; 64-byte chunks) -- every outcome equal to interp's,
+no stale root, no protocol error, and the storage reserved (2 chunks, 192
+bytes) and in use (128 bytes) the same at N = 60 and N = 240.
+`ss-run-stress-collects`: a stress run collects as often with scratch
+storage as without (p01: 4,000 collections both ways; p13: 1,800; p14:
+3,666). The fuzzer's stress mode ran every generated program the same way.
+
+**[probe]** Memory-safety instrumentation, kept apart from the functional
+evidence: valgrind 3.22's memcheck on standalone executables of p01, p04,
+p05, p13 and p14, plain and under GC stress
+(`audit/storage-scratch/tools/memcheck.tcl`,
+`results/memcheck.txt`): no error, every run status 0. Memcheck sees a
+swept heap object read through a lost root, or an invalid free, as an
+error; it cannot see a read of released scratch storage (chunks are
+ordinary allocated memory to it), which is what the poisoning instruments.
+
+**[measurement]** No permanent growth when the workload is bounded: one
+reservation (16 KiB) and the same peak in use at every N for every positive
+workload (section 23); 2 reservations under 64-byte chunks at N = 60 and
+240 alike. No retention of dead heap objects: a placed String is a leaf, so
+nothing in scratch storage keeps a heap object alive; GC-stress peaks of the
+lifetime audit's reachability shapes are unchanged
+(`audit/storage-lifetime/tools/reachability.tcl`, run with scratch storage
+off, since it checks the facts against the heap).
+
+## 21. Allocation-count comparisons
+
+**[measurement]** Heap allocations without and with scratch storage
+(`results/measurements.md`; `results/plans/summary.md` for what the plan
+selected; census cases at their own sizes, section 18):
+
+| workload | N = 1 | N = 10 | N = 100 | N = 1,000 | N = 10,000 |
+|---|---:|---:|---:|---:|---:|
+| p01 | 4 / 0 | 40 / 0 | 400 / 0 | 4,000 / 0 | 40,000 / 0 |
+| p04 | 1 / 0 | 10 / 0 | 100 / 0 | 1,000 / 0 | 10,000 / 0 |
+| p13 | 9 / 1 | 90 / 10 | 900 / 100 | 9,000 / 1,000 | 90,000 / 10,000 |
+| p14 | 3 / 0 | 36 / 0 | 366 / 0 | 3,666 / 0 | 36,666 / 0 |
+| p05 | 4 / 0 | 40 / 0 | 400 / 0 | 4,000 / 0 | 40,000 / 0 |
+| p12 | 173 / 173 | 281 / 281 | 1,361 / 1,361 | 12,161 / 12,161 | 120,161 / 120,161 |
+
+The heap counts are the Botlish managed heap's, every runtime helper's
+allocations included (they all allocate through the Vm's heap); scratch
+reservations are the provider's system allocations, counted apart (one per
+run here). Scratch placements are not heap allocations: they are counted
+as `scratch allocations` (the same number as the heap allocations they
+replace, in p01, p04, p05 and p14).
+
+**[measurement]** The fuzzer's corpus (240 programs, section 19): «FUZZHEAP».
+
+**[inference]** What the counts do not include: the 16 KiB chunk per Vm
+(reserved once, kept until the run ends), the frames' register and the two
+32-bit Vm words. A program that places nothing reserves nothing.
+
+## 22. Performance and latency measurements
+
+**[measurement]** Times are the native driver's `bench` (the program
+JIT-compiled once, then run R times in one process; compile time excluded),
+at N = 10,000, R = 7, on a 4-core x86-64 container with nothing else
+running (other jobs were paused for the timed runs: an earlier run beside
+a mutation harness gave p04 and p14 times 25% and 3% worse with scratch
+storage, and the reruns below did not reproduce either). Best and median
+per run, and per unit (`results/measurements.md`):
+
+| workload | off: best / median, us | on: best / median, us | per unit off / on, ns (best) | on/off (best) | on/off (median) |
+|---|---:|---:|---:|---:|---:|
+| p01 | 1,415 / 1,500 | 667 / 691 | 141 / 67 | 0.47 | 0.46 |
+| p04 | 275 / 307 | 344 / 354 | 28 / 34 | 1.25 | 1.15 |
+| p13 | 5,086 / 5,150 | 2,873 / 2,936 | 509 / 287 | 0.56 | 0.57 |
+| p14 | 1,939 / 2,016 | 1,191 / 1,228 | 194 / 119 | 0.61 | 0.61 |
+| p05 | 1,418 / 1,523 | 750 / 766 | 142 / 75 | 0.53 | 0.50 |
+| p12 (nothing placed) | 33,104 / 33,552 | 33,305 / 33,550 | 3,310 / 3,330 | 1.01 | 1.00 |
+
+**[measurement]** p04 at N = 10,000 runs for about 0.3 ms, too short to
+time reliably here: three other measurements of the same program at the
+same size (two runs of the cost probe and a separate one, best of 9 or 11)
+gave 0.73, 0.73 and 0.74 (on/off, best); the table's run gave 1.25.
+At sizes long enough to time (`results/costs.md`):
+
+| p04, N | collections (off) | per iteration off / on, ns (best of 9) |
+|---:|---:|---:|
+| 10,000 | 0 | 28.7 / 21.0 |
+| 100,000 | 2 | 37.8 / 21.3 |
+| 1,000,000 | 29 | 42.7 / 22.0 |
+
+**Where the time goes.** **[measurement]** The cost probe
+(`tools/costs.tcl`: one function called 100,000 times, placing K Strings per
+call):
+
+| K | collections (off) | (on - off) per call, ns (best of 9) | saved per placed String, ns |
+|---:|---:|---:|---:|
+| 0 (a frame and an empty loop region, nothing placed) | 0 | +11.4 | -- |
+| 1 | 2 | -15.2 | 15.2 |
+| 2 | 5 | -41.3 | 20.7 |
+| 4 | 11 | -87.3 | 21.8 |
+| 8 | 22 | -181.1 | 22.6 |
+
+**[inference]** From these:
+
+* *Region bookkeeping* is the cost: a frame is a mark, a reset (two
+  runtime calls) and the error exit's registration; a loop region a mark
+  and a reset per iteration. About 11 ns for the five runtime calls of
+  K = 0, about 2 ns each. They are calls into `rt_scratch_mark`,
+  `rt_scratch_reset` and `rt_scratch_exit`, not inline code: inlining the
+  position's load and store (the Vm word is at a fixed offset, as the
+  request and destination already are) is the obvious next step.
+* *The saving* per placed String is the heap path's cost -- the system
+  allocator, the heap's object list, its share of every collection's mark
+  and sweep -- against a bump of a position. It is 15 to 23 ns here, and
+  grows with the heap side's collections (the K = 1 row's two collections
+  against the K = 8 row's 22).
+* So one placed String already pays for its frame, and a function with
+  several placed Strings per region gains most (p01: four per frame, 0.47;
+  p13: eight per request region, 0.56 including its remaining struct
+  allocation).
+* *GC integration* costs nothing outside GC stress: a placement never
+  collects, and the collector's address check is two comparisons per
+  pointer it pops (`contains`'s bounds first). *Root management* is
+  unchanged: no root is added (a mark is a small Int), and the stack maps
+  are the same. *Lost native optimizations*: none observed (the functions
+  that get frames already call runtime helpers). *Placement*: the innermost-region rule puts a reset at every
+  loop iteration even when the loop places one small String, which is
+  p04's whole cost at sizes where its heap side never collects.
+
+**Latency.** **[measurement]** The harness times whole runs, not single
+requests: the spread of R runs (best to worst) is the distribution it can
+measure reliably. With scratch storage on, the spreads are narrower (p01:
+667-733 us against 1,415-2,434; p13: 2,873-3,166 against 5,086-5,822),
+which **[inference]** is the collections the heap side runs in some runs and
+not others (p13 off: 4 collections per run at N = 10,000, on: none). A
+per-request latency distribution needs a per-request clock in the program,
+which Botlish does not offer (no clock without a context); it is not
+measured.
+
+**Compile time.** **[measurement]** Native lowering of an already-built
+HIR, scratch storage off and on, best of 3 (`tools/compile-cost.tcl`,
+`results/compile-cost.md`): p01 7 and 9 ms; p13 16 and 22 ms; the 2048
+demo 431 and 519 ms (+20%); the CSV export application 1,284 and 1,417 ms
+(+10%); p12 and the event loop's fairness program (4.9 s and 4.4 s
+lowerings) within their noise. **[inference]** The added time is
+`hir::lifetime::analyze` and the plan, which run for every native lowering
+with scratch storage on; it is a small part of the larger programs'
+lowering, and the facts are computed once per lowering, stored nowhere.
+
+## 23. Memory-use measurements
+
+**[measurement]** Scratch storage per run (`results/measurements.md`):
+
+| workload | reservations | peak reserved | peak in use, N = 1 | peak in use, N = 10,000 | growths | fallbacks |
+|---|---:|---:|---:|---:|---:|---:|
+| p01 | 1 | 16,384 B | 128 B | 128 B | 0 | 0 |
+| p04 | 1 | 16,384 B | 32 B | 32 B | 0 | 0 |
+| p13 | 1 | 16,384 B | 384 B | 400 B | 0 | 0 |
+| p14 | 1 | 16,384 B | 72 B | 72 B | 0 | 0 |
+| p05 | 1 | 16,384 B | 128 B | 144 B | 0 | 0 |
+
+The peak in use depends on the Strings' lengths (more digits at larger N),
+never on the number of iterations or requests: no permanent growth.
+
+**[measurement]** Whole-process memory, the peak resident set of a
+standalone executable at N = 10,000 (python3's `resource.getrusage` of the
+child): p01 12,912 KB off and 12,916 KB on; p13 12,952 and 12,912; p14
+12,948 and 12,924; p12 12,924 and 12,928. **[inference]** The difference is
+within the measurement's noise: the process's footprint is the runtime's
+and the heap's 1 MB collection threshold, and these workloads' heaps never
+grow past it far enough for the avoided allocations to show in the resident
+set. A workload with a larger live heap per request would show the
+difference the collection counts already do.
+
+## 24. Existing regression and CI results
+
+«SEC24»
 
 ## 25. Known limitations
 
@@ -623,6 +1062,12 @@ after. `scratchtake` is a load, a store of 0 and a tag. `scratchmark`,
 * **Companion, region, `fields` and internal variants have no frame.** A
   String such a variant builds stays on the heap, and a call through a
   function value reaches the generic instance, which takes no destination.
+  **[measurement]** In the fuzzer's corpus this is the largest gap: of
+  3,563 sites the plan selected, «NOTLOWERED» are in instances lowered only
+  as a companion (a struct result returned in registers) or an internal
+  variant (a closure's captures passed as parameters), and «NOTEMITTED»
+  have no instruction of their own (the inner sites of a fused
+  concatenation, whose one `construct` is placed, and virtual Strings).
 * **Construction plans' own objects.** A unit whose result is a String
   plan (`StringPlan`) returns a heap object; its pieces may be placed, the
   plan object is not.
@@ -646,14 +1091,18 @@ after. `scratchtake` is a load, a store of 0 and a tag. `scratchmark`,
 ## 26. Recommended next milestone
 
 **[inference]** The measurements (sections 17, 21-23) say compiler-managed
-reuse is worth having where temporaries are many and short-lived: it
-removes allocations and collections without measurable cost per placed
-String, and the steady state needs one chunk. The remaining heap traffic of
-the positive workloads is not Strings but structs (p13's `Request`) and
-what coroutine bodies build (p07b, p12). In that light:
+reuse is worth having where temporaries are many and short-lived: a placed
+String saves 15 to 23 ns of heap allocation and collection, a frame costs
+about 11 ns of runtime calls, and the steady state needs one chunk. The
+remaining heap traffic of the positive workloads is not Strings but structs
+(p13's `Request`) and what coroutine bodies build (p07b, p12); in generated
+programs, Strings in companion and internal variants. In that light:
 
-1. **STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-2** first: place confined
-   structs whose fields are Ints or placed Strings (the collector already
+1. **STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-2** first: inline the
+   mark and reset (the position as Vm words at fixed offsets, as the
+   request and destination already are), frame companion and internal
+   variants, place confined structs whose fields are Ints or placed
+   Strings (the collector already
    skips scratch addresses; a placed struct with a heap reference needs a
    trace of scratch objects, or the restriction that every reference it
    holds is itself placed or static), match deferred constructions at

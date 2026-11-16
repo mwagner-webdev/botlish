@@ -11,11 +11,11 @@ The native backend (cranelift), each size run once per configuration; "off" is `
 | 10 | 40 / 0 | 1090 / 0 | 0 / 0 | 0 / 0 | 40 | 1280 | 36 | 10 | 1 | 0 | 16384 | 128 | 0 | 0 / 0 | yes |
 | 100 | 400 / 0 | 11270 / 0 | 0 / 0 | 0 / 0 | 400 | 12800 | 396 | 100 | 1 | 0 | 16384 | 128 | 0 | 0 / 0 | yes |
 | 1000 | 4000 / 0 | 116670 / 0 | 0 / 0 | 0 / 0 | 4000 | 128000 | 3996 | 1000 | 1 | 0 | 16384 | 128 | 0 | 0 / 0 | yes |
-| 10000 | 40000 / 0 | 1206670 / 0 | 1 / 0 | 574 / 0 | 40000 | 1280000 | 39996 | 10000 | 1 | 0 | 16384 | 128 | 0 | 0 / 0 | yes |
+| 10000 | 40000 / 0 | 1206670 / 0 | 1 / 0 | 570 / 0 | 40000 | 1280000 | 39996 | 10000 | 1 | 0 | 16384 | 128 | 0 | 0 / 0 | yes |
 
 Marginal per unit between N = 1000 and 10000: heap allocations 4.00 off, 0.00 on; scratch reservations 0.0000 on.
-Time at N = 10000, 7 runs each: off best 2245 us, median 2437 us (spread 2245-3483); on best 1199 us, median 1219 us (spread 1199-1346); per unit 0.224 us off, 0.120 us on (best), on/off 0.53 (best), 0.50 (median).
-Peak resident set of a standalone executable at N = 10000: 12912 KB off, 12916 KB on.
+Time at N = 10000, 7 runs each: off best 1415 us, median 1500 us (spread 1415-2434); on best 667 us, median 691 us (spread 667-733); per unit 0.141 us off, 0.067 us on (best), on/off 0.47 (best), 0.46 (median).
+Peak resident set of a standalone executable at N = 10000: 12936 KB off, 12940 KB on.
 
 ## loop (p04-loop-reuse)
 
@@ -28,8 +28,8 @@ Peak resident set of a standalone executable at N = 10000: 12912 KB off, 12916 K
 | 10000 | 10000 / 0 | 294445 / 0 | 0 / 0 | 0 / 0 | 10000 | 320000 | 9999 | 2 | 1 | 0 | 16384 | 32 | 0 | 0 / 0 | yes |
 
 Marginal per unit between N = 1000 and 10000: heap allocations 1.00 off, 0.00 on; scratch reservations 0.0000 on.
-Time at N = 10000, 7 runs each: off best 297 us, median 306 us (spread 297-472); on best 204 us, median 210 us (spread 204-253); per unit 0.030 us off, 0.020 us on (best), on/off 0.69 (best), 0.69 (median).
-Peak resident set of a standalone executable at N = 10000: 12944 KB off, 12936 KB on.
+Time at N = 10000, 7 runs each: off best 275 us, median 307 us (spread 275-459); on best 344 us, median 354 us (spread 344-459); per unit 0.028 us off, 0.034 us on (best), on/off 1.25 (best), 1.15 (median).
+Peak resident set of a standalone executable at N = 10000: 12916 KB off, 12912 KB on.
 
 ## request (p13-request-handler)
 
@@ -39,11 +39,11 @@ Peak resident set of a standalone executable at N = 10000: 12944 KB off, 12936 K
 | 10 | 90 / 10 | 3985 / 560 | 0 / 0 | 0 / 0 | 80 | 3840 | 72 | 40 | 1 | 0 | 16384 | 384 | 0 | 0 / 0 | yes |
 | 100 | 900 / 100 | 40585 / 5600 | 0 / 0 | 0 / 0 | 800 | 38400 | 792 | 400 | 1 | 0 | 16384 | 384 | 0 | 0 / 0 | yes |
 | 1000 | 9000 / 1000 | 413785 / 56000 | 0 / 0 | 0 / 0 | 8000 | 384000 | 7992 | 4000 | 1 | 0 | 16384 | 384 | 0 | 0 / 0 | yes |
-| 10000 | 90000 / 10000 | 4217785 / 560000 | 4 / 0 | 2347 / 0 | 80000 | 3952000 | 79990 | 40000 | 1 | 0 | 16384 | 400 | 0 | 0 / 0 | yes |
+| 10000 | 90000 / 10000 | 4217785 / 560000 | 4 / 0 | 1589 / 0 | 80000 | 3952000 | 79990 | 40000 | 1 | 0 | 16384 | 400 | 0 | 0 / 0 | yes |
 
 Marginal per unit between N = 1000 and 10000: heap allocations 9.00 off, 1.00 on; scratch reservations 0.0000 on.
-Time at N = 10000, 7 runs each: off best 8014 us, median 8634 us (spread 8014-9231); on best 2974 us, median 3057 us (spread 2974-7218); per unit 0.801 us off, 0.297 us on (best), on/off 0.37 (best), 0.35 (median).
-Peak resident set of a standalone executable at N = 10000: 12952 KB off, 12912 KB on.
+Time at N = 10000, 7 runs each: off best 5086 us, median 5150 us (spread 5086-5822); on best 2873 us, median 2936 us (spread 2873-3166); per unit 0.509 us off, 0.287 us on (best), on/off 0.56 (best), 0.57 (median).
+Peak resident set of a standalone executable at N = 10000: 12912 KB off, 12944 KB on.
 
 ## errors (p14-errors-early-exit)
 
@@ -53,11 +53,11 @@ Peak resident set of a standalone executable at N = 10000: 12952 KB off, 12912 K
 | 10 | 36 / 0 | 1022 / 0 | 0 / 0 | 0 / 0 | 36 | 1232 | 34 | 20 | 1 | 0 | 16384 | 72 | 0 | 0 / 0 | yes |
 | 100 | 366 / 0 | 10712 / 0 | 0 / 0 | 0 / 0 | 366 | 12512 | 364 | 200 | 1 | 0 | 16384 | 72 | 0 | 0 / 0 | yes |
 | 1000 | 3666 / 0 | 110912 / 0 | 0 / 0 | 0 / 0 | 3666 | 125312 | 3664 | 2000 | 1 | 0 | 16384 | 72 | 0 | 0 / 0 | yes |
-| 10000 | 36666 / 0 | 1145912 / 0 | 1 / 0 | 544 / 0 | 36666 | 1253312 | 36664 | 20000 | 1 | 0 | 16384 | 72 | 0 | 0 / 0 | yes |
+| 10000 | 36666 / 0 | 1145912 / 0 | 1 / 0 | 748 / 0 | 36666 | 1253312 | 36664 | 20000 | 1 | 0 | 16384 | 72 | 0 | 0 / 0 | yes |
 
 Marginal per unit between N = 1000 and 10000: heap allocations 3.67 off, 0.00 on; scratch reservations 0.0000 on.
-Time at N = 10000, 7 runs each: off best 1933 us, median 2057 us (spread 1933-2930); on best 1989 us, median 2027 us (spread 1989-2051); per unit 0.193 us off, 0.199 us on (best), on/off 1.03 (best), 0.99 (median).
-Peak resident set of a standalone executable at N = 10000: 12948 KB off, 12924 KB on.
+Time at N = 10000, 7 runs each: off best 1939 us, median 2016 us (spread 1939-2761); on best 1191 us, median 1228 us (spread 1191-1284); per unit 0.194 us off, 0.119 us on (best), on/off 0.61 (best), 0.61 (median).
+Peak resident set of a standalone executable at N = 10000: 12912 KB off, 12952 KB on.
 
 ## returned (p05-escape-result)
 
@@ -67,11 +67,11 @@ Peak resident set of a standalone executable at N = 10000: 12948 KB off, 12924 K
 | 10 | 40 / 0 | 1142 / 0 | 0 / 0 | 0 / 0 | 40 | 1280 | 36 | 30 | 1 | 0 | 16384 | 128 | 0 | 0 / 0 | yes |
 | 100 | 400 / 0 | 11764 / 0 | 0 / 0 | 0 / 0 | 400 | 12808 | 395 | 300 | 1 | 0 | 16384 | 136 | 0 | 0 / 0 | yes |
 | 1000 | 4000 / 0 | 121566 / 0 | 0 / 0 | 0 / 0 | 4000 | 142408 | 3994 | 3000 | 1 | 0 | 16384 | 144 | 0 | 0 / 0 | yes |
-| 10000 | 40000 / 0 | 1255568 / 0 | 1 / 0 | 825 / 0 | 40000 | 1438408 | 39994 | 30000 | 1 | 0 | 16384 | 144 | 0 | 0 / 0 | yes |
+| 10000 | 40000 / 0 | 1255568 / 0 | 1 / 0 | 580 / 0 | 40000 | 1438408 | 39994 | 30000 | 1 | 0 | 16384 | 144 | 0 | 0 / 0 | yes |
 
 Marginal per unit between N = 1000 and 10000: heap allocations 4.00 off, 0.00 on; scratch reservations 0.0000 on.
-Time at N = 10000, 7 runs each: off best 1487 us, median 1550 us (spread 1487-2418); on best 762 us, median 785 us (spread 762-4815); per unit 0.149 us off, 0.076 us on (best), on/off 0.51 (best), 0.51 (median).
-Peak resident set of a standalone executable at N = 10000: 12948 KB off, 12924 KB on.
+Time at N = 10000, 7 runs each: off best 1418 us, median 1523 us (spread 1418-2307); on best 750 us, median 766 us (spread 750-813); per unit 0.142 us off, 0.075 us on (best), on/off 0.53 (best), 0.50 (median).
+Peak resident set of a standalone executable at N = 10000: 12912 KB off, 12916 KB on.
 
 ## actor (p12-actor-messages)
 
@@ -81,9 +81,9 @@ Peak resident set of a standalone executable at N = 10000: 12948 KB off, 12924 K
 | 10 | 281 / 281 | 13880 / 13880 | 0 / 0 | 0 / 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 0 | yes |
 | 100 | 1361 / 1361 | 78150 / 78150 | 0 / 0 | 0 / 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 0 | yes |
 | 1000 | 12161 / 12161 | 722650 / 722650 | 0 / 0 | 0 / 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 0 | yes |
-| 10000 | 120161 / 120161 | 7185650 / 7185650 | 7 / 7 | 3828 / 3163 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 0 | yes |
+| 10000 | 120161 / 120161 | 7185650 / 7185650 | 7 / 7 | 2847 / 3259 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 0 | yes |
 
 Marginal per unit between N = 1000 and 10000: heap allocations 12.00 off, 12.00 on; scratch reservations 0.0000 on.
-Time at N = 10000, 7 runs each: off best 33254 us, median 33682 us (spread 33254-36536); on best 32635 us, median 33113 us (spread 32635-33967); per unit 3.325 us off, 3.264 us on (best), on/off 0.98 (best), 0.98 (median).
-Peak resident set of a standalone executable at N = 10000: 12924 KB off, 12928 KB on.
+Time at N = 10000, 7 runs each: off best 33104 us, median 33552 us (spread 33104-37350); on best 33305 us, median 33550 us (spread 33305-34096); per unit 3.310 us off, 3.330 us on (best), on/off 1.01 (best), 1.00 (median).
+Peak resident set of a standalone executable at N = 10000: 12928 KB off, 12912 KB on.
 

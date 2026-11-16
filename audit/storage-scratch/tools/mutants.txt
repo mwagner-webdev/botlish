@@ -10,9 +10,10 @@
 # tests/scratch-storage.test (ss-...) or tests/storage-lifetime.test
 # (sl-...), the differential fuzzer (fuzz) or the Rust tests (rust).
 #
-# One mutant considered is not here because no program can kill it: an
-# instruction at a use of a String's binding taken as the site's even where
-# the use runs in a deeper loop (native/lower.tcl's ScratchLoopOf check).
+# One mutant considered is not here because no program we could write
+# kills it: an instruction at a use of a String's binding taken as the
+# site's even where the use runs in a deeper loop (native/lower.tcl's
+# ScratchLoopOf check).
 # Lowering materializes a binding that a deeper loop reads before that loop
 # (eagerly, at the binding), never inside it, so the check never rejects an
 # instruction today; it stays as a guard for a lowering that would defer

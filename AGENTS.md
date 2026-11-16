@@ -2086,8 +2086,10 @@ and with tiny chunks) and `audit/storage-scratch/tools/mutate.tcl` (every
 mutant in its `mutants.txt` must still apply and be killed by a detector
 its `!!` line names: update a mutant's text when you change the code it
 mutates, keeping it a mutant of the same rule).
-`audit/storage-scratch/tools/measure.tcl` regenerates the measurements,
-`audit/storage-scratch/tools/plan.tcl` the corpus's plan reports.
+`audit/storage-scratch/tools/measure.tcl`, `costs.tcl` and
+`compile-cost.tcl` regenerate the measurements (time them on an otherwise
+idle machine), `plan.tcl` the corpus's plan reports and `memcheck.tcl`
+valgrind's view of the positive workloads.
 
 ## Coroutine fusion
 

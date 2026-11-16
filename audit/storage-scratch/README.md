@@ -24,14 +24,25 @@ native/Cargo.toml`. Each keeps its scratch files in a temporary directory.
   reserved and in use, fallbacks, stale roots and protocol errors, the
   marginal rates, times through the driver's `bench` and the peak resident
   set of a standalone executable: `results/measurements.md`.
-* `tools/fuzz.tcl ?-seeds A-B? ?-count N? ?-modes {plain stress growth}?
-  ?-keep 0|1?` -- generated programs (helpers that build, return, retain,
-  fail with, recurse over and box Strings; loops, handlers, closures,
-  calls through function values) run on the reference interpreter and
-  natively with scratch storage on, plain, under GC stress with released
-  storage poisoned, and with tiny chunks (growth and fallback); every
-  outcome must equal the interpreter's and the native run without scratch
-  storage, with no stale root and no protocol error.
+* `tools/costs.tcl ?-n N? ?-runs R?` -- a cost probe: one function placing
+  K = 0 .. 8 Strings per call (the frame's own cost at K = 0, the saving per
+  placed String above it), and p04 at N = 10^4 .. 10^6:
+  `results/costs.md`.
+* `tools/compile-cost.tcl ?-runs R? ?FILE.bot ...?` -- native lowering with
+  scratch storage off and on (the analysis, the plan and the frames'
+  post-processing): `results/compile-cost.md`.
+* `tools/memcheck.tcl ?CASE ...?` -- standalone executables of the positive
+  workloads under valgrind's memcheck, plain and under GC stress:
+  `results/memcheck.txt`.
+* `tools/fuzz.tcl ?-seeds A-B? ?-count N? ?-modes {plain stress growth off}?
+  ?-compile 0|1? ?-keep DIR?` -- generated programs (helpers that build,
+  return, retain, fail with, recurse over and box Strings; loops, handlers,
+  closures, calls through function values) run on the reference
+  interpreter (the oracle), on the Tcl compiler and natively: scratch
+  storage on, under GC stress with released storage poisoned, with tiny
+  chunks (growth and fallback) and with scratch storage off; every outcome
+  must equal the interpreter's, with no stale root and no protocol error.
+  It also says why selected sites were not emitted.
 * `tools/mutate.tcl ?-only NAME,...? ?-timeout S?` -- the mutants of
   `tools/mutants.txt`, each a broken rule of the plan, the lowering, the
   provider, the collector, the code generator, the NIR protocol or the
@@ -42,4 +53,5 @@ native/Cargo.toml`. Each keeps its scratch files in a temporary directory.
 
 * `results/plans/` -- the census's plans (`tools/plan.tcl`).
 * `results/measurements.md` -- the measurements (`tools/measure.tcl`).
-* `results/fuzz.txt`, `results/mutants.txt` -- the runs the report cites.
+* `results/costs.md`, `results/compile-cost.md`, `results/memcheck.txt`,
+  `results/fuzz.txt`, `results/mutants.txt` -- the runs the report cites.
