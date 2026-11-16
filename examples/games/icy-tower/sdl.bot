@@ -565,14 +565,20 @@ fn presented(context sdl: Sdl) -> Area:
             return no_area()
     area
 
-private nomethod fn session_presentation(width: std::ffi::c::Int, height: std::ffi::c::Int, mode: std::ffi::c::UInt, context sdl: Sdl) -> bool errors IndexNotFound:
-    sdl.open.element(0).renderer.SDL_SetRenderLogicalPresentation(width, height, mode)
+# (Each passes its SDL_LOGICAL_PRESENTATION_ constant straight to SDL: an
+# SDL enumeration constant's C type is the target's, unsigned int on Linux
+# and int with MSVC, so no parameter of one C type may hold one.)
+private fn session_unscaled(context sdl: Sdl) -> bool errors IndexNotFound:
+    sdl.open.element(0).renderer.SDL_SetRenderLogicalPresentation(0, 0, sdl3::render::SDL_LOGICAL_PRESENTATION_DISABLED)
+
+private nomethod fn session_scaled(width: std::ffi::c::Int, height: std::ffi::c::Int, context sdl: Sdl) -> bool errors IndexNotFound:
+    sdl.open.element(0).renderer.SDL_SetRenderLogicalPresentation(width, height, sdl3::render::SDL_LOGICAL_PRESENTATION_LETTERBOX)
 
 # Turns the logical view off: what is drawn after it is in the window's
 # pixels, the whole window, until `scaled`. (SDL draws logical and pixel
 # coordinates in one frame alike: its presentation is a transform.)
 fn unscaled(context sdl: Sdl) -> bool:
-    done = session_presentation(0, 0, sdl3::render::SDL_LOGICAL_PRESENTATION_DISABLED):
+    done = session_unscaled():
         on IndexNotFound:
             return false
     done
@@ -580,7 +586,7 @@ fn unscaled(context sdl: Sdl) -> bool:
 # Turns the logical view back on: a WIDTH x HEIGHT view letterboxed into the
 # window, as `open` sets it.
 nomethod fn scaled(width: std::ffi::c::Int, height: std::ffi::c::Int, context sdl: Sdl) -> bool:
-    done = session_presentation(width, height, sdl3::render::SDL_LOGICAL_PRESENTATION_LETTERBOX):
+    done = session_scaled(width, height):
         on IndexNotFound:
             return false
     done

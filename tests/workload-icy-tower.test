@@ -289,7 +289,7 @@ test workload-icy-tower-sdl-helpers-private {every function of sdl.bot whose par
         }
     }
     list [lsort $found] [icyPrivate $hir]
-} -result {{} {types {EventType KeyEvent KeyState Session TextBuffer} values {cstring down? error_text finger? finger_event free_text nul printable quit_requested? read_text release session_clear session_color session_fill session_fullscreen session_line session_present session_presentation session_presented session_scale session_synced? session_text text_of touch_events write_chars write_text write_text_unchecked}}}
+} -result {{} {types {EventType KeyEvent KeyState Session TextBuffer} values {cstring down? error_text finger? finger_event free_text nul printable quit_requested? read_text release session_clear session_color session_fill session_fullscreen session_line session_present session_presented session_scale session_scaled session_synced? session_text session_unscaled text_of touch_events write_chars write_text write_text_unchecked}}}
 
 test workload-icy-tower-no-resource-escape {the refactored airlock hands nothing raw across its boundary: no CONTEXT-RESOURCE-ESCAPE (the warning-clean test above compiles it under -warnings error; this asks the pass itself)} -body {
     set hir [icyStagedHir]
