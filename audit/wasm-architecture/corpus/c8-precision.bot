@@ -1,0 +1,25 @@
+# Precision at a suspension: the coroutine builds 200,000 Strings, keeps
+# only their count, and suspends; while it is suspended the main program
+# allocates (the collections run). The List is dead at the yield, so a
+# precise suspended state does not keep it.
+import std::coroutine
+import std::int
+import std::list
+import std::str
+
+fn worker(n: int) -> int:
+    big = loop i from 0 to n:
+        std::str::concat("x", std::int::to_string(i))
+    count = std::list::length(big)
+    yield count
+    count + 1
+
+fn churn(rounds: int) -> int:
+    fold i from 0 to rounds with intermediate acc 0:
+        junk = loop j from 0 to 100:
+            std::str::concat("junk", std::int::to_string(i + j))
+        acc + std::list::length(junk)
+
+coroutine {step: w, first: c} = worker(200000)
+k = churn(3000)
+[c, k, w()]

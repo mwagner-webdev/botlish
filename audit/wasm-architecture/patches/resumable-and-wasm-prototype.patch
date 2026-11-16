@@ -1,0 +1,2174 @@
+diff -ruN a/native/Cargo.toml b/native/Cargo.toml
+--- a/native/Cargo.toml	2026-11-15 18:34:53.000000000 +0000
++++ b/native/Cargo.toml	2026-11-15 19:12:07.000000000 +0000
+@@ -17,14 +17,7 @@
+ # native library's object for another target than its own
+ # (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md: android-aarch64 from a
+ # Linux x86-64 host), and Cranelift's default builds only the host's.
+-cranelift-codegen = { version = "0.135", features = ["trace-log", "x86", "arm64"] }
+-cranelift-frontend = "0.135"
+-cranelift-module = "0.135"
+ # The JIT (codegen's CraneliftJit): the `jit` feature, on by default.
+-cranelift-jit = { version = "0.135", optional = true }
+-cranelift-object = "0.135"
+-cranelift-native = "0.135"
+-log = "0.4"
+ num-bigint = "0.4"
+ num-traits = "0.2"
+ # Exactly 1.1.0: its tables are Unicode 16.0, the Tcl reference's (Tcl
+@@ -36,7 +29,6 @@
+ libc = "0.2"
+ # The compilation target's triple (codegen/target.rs): the same version
+ # Cranelift resolves.
+-target-lexicon = "0.13"
+ 
+ # Windows' unwinder (RtlVirtualUnwind and the JIT's function tables), the
+ # JIT's code range and the thread's stack bounds
+@@ -45,6 +37,16 @@
+ # the standard handles, the exception record's flags); coroutine fibers
+ # (WINDOWS-X86-64-MILESTONE-5.md: FIBER_FLAG_FLOAT_SWITCH is
+ # WindowsProgramming's).
++[target.'cfg(not(target_family = "wasm"))'.dependencies]
++cranelift-codegen = { version = "0.135", features = ["trace-log", "x86", "arm64"] }
++cranelift-frontend = "0.135"
++cranelift-module = "0.135"
++cranelift-jit = { version = "0.135", optional = true }
++cranelift-object = "0.135"
++cranelift-native = "0.135"
++log = "0.4"
++target-lexicon = "0.13"
++
+ [target.'cfg(windows)'.dependencies]
+ windows-sys = { version = "0.61", features = [
+     "Win32_Foundation",
+diff -ruN a/native/src/codegen/clif.rs b/native/src/codegen/clif.rs
+--- a/native/src/codegen/clif.rs	2026-11-15 18:34:53.000000000 +0000
++++ b/native/src/codegen/clif.rs	2026-11-15 18:55:53.000000000 +0000
+@@ -3066,6 +3066,22 @@
+                         CoResume0 => ("rt_co_resume0", None, true, None),
+                         CoYield => ("rt_co_yield", None, true, None),
+                         CoDone => ("rt_co_done", None, false, None),
++                        // WASM-ARCH PROTOTYPE: resumable frames.
++                        FrTake => ("rt_fr_take", None, false, None),
++                        FrIsFrame => ("rt_fr_is_frame", None, false, None),
++                        FrEnsure => ("rt_fr_ensure", None, false, None),
++                        FrPut => ("rt_fr_put", None, false, None),
++                        FrPutRaw => ("rt_fr_put_raw", None, false, None),
++                        FrFinish => ("rt_fr_finish", None, false, None),
++                        FrGet => ("rt_fr_get", None, false, None),
++                        FrGetRaw => ("rt_fr_get_raw", None, false, None),
++                        FrPoint => ("rt_fr_point", None, false, None),
++                        FrCallee => ("rt_fr_callee", None, false, None),
++                        FrPending => ("rt_fr_pending", None, false, None),
++                        FrSetResume => ("rt_fr_set_resume", None, false, None),
++                        FrIsSuspend => ("rt_fr_is_suspend", None, false, None),
++                        CoSuspend => ("rt_co_suspend", None, true, None),
++                        CoMsg => ("rt_co_msg", None, true, None),
+                         CPtrFixture => ("rt_cptr_fixture", None, true, None),
+                         CPtrFixtureAddress => ("rt_cptr_fixture_address", None, false, None),
+                         // The borrow test fixture (runtime/ffifixture.rs):
+diff -ruN a/native/src/codegen/fusion.rs b/native/src/codegen/fusion.rs
+--- a/native/src/codegen/fusion.rs	2026-11-15 18:34:53.000000000 +0000
++++ b/native/src/codegen/fusion.rs	2026-11-15 18:56:01.000000000 +0000
+@@ -287,7 +287,7 @@
+ /// Per function: whether it may yield through direct calls -- it contains a
+ /// `coyield`, or a direct call of a function that may (a function that may
+ /// yield is never a value: COROUTINES.md point 37).
+-fn yielding(program: &Program) -> Vec<bool> {
++pub(crate) fn yielding(program: &Program) -> Vec<bool> {
+     let mut y: Vec<bool> = program
+         .functions
+         .iter()
+@@ -329,7 +329,7 @@
+     if f.name.is_empty() { format!("#{}", f.id) } else { f.name.clone() }
+ }
+ 
+-fn max_label(f: &Function) -> Option<Label> {
++pub(crate) fn max_label(f: &Function) -> Option<Label> {
+     f.body.iter().filter_map(|i| if let Inst::Label(l) = i { Some(*l) } else { None }).max()
+ }
+ 
+@@ -591,7 +591,7 @@
+ }
+ 
+ /// A new register of F of KIND (a plan register if PLAN).
+-fn push_reg(f: &mut Function, kind: RegKind, plan: bool) -> Reg {
++pub(crate) fn push_reg(f: &mut Function, kind: RegKind, plan: bool) -> Reg {
+     let r = f.regs;
+     f.regs += 1;
+     f.raw_regs.push(kind == RegKind::Raw);
+@@ -998,7 +998,7 @@
+ 
+ /// INST with every register R read or written as REG(R) and every label L
+ /// as LABEL(L).
+-fn rename(inst: &Inst, reg: &dyn Fn(Reg) -> Reg, label: &dyn Fn(Label) -> Label) -> Inst {
++pub(crate) fn rename(inst: &Inst, reg: &dyn Fn(Reg) -> Reg, label: &dyn Fn(Label) -> Label) -> Inst {
+     let regs = |rs: &[Reg]| rs.iter().map(|r| reg(*r)).collect::<Vec<Reg>>();
+     match inst {
+         Inst::Label(l) => Inst::Label(label(*l)),
+diff -ruN a/native/src/codegen/mod.rs b/native/src/codegen/mod.rs
+--- a/native/src/codegen/mod.rs	2026-11-15 18:34:53.000000000 +0000
++++ b/native/src/codegen/mod.rs	2026-11-15 19:11:35.000000000 +0000
+@@ -23,6 +23,8 @@
+ #[cfg(all(windows, target_arch = "x86_64", feature = "jit"))]
+ pub mod jitunwind;
+ pub mod nirtext;
++pub mod resumable;
++pub mod wasmemit;
+ pub mod roots;
+ pub mod target;
+ pub mod unwind;
+diff -ruN a/native/src/codegen/resumable.rs b/native/src/codegen/resumable.rs
+--- a/native/src/codegen/resumable.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/native/src/codegen/resumable.rs	2026-11-15 19:23:21.000000000 +0000
+@@ -0,0 +1,384 @@
++//! WASM-ARCH PROTOTYPE (WASM-TARGET-AND-COROUTINE-ARCHITECTURE-MILESTONE-1.md):
++//! compiler-side resumable lowering of general coroutines, a NIR-to-NIR pass.
++//!
++//! Where the runtime has no stack switch (runtime::coroutine::RESUMABLE), every
++//! function that may yield (a `coyield`, or a direct call of a function that
++//! may: fusion's `yielding`, exact because a function that may yield is never
++//! a value, COROUTINES.md point 37) becomes a state machine over a heap frame:
++//!
++//! * its prologue takes the frame the caller (or the coroutine's segment) left
++//!   in the Vm (`frtake`): UNIT for a fresh call, else its own frame from its
++//!   last suspension, which it dispatches on (`frpoint`, a `switch`) to the
++//!   suspension point, reloading every register live there (`frget`,
++//!   `frgetraw`);
++//! * a yield stores the outward value (`cosuspend`), saves the registers live
++//!   after it into its frame (`frensure`, `frput`, `frputraw`, `frfinish`) and
++//!   returns SUSPEND; resumed, the yield's value is the message (`comsg`,
++//!   which fails when the coroutine is abandoned);
++//! * a call of a yielding function checks for SUSPEND (`frissuspend`): its
++//!   caller takes the callee's frame (`frpending`), saves its own live
++//!   registers with it and returns SUSPEND too; resumed, it hands the callee
++//!   its frame (`frsetresume`) and makes the call again, which continues the
++//!   callee where it stopped.
++//!
++//! No activation outlives a suspension: every frame is popped, and the
++//! suspended state is exactly the chain of frames, reachable from the
++//! coroutine object and traced like any object. The shadow stack stays one
++//! LIFO stack.
++use crate::codegen::fusion::{max_label, push_reg, yielding};
++use crate::codegen::roots::live_at_many;
++use crate::nir::{Function, Inst, Label, OpCode, Program, Reg, RegKind};
++
++#[derive(Default, Debug)]
++pub struct Report {
++    pub functions: usize,
++    pub yield_sites: usize,
++    pub call_sites: usize,
++    pub max_tagged: usize,
++    pub max_raw: usize,
++    pub refused: Vec<String>,
++}
++
++pub fn enabled() -> bool {
++    crate::runtime::coroutine::RESUMABLE && std::env::var("BOTLISH_NATIVE_RESUMABLE").map_or(true, |v| v != "0")
++}
++
++enum Site {
++    Yield { dst: Reg, value: Reg },
++    Call { closure: Option<Reg>, args: Vec<Reg> },
++}
++
++fn name_of(f: &Function) -> String {
++    if f.name.is_empty() { format!("#{}", f.id) } else { f.name.clone() }
++}
++
++/// Lowers every yielding function of PROGRAM. Err: a construct the prototype
++/// does not lower (the program then refuses to run its coroutines).
++pub fn lower(program: &mut Program) -> Result<Report, String> {
++    let y = yielding(program);
++    let mut report = Report::default();
++    // A yielding function's result must be one tagged Value (SUSPEND travels
++    // in it): a scalar result (raw, short, packed ASCII: proven small or
++    // short, so boxing is exact) is boxed at its returns and unboxed by its
++    // callers after their suspension check; multiple results are refused.
++    let mut converted: Vec<Option<RegKind>> = vec![None; program.functions.len()];
++    for i in 0..program.functions.len() {
++        let f = &mut program.functions[i];
++        if !y[i] || f.results != 1 || f.plan_result {
++            continue;
++        }
++        let kind = if f.raw_result { RegKind::Raw } else if f.short_result { RegKind::Short } else if f.ascii_result { RegKind::Ascii } else { continue };
++        let boxing = match kind { RegKind::Raw => OpCode::RBox, RegKind::Short => OpCode::ShortToStr, _ => OpCode::AsciiToStr };
++        let old_body = std::mem::take(&mut f.body);
++        let old_origins = std::mem::take(&mut f.origins);
++        for (inst, origin) in old_body.into_iter().zip(old_origins) {
++            if let Inst::Ret(r) = inst {
++                let t = push_reg(f, RegKind::Tagged, false);
++                f.body.push(Inst::Op { dst: t, op: boxing, args: vec![r] });
++                f.origins.push(origin);
++                f.body.push(Inst::Ret(t));
++                f.origins.push(origin);
++            } else {
++                f.body.push(inst);
++                f.origins.push(origin);
++            }
++        }
++        f.raw_result = false;
++        f.short_result = false;
++        f.ascii_result = false;
++        converted[i] = Some(kind);
++    }
++    for g in program.functions.iter_mut() {
++        if !g.body.iter().any(|inst| matches!(inst, Inst::Call { func, .. } | Inst::CallEnv { func, .. } if converted[*func as usize].is_some())) {
++            continue;
++        }
++        let old_body = std::mem::take(&mut g.body);
++        let old_origins = std::mem::take(&mut g.origins);
++        for (inst, origin) in old_body.into_iter().zip(old_origins) {
++            let (func, dst) = match &inst {
++                Inst::Call { func, dst, .. } | Inst::CallEnv { func, dst, .. } => (*func, *dst),
++                _ => {
++                    g.body.push(inst);
++                    g.origins.push(origin);
++                    continue;
++                }
++            };
++            let Some(kind) = converted[func as usize] else {
++                g.body.push(inst);
++                g.origins.push(origin);
++                continue;
++            };
++            let t = push_reg(g, RegKind::Tagged, false);
++            let inst = match inst {
++                Inst::Call { func, args, may_error, may_gc, .. } => Inst::Call { dst: t, func, args, may_error, may_gc },
++                Inst::CallEnv { func, closure, args, may_error, may_gc, .. } => Inst::CallEnv { dst: t, func, closure, args, may_error, may_gc },
++                _ => unreachable!(),
++            };
++            g.body.push(inst);
++            g.origins.push(origin);
++            let unboxing = match kind { RegKind::Raw => OpCode::RUnbox, RegKind::Short => OpCode::StrToShort, _ => OpCode::StrToAscii };
++            g.body.push(Inst::Op { dst, op: unboxing, args: vec![t] });
++            g.origins.push(None);
++        }
++    }
++    for (i, f) in program.functions.iter().enumerate() {
++        if y[i] && (f.raw_result || f.short_result || f.ascii_result || f.plan_result) {
++            report.refused.push(format!("{}: a yielding function with a scalar or multiple result", name_of(f)));
++        }
++    }
++    if !report.refused.is_empty() {
++        return Err(report.refused.join("; "));
++    }
++    for i in 0..program.functions.len() {
++        if !y[i] {
++            continue;
++        }
++        let f = &program.functions[i];
++        let mut sites: Vec<(usize, Site)> = Vec::new();
++        for (j, inst) in f.body.iter().enumerate() {
++            match inst {
++                Inst::Op { dst, op: OpCode::CoYield, args } => sites.push((j, Site::Yield { dst: *dst, value: args[0] })),
++                Inst::Call { func, args, .. } if y[*func as usize] => sites.push((j, Site::Call { closure: None, args: args.clone() })),
++                Inst::CallEnv { func, closure, args, .. } if y[*func as usize] => {
++                    sites.push((j, Site::Call { closure: Some(*closure), args: args.clone() }))
++                }
++                Inst::CallMulti { func, args, .. } if y[*func as usize] => sites.push((j, Site::Call { closure: None, args: args.clone() })),
++                Inst::CallEnvMulti { func, closure, args, .. } if y[*func as usize] => {
++                    sites.push((j, Site::Call { closure: Some(*closure), args: args.clone() }))
++                }
++                _ => {}
++            }
++        }
++        let indices: Vec<usize> = sites.iter().map(|(j, _)| *j).collect();
++        let live = live_at_many(f, &indices);
++        let mut f = program.functions[i].clone();
++        let rf = push_reg(&mut f, RegKind::Tagged, false);
++        let is_frame = push_reg(&mut f, RegKind::Tagged, false);
++        let mut next = max_label(&f).map_or(0, |l| l + 1);
++        let mut label = || {
++            next += 1;
++            next - 1
++        };
++        // What each site saves: (tagged, scalar) registers live after it.
++        let mut saved: Vec<(Vec<Reg>, Vec<Reg>)> = Vec::new();
++        for ((j, site), (_, out)) in sites.iter().zip(&live) {
++            let dsts: Vec<Reg> = match &f.body[*j] {
++                Inst::Op { dst, .. } | Inst::Call { dst, .. } | Inst::CallEnv { dst, .. } => vec![*dst],
++                Inst::CallMulti { dsts, .. } | Inst::CallEnvMulti { dsts, .. } => dsts.clone(),
++                _ => unreachable!(),
++            };
++            let mut tagged = Vec::new();
++            let mut scalar = Vec::new();
++            for r in 0..out.len() as Reg {
++                let force = matches!(site, Site::Call { closure: Some(c), .. } if *c == r);
++                if (!out[r as usize] && !force) || dsts.contains(&r) || r == rf || r == is_frame {
++                    continue;
++                }
++                if f.kind_of(r) == RegKind::Tagged { tagged.push(r) } else { scalar.push(r) }
++            }
++            saved.push((tagged, scalar));
++        }
++        let cap_tagged = saved.iter().map(|s| s.0.len()).max().unwrap_or(0);
++        let cap_raw = saved.iter().map(|s| s.1.len()).max().unwrap_or(0);
++        report.max_tagged = report.max_tagged.max(cap_tagged);
++        report.max_raw = report.max_raw.max(cap_raw);
++
++        let l_dispatch = label();
++        let l_start = label();
++        let resume_labels: Vec<Label> = sites.iter().map(|_| label()).collect();
++        let reenter_labels: Vec<Label> = sites.iter().map(|_| label()).collect();
++        let l_bad = label();
++
++        let old_body = std::mem::take(&mut f.body);
++        let old_origins = std::mem::take(&mut f.origins);
++        let mut body: Vec<Inst> = Vec::new();
++        let mut origins: Vec<Option<u32>> = Vec::new();
++        macro_rules! emit {
++            ($f:expr, $inst:expr) => {{
++                body.push($inst);
++                origins.push(None);
++            }};
++        }
++        let raw = |f: &mut Function, body: &mut Vec<Inst>, origins: &mut Vec<Option<u32>>, n: usize| -> Reg {
++            let r = push_reg(f, RegKind::Raw, false);
++            body.push(Inst::RawInt { dst: r, digits: n.to_string() });
++            origins.push(None);
++            r
++        };
++        let unit = |f: &mut Function| push_reg(f, RegKind::Tagged, false);
++        emit!(f, Inst::Op { dst: rf, op: OpCode::FrTake, args: vec![] });
++        emit!(f, Inst::Op { dst: is_frame, op: OpCode::FrIsFrame, args: vec![rf] });
++        emit!(f, Inst::Br { cond: is_frame, then: l_dispatch, otherwise: l_start });
++        emit!(f, Inst::Label(l_start));
++        let mut site_of = std::collections::HashMap::new();
++        for (k, (j, _)) in sites.iter().enumerate() {
++            site_of.insert(*j, k);
++        }
++        for (j, inst) in old_body.into_iter().enumerate() {
++            let Some(&k) = site_of.get(&j) else {
++                body.push(inst);
++                origins.push(old_origins[j]);
++                continue;
++            };
++            let (tagged, scalar) = saved[k].clone();
++            // The suspension: save, finish, return SUSPEND.
++            let mut save = |f: &mut Function, body: &mut Vec<Inst>, origins: &mut Vec<Option<u32>>, callee: Reg| {
++                let nt = raw(f, body, origins, cap_tagged);
++                let nr = raw(f, body, origins, cap_raw);
++                let fr = push_reg(f, RegKind::Tagged, false);
++                body.push(Inst::Op { dst: fr, op: OpCode::FrEnsure, args: vec![rf, nt, nr] });
++                origins.push(None);
++                for (slot, r) in tagged.iter().enumerate() {
++                    let idx = raw(f, body, origins, slot);
++                    let t = unit(f);
++                    body.push(Inst::Op { dst: t, op: OpCode::FrPut, args: vec![fr, idx, *r] });
++                    origins.push(None);
++                }
++                for (slot, r) in scalar.iter().enumerate() {
++                    let idx = raw(f, body, origins, slot);
++                    let t = unit(f);
++                    body.push(Inst::Op { dst: t, op: OpCode::FrPutRaw, args: vec![fr, idx, *r] });
++                    origins.push(None);
++                }
++                let point = raw(f, body, origins, k + 1);
++                let count = raw(f, body, origins, tagged.len());
++                let s = push_reg(f, RegKind::Tagged, false);
++                body.push(Inst::Op { dst: s, op: OpCode::FrFinish, args: vec![fr, point, callee, count] });
++                origins.push(None);
++                if f.results > 1 {
++                    let mut rs = vec![s];
++                    for _ in 1..f.results {
++                        let u = push_reg(f, RegKind::Tagged, false);
++                        body.push(Inst::Unit { dst: u });
++                        origins.push(None);
++                        rs.push(u);
++                    }
++                    body.push(Inst::RetMulti(rs));
++                } else {
++                    body.push(Inst::Ret(s));
++                }
++                origins.push(None);
++            };
++            match &sites[k].1 {
++                Site::Yield { dst, value } => {
++                    report.yield_sites += 1;
++                    let t = unit(&mut f);
++                    body.push(Inst::Op { dst: t, op: OpCode::CoSuspend, args: vec![*value] });
++                    origins.push(old_origins[j]);
++                    let none = unit(&mut f);
++                    body.push(Inst::Unit { dst: none });
++                    origins.push(None);
++                    save(&mut f, &mut body, &mut origins, none);
++                    body.push(Inst::Label(resume_labels[k]));
++                    origins.push(None);
++                    body.push(Inst::Op { dst: *dst, op: OpCode::CoMsg, args: vec![] });
++                    origins.push(old_origins[j]);
++                }
++                Site::Call { .. } => {
++                    report.call_sites += 1;
++                    let dst = match &inst {
++                        Inst::Call { dst, .. } | Inst::CallEnv { dst, .. } => *dst,
++                        Inst::CallMulti { dsts, .. } | Inst::CallEnvMulti { dsts, .. } => dsts[0],
++                        _ => unreachable!(),
++                    };
++                    body.push(Inst::Jump(reenter_labels[k]));
++                    origins.push(None);
++                    body.push(Inst::Label(reenter_labels[k]));
++                    origins.push(None);
++                    body.push(inst);
++                    origins.push(old_origins[j]);
++                    let t = unit(&mut f);
++                    body.push(Inst::Op { dst: t, op: OpCode::FrIsSuspend, args: vec![dst] });
++                    origins.push(None);
++                    let suspend = resume_labels[k];
++                    let cont = { next += 1; next - 1 };
++                    body.push(Inst::Br { cond: t, then: suspend, otherwise: cont });
++                    origins.push(None);
++                    body.push(Inst::Label(suspend));
++                    origins.push(None);
++                    let cf = unit(&mut f);
++                    body.push(Inst::Op { dst: cf, op: OpCode::FrPending, args: vec![] });
++                    origins.push(None);
++                    save(&mut f, &mut body, &mut origins, cf);
++                    body.push(Inst::Label(cont));
++                    origins.push(None);
++                }
++            }
++        }
++        // The dispatch: reload what the suspension point saved, then continue
++        // after a yield, or make a suspended call again with its callee's frame.
++        let point = push_reg(&mut f, RegKind::Raw, false);
++        let dispatch_labels: Vec<Label> = sites.iter().map(|_| { next += 1; next - 1 }).collect();
++        body.push(Inst::Label(l_dispatch));
++        origins.push(None);
++        body.push(Inst::Op { dst: point, op: OpCode::FrPoint, args: vec![rf] });
++        origins.push(None);
++        let cases = dispatch_labels.iter().enumerate().map(|(k, l)| ((k + 1) as i64, (k + 1) as i64, *l)).collect();
++        body.push(Inst::Switch { value: point, default: l_bad, cases });
++        origins.push(None);
++        for (k, (_, site)) in sites.iter().enumerate() {
++            body.push(Inst::Label(dispatch_labels[k]));
++            origins.push(None);
++            let (tagged, scalar) = &saved[k];
++            for (slot, r) in tagged.iter().enumerate() {
++                let idx = raw(&mut f, &mut body, &mut origins, slot);
++                body.push(Inst::Op { dst: *r, op: OpCode::FrGet, args: vec![rf, idx] });
++                origins.push(None);
++            }
++            for (slot, r) in scalar.iter().enumerate() {
++                let idx = raw(&mut f, &mut body, &mut origins, slot);
++                body.push(Inst::Op { dst: *r, op: OpCode::FrGetRaw, args: vec![rf, idx] });
++                origins.push(None);
++            }
++            match site {
++                Site::Yield { .. } => {
++                    // Continue right after the suspension, at the yield's value.
++                    let after = resume_labels[k];
++                    // resume_labels[k] marks the CoMsg of a yield site.
++                    body.push(Inst::Jump(after));
++                    origins.push(None);
++                }
++                Site::Call { args, .. } => {
++                    // Arguments the callee will not read (it reloads its own
++                    // registers): defined, of their kinds.
++                    for a in args {
++                        if tagged.contains(a) || scalar.contains(a) {
++                            continue;
++                        }
++                        let inst = match f.kind_of(*a) {
++                            RegKind::Tagged => Inst::Unit { dst: *a },
++                            RegKind::Raw => Inst::RawInt { dst: *a, digits: "0".into() },
++                            RegKind::Short => Inst::ShortLit { dst: *a, value: -1 },
++                            RegKind::Ascii => Inst::AsciiLit { dst: *a, value: 0 },
++                            RegKind::I64 | RegKind::U64 => Inst::CWord { dst: *a, digits: "0".into() },
++                        };
++                        body.push(inst);
++                        origins.push(None);
++                    }
++                    let cf = push_reg(&mut f, RegKind::Tagged, false);
++                    body.push(Inst::Op { dst: cf, op: OpCode::FrCallee, args: vec![rf] });
++                    origins.push(None);
++                    let t = push_reg(&mut f, RegKind::Tagged, false);
++                    body.push(Inst::Op { dst: t, op: OpCode::FrSetResume, args: vec![cf] });
++                    origins.push(None);
++                    body.push(Inst::Jump(reenter_labels[k]));
++                    origins.push(None);
++                }
++            }
++        }
++        body.push(Inst::Label(l_bad));
++        origins.push(None);
++        body.push(Inst::Unreachable);
++        origins.push(None);
++        let _ = emit_unused();
++        f.body = body;
++        f.origins = origins;
++        f.may_gc = true;
++        report.functions += 1;
++        program.functions[i] = f;
++    }
++    crate::nir::validate(program).map_err(|e| format!("the resumable lowering's NIR does not validate: {e}"))?;
++    Ok(report)
++}
++
++fn emit_unused() {}
+diff -ruN a/native/src/codegen/roots.rs b/native/src/codegen/roots.rs
+--- a/native/src/codegen/roots.rs	2026-11-14 16:03:38.000000000 +0000
++++ b/native/src/codegen/roots.rs	2026-11-15 19:00:58.000000000 +0000
+@@ -841,7 +841,12 @@
+     // nested native frames, so a Botlish call no longer disqualifies it --
+     // this milestone's own goal). On the fallback path, unchanged: only a
+     // function with no Botlish call qualifies (RootStorage's own doc).
+-    let storage = if native_frame_supported || !has_call {
++    // WASM-ARCH PROTOTYPE: ShadowOnly-style storage off the stack-map path:
++    // no leaf publication through native_roots_ptr (one published block,
++    // which a leaf that re-enters Botlish code through an op -- costart,
++    // coresume, generate, a cleanup -- would lose while the callee runs).
++    let _ = has_call;
++    let storage = if native_frame_supported {
+         RootStorage::NativeFrame
+     } else {
+         RootStorage::RuntimeStack
+diff -ruN a/native/src/codegen/wasmemit.rs b/native/src/codegen/wasmemit.rs
+--- a/native/src/codegen/wasmemit.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/native/src/codegen/wasmemit.rs	2026-11-15 19:18:32.000000000 +0000
+@@ -0,0 +1,942 @@
++//! WASM-ARCH PROTOTYPE (WASM-TARGET-AND-COROUTINE-ARCHITECTURE-MILESTONE-1.md,
++//! experiment E2): NIR -> WebAssembly assembly text, for a subset of NIR.
++//!
++//! What it shows: the driver's real NIR (after the real parse, call-effect
++//! settlement and, for coroutine programs, the resumable lowering) lowered
++//! to a relocatable wasm object that wasm-ld links with the real Botlish
++//! runtime compiled for wasm32. What it is not: the production code
++//! generator. Control flow is a dispatch loop over NIR blocks (no
++//! structuring), every tagged operation is a runtime helper call (no inline
++//! fast paths, so no field offsets are read by generated code), and GC roots
++//! use the ShadowOnly model through two glue helpers (`proto_ss_enter`,
++//! `proto_ss_leave`): every function with a root slot gets a frame in the
++//! Vm's shadow array, every rooted register is stored there at its
++//! definition (codegen::roots's liveness and slot coloring, unchanged).
++use crate::codegen::roots;
++use crate::codegen::ConstPool;
++use crate::nir::{Function, Inst, Label, OpCode, Program, Reg, RegKind};
++use crate::runtime::constants::Const;
++use crate::runtime::value::*;
++use std::collections::HashMap;
++use std::fmt::Write;
++
++pub struct Emitted {
++    pub asm: String,
++    pub descriptor: Vec<u8>,
++    pub startup: String,
++}
++
++/// Helper signatures beyond `vm`: 'v' an i64 (Value or raw word), 'p' an i32
++/// pointer. Every helper returns i64.
++fn helper_sig(name: &str) -> Option<&'static str> {
++    Some(match name {
++        "rt_int_add" | "rt_int_sub" | "rt_int_mul" | "rt_int_cmp" => "vv",
++        "rt_list_new" => "vp",
++        "rt_closure_new" => "vvvp",
++        "rt_call_value" => "vvp",
++        "rt_co_create" | "rt_co_start" | "rt_co_resume0" | "rt_co_done" | "rt_co_release" | "rt_co_abandon" | "rt_co_yield" => "v",
++        "rt_co_resume" => "vv",
++        "rt_fr_take" | "rt_fr_pending" | "rt_co_msg" => "",
++        "rt_fr_is_frame" | "rt_fr_point" | "rt_fr_callee" | "rt_fr_set_resume" | "rt_fr_is_suspend" | "rt_co_suspend" => "v",
++        "rt_fr_get" | "rt_fr_get_raw" => "vv",
++        "rt_fr_ensure" | "rt_fr_put" | "rt_fr_put_raw" => "vvv",
++        "rt_fr_finish" => "vvvv",
++        "rt_list_len" => "v",
++        "rt_list_get" => "vv",
++        "rt_list_get_proven" => "vv",
++        "rt_str_len" => "v",
++        "rt_mv_from_list" | "rt_mv_len" | "rt_mv_empty" | "rt_mv_pop" | "rt_mv_to_list" => "v",
++        "rt_mv_push" | "rt_mv_take" => "vv",
++        "rt_affine_drop" | "rt_str_cat" => "vv",
++        "rt_int_to_str" | "proto_str_len" => "v",
++        "rt_construct" => "vvp",
++        "rt_struct_new" => "vvp",
++        "rt_cleanup_table" => "vp",
++        "rt_cleanup_call" | "rt_mv_at" | "rt_mv_share" | "rt_affine_drop_run" => "vv",
++        "rt_context_root" => "v",
++        "rt_fail_declared" => "vv",
++        "rt_fail_declared_payload" => "vvvvp",
++        "rt_declared_payload" => "v",
++        "rt_declared_error" | "rt_clear_declared_error" => "",
++        _ => return None,
++    })
++}
++
++/// The runtime helper of OP, whether its result is checked for NO_VALUE.
++fn op_helper(op: OpCode) -> Option<(&'static str, bool)> {
++    use OpCode::*;
++    Some(match op {
++        IAdd => ("rt_int_add", true),
++        ISub => ("rt_int_sub", true),
++        IMul => ("rt_int_mul", true),
++        CoCreate => ("rt_co_create", false),
++        CoStart => ("rt_co_start", true),
++        CoResume => ("rt_co_resume", true),
++        CoResume0 => ("rt_co_resume0", true),
++        CoYield => ("rt_co_yield", true),
++        CoDone => ("rt_co_done", false),
++        CoRelease => ("rt_co_release", false),
++        CoAbandon => ("rt_co_abandon", true),
++        FrTake => ("rt_fr_take", false),
++        FrIsFrame => ("rt_fr_is_frame", false),
++        FrEnsure => ("rt_fr_ensure", false),
++        FrPut => ("rt_fr_put", false),
++        FrPutRaw => ("rt_fr_put_raw", false),
++        FrFinish => ("rt_fr_finish", false),
++        FrGet => ("rt_fr_get", false),
++        FrGetRaw => ("rt_fr_get_raw", false),
++        FrPoint => ("rt_fr_point", false),
++        FrCallee => ("rt_fr_callee", false),
++        FrPending => ("rt_fr_pending", false),
++        FrSetResume => ("rt_fr_set_resume", false),
++        FrIsSuspend => ("rt_fr_is_suspend", false),
++        CoSuspend => ("rt_co_suspend", true),
++        CoMsg => ("rt_co_msg", true),
++        ListLen => ("rt_list_len", false),
++        ListGet => ("rt_list_get", true),
++        ListGetProven => ("rt_list_get_proven", true),
++        MvFromList => ("rt_mv_from_list", false),
++        MvLen => ("rt_mv_len", false),
++        MvPush => ("rt_mv_push", false),
++        AffineDrop => ("rt_affine_drop", false),
++        StrCat => ("rt_str_cat", true),
++        IntToStr => ("rt_int_to_str", false),
++        StrLen => ("proto_str_len", false),
++        MvAt => ("rt_mv_at", true),
++        MvShare => ("rt_mv_share", false),
++        CtxRoot => ("rt_context_root", false),
++        CleanupCall => ("rt_cleanup_call", true),
++        AffineDropRun => ("rt_affine_drop_run", true),
++        MvTake => ("rt_mv_take", true),
++        _ => return None,
++    })
++}
++
++fn wasm_name(op: OpCode) -> Option<&'static str> {
++    use OpCode::*;
++    Some(match op {
++        RIAdd => "i64.add",
++        RISub => "i64.sub",
++        RIMul => "i64.mul",
++        RIAnd => "i64.and",
++        RIOr => "i64.or",
++        RIXor => "i64.xor",
++        RILt => "i64.lt_s",
++        RILe => "i64.le_s",
++        RIGt => "i64.gt_s",
++        RIGe => "i64.ge_s",
++        RIEq => "i64.eq",
++        _ => return None,
++    })
++}
++
++struct Fx<'a> {
++    program: &'a Program,
++    f: &'a Function,
++    out: String,
++    slot_of: Vec<Option<u32>>,
++    nblocks: usize,
++    block_of: HashMap<Label, usize>,
++    cur: usize,
++    errors: Vec<Option<Label>>,
++    pool: &'a mut ConstPool,
++    helpers: &'a mut std::collections::BTreeSet<String>,
++    // local indices
++    vm: u32,
++    closure: Option<u32>,
++    reg0: u32,
++    pc: u32,
++    base: u32,
++    sp: u32,
++}
++
++impl<'a> Fx<'a> {
++    fn line(&mut self, s: impl AsRef<str>) {
++        self.out.push('\t');
++        self.out.push_str(s.as_ref());
++        self.out.push('\n');
++    }
++    fn local(&self, r: Reg) -> u32 {
++        self.reg0 + r
++    }
++    fn get(&mut self, r: Reg) {
++        let l = self.local(r);
++        self.line(format!("local.get\t{l}"));
++    }
++    /// Pops the i64 on the stack into R (and its shadow slot, if rooted).
++    fn def(&mut self, r: Reg) {
++        let l = self.local(r);
++        self.line(format!("local.set\t{l}"));
++        if let Some(slot) = self.slot_of[r as usize] {
++            let base = self.base;
++            self.line(format!("local.get\t{base}"));
++            self.line(format!("local.get\t{l}"));
++            self.line(format!("i64.store\t{}", slot * 8));
++        }
++    }
++    fn depth_to_loop(&self) -> usize {
++        self.nblocks - 1 - self.cur
++    }
++    fn goto(&mut self, l: Label, extra: usize) {
++        let b = self.block_of[&l];
++        let pc = self.pc;
++        self.line(format!("i32.const\t{b}"));
++        self.line(format!("local.set\t{pc}"));
++        let d = self.depth_to_loop() + extra;
++        self.line(format!("br\t{d}"));
++    }
++    /// Control to the innermost error exit (a pending error is set).
++    fn to_error_exit(&mut self, extra: usize) {
++        match *self.errors.last().unwrap() {
++            Some(l) => self.goto(l, extra),
++            None => {
++                self.leave();
++                self.zeros();
++                self.line("return");
++            }
++        }
++    }
++    fn zeros(&mut self) {
++        let n = if self.f.scalar_result() && self.f.may_error { 2 } else { self.f.results.max(1) };
++        for _ in 0..n {
++            self.line("i64.const\t0");
++        }
++    }
++    fn leave(&mut self) {
++        let (vm, base) = (self.vm, self.base);
++        self.line(format!("local.get\t{vm}"));
++        self.line(format!("local.get\t{base}"));
++        self.line("call\tproto_ss_leave");
++        self.helpers.insert("proto_ss_leave".into());
++    }
++    /// The value on the stack is a call's result: NO_VALUE goes to the
++    /// innermost error exit (a handler block, or this function's error
++    /// return). Leaves the value on the stack.
++    fn check(&mut self, tmp: u32) {
++        self.line(format!("local.tee\t{tmp}"));
++        self.line("i64.eqz");
++        self.line("if");
++        match *self.errors.last().unwrap() {
++            Some(l) => self.goto(l, 1),
++            None => {
++                self.leave();
++                self.zeros();
++                self.line("return");
++            }
++        }
++        self.line("end_if");
++        self.line(format!("local.get\t{tmp}"));
++    }
++    fn constant(&mut self, c: Const) {
++        let i = self.pool.index(c);
++        let vm = self.vm;
++        self.line(format!("local.get\t{vm}"));
++        self.line(format!("i32.const\t{i}"));
++        self.line("call\tproto_const");
++        self.helpers.insert("proto_const".into());
++    }
++    /// ARGS as an array of i64 below __stack_pointer; pushes its address.
++    /// The caller restores the stack pointer from `self.sp` after the call.
++    fn array(&mut self, args: &[Reg]) {
++        let sp = self.sp;
++        self.line("global.get\t__stack_pointer");
++        self.line(format!("local.tee\t{sp}"));
++        self.line(format!("i32.const\t{}", ((8 * args.len() + 15) / 16) * 16));
++        self.line("i32.sub");
++        self.line("global.set\t__stack_pointer");
++        for (i, a) in args.iter().enumerate() {
++            self.line("global.get\t__stack_pointer");
++            self.get(*a);
++            self.line(format!("i64.store\t{}", 8 * i));
++        }
++        self.line("global.get\t__stack_pointer");
++    }
++    fn restore_sp(&mut self) {
++        let sp = self.sp;
++        self.line(format!("local.get\t{sp}"));
++        self.line("global.set\t__stack_pointer");
++    }
++    fn helper(&mut self, name: &str, args: &[Reg]) -> Result<(), String> {
++        let sig = helper_sig(name).ok_or_else(|| format!("no signature for {name}"))?;
++        if sig.len() != args.len() {
++            return Err(format!("{name}: {} arguments, signature {sig}", args.len()));
++        }
++        let vm = self.vm;
++        self.line(format!("local.get\t{vm}"));
++        for a in args {
++            self.get(*a);
++        }
++        self.line(format!("call\t{name}"));
++        self.helpers.insert(name.into());
++        Ok(())
++    }
++    fn bool_of_i32(&mut self) {
++        // i32 condition on the stack -> TRUE / FALSE
++        let t = self.reg0 + self.f.regs; // scratch i64? use select form instead
++        let _ = t;
++    }
++}
++
++fn kind_scalar(f: &Function, r: Reg) -> bool {
++    f.kind_of(r) != RegKind::Tagged
++}
++
++fn direct_type(f: &Function) -> String {
++    let mut ps = vec!["i32".to_string()];
++    if f.env {
++        ps.push("i64".into());
++    }
++    for _ in 0..f.params {
++        ps.push("i64".into());
++    }
++    if f.scalar_result() && f.may_error {
++        format!("({}) -> (i64, i64)", ps.join(", "))
++    } else {
++        format!("({}) -> ({})", ps.join(", "), vec!["i64"; f.results.max(1) as usize].join(", "))
++    }
++}
++
++pub fn emit(program: &Program) -> Result<Emitted, String> {
++    let mut pool = ConstPool::default();
++    let mut helpers = std::collections::BTreeSet::new();
++    let mut body = String::new();
++    for f in &program.functions {
++        let plan = roots::plan(f, false);
++        // Blocks: the entry and one per label.
++        let mut block_of = HashMap::new();
++        let mut nblocks = 1;
++        for inst in &f.body {
++            if let Inst::Label(l) = inst {
++                block_of.insert(*l, nblocks);
++                nblocks += 1;
++            }
++        }
++        let vm = 0u32;
++        let closure = if f.env { Some(1u32) } else { None };
++        let reg0 = 1 + f.env as u32;
++        let nlocals_i64 = f.regs + 2; // registers (params first) and two scratch
++        let pc = reg0 + nlocals_i64;
++        let base = pc + 1;
++        let sp = pc + 2;
++        let mut fx = Fx {
++            program,
++            f,
++            out: String::new(),
++            slot_of: plan.slot_of.clone(),
++            nblocks,
++            block_of,
++            cur: 0,
++            errors: vec![None],
++            pool: &mut pool,
++            helpers: &mut helpers,
++            vm,
++            closure,
++            reg0,
++            pc,
++            base,
++            sp,
++        };
++        let tmp = reg0 + f.regs;
++        let name = format!("botlish_fn_{}", f.id);
++        writeln!(fx.out, "\t.globl\t{name}\n\t.type\t{name},@function\n{name}:\n\t.functype\t{name} {}", direct_type(f)).unwrap();
++        let extra_i64 = f.regs - f.params + 2;
++        let mut locals: Vec<&str> = vec!["i64"; extra_i64 as usize];
++        locals.extend(["i32", "i32", "i32"]);
++        fx.line(format!(".local\t{}", locals.join(", ")));
++        // Prologue: the shadow frame, raw parameters unboxed, rooted
++        // parameters stored.
++        fx.line(format!("local.get\t{vm}"));
++        fx.line(format!("i32.const\t{}", plan.num_slots));
++        fx.line("call\tproto_ss_enter");
++        fx.helpers.insert("proto_ss_enter".into());
++        fx.line(format!("local.set\t{base}"));
++        for p in 0..f.params {
++            if f.raw_regs[p as usize] && !f.raw_params[p as usize] {
++                fx.get(p);
++                fx.line("i64.const\t1");
++                fx.line("i64.shr_s");
++                fx.def(p);
++            } else if fx.slot_of[p as usize].is_some() {
++                fx.get(p);
++                fx.def(p);
++            }
++        }
++        fx.line("i32.const\t0");
++        fx.line(format!("local.set\t{pc}"));
++        fx.line("loop");
++        for _ in 0..nblocks {
++            fx.line("block");
++        }
++        fx.line(format!("local.get\t{pc}"));
++        let table: Vec<String> = (0..nblocks).map(|i| i.to_string()).collect();
++        fx.line(format!("br_table\t{{{}, {}}}", table.join(", "), nblocks - 1));
++        fx.line("end_block");
++        fx.cur = 0;
++        let mut terminated = false;
++        for inst in &f.body {
++            if let Inst::Label(l) = inst {
++                if !terminated {
++                    fx.goto(*l, 0);
++                }
++                fx.line("end_block");
++                fx.cur = fx.block_of[l];
++                terminated = false;
++                continue;
++            }
++            terminated = false;
++            match inst {
++                Inst::Int { dst, digits } => {
++                    match digits.parse::<i64>() {
++                        Ok(n) if fits_small(n) => fx.line(format!("i64.const\t{}", make_small(n) as i64)),
++                        _ => fx.constant(Const::BigInt(digits.clone())),
++                    }
++                    fx.def(*dst);
++                }
++                Inst::RawInt { dst, digits } | Inst::CWord { dst, digits } => {
++                    let n: i64 = digits.parse().map_err(|_| format!("raw literal {digits}"))?;
++                    fx.line(format!("i64.const\t{n}"));
++                    fx.def(*dst);
++                }
++                Inst::ShortLit { dst, value } | Inst::AsciiLit { dst, value } => {
++                    fx.line(format!("i64.const\t{value}"));
++                    fx.def(*dst);
++                }
++                Inst::Bool { dst, value } => {
++                    fx.line(format!("i64.const\t{}", bool_value(*value)));
++                    fx.def(*dst);
++                }
++                Inst::Unit { dst } => {
++                    fx.line(format!("i64.const\t{UNIT}"));
++                    fx.def(*dst);
++                }
++                Inst::Str { dst, text } => {
++                    fx.constant(Const::Str(text.clone()));
++                    fx.def(*dst);
++                }
++                Inst::FnValue { dst, func } => {
++                    fx.constant(Const::FnValue(*func));
++                    fx.def(*dst);
++                }
++                Inst::Native { dst, native } => {
++                    fx.constant(Const::Native(*native));
++                    fx.def(*dst);
++                }
++                Inst::Move { dst, src } => {
++                    fx.get(*src);
++                    fx.def(*dst);
++                }
++                Inst::SelfClosure { dst } => {
++                    let c = fx.closure.ok_or("selfclosure without env")?;
++                    fx.line(format!("local.get\t{c}"));
++                    fx.def(*dst);
++                }
++                Inst::Capture { dst, index } => {
++                    let c = fx.closure.ok_or("capture without env")?;
++                    fx.line(format!("local.get\t{vm}"));
++                    fx.line(format!("local.get\t{c}"));
++                    fx.line(format!("i32.const\t{index}"));
++                    fx.line("call\tproto_capture");
++                    fx.helpers.insert("proto_capture".into());
++                    fx.def(*dst);
++                }
++                Inst::Closure { dst, func, captures } => {
++                    fx.line(format!("local.get\t{vm}"));
++                    fx.line(format!("i64.const\t{func}"));
++                    fx.line(format!("i32.const\tbotlish_entry_{func}"));
++                    fx.line("i64.extend_i32_u");
++                    fx.line(format!("i64.const\t{}", captures.len()));
++                    fx.array(captures);
++                    fx.line("call\trt_closure_new");
++                    fx.helpers.insert("rt_closure_new".into());
++                    fx.restore_sp();
++                    fx.def(*dst);
++                }
++                Inst::Op { dst, op, args } => {
++                    if let Some(w) = wasm_name(*op) {
++                        let cmp = matches!(op, OpCode::RILt | OpCode::RILe | OpCode::RIGt | OpCode::RIGe | OpCode::RIEq);
++                        if cmp {
++                            fx.line(format!("i64.const\t{TRUE}"));
++                            fx.line(format!("i64.const\t{FALSE}"));
++                        }
++                        fx.get(args[0]);
++                        fx.get(args[1]);
++                        fx.line(w);
++                        if cmp {
++                            fx.line("i64.select");
++                        }
++                        fx.def(*dst);
++                        continue;
++                    }
++                    match op {
++                        OpCode::RBox => {
++                            fx.get(args[0]);
++                            fx.line("i64.const\t1");
++                            fx.line("i64.shl");
++                            fx.line("i64.const\t1");
++                            fx.line("i64.or");
++                            fx.def(*dst);
++                            continue;
++                        }
++                        OpCode::RUnbox => {
++                            fx.get(args[0]);
++                            fx.line("i64.const\t1");
++                            fx.line("i64.shr_s");
++                            fx.def(*dst);
++                            continue;
++                        }
++                        OpCode::ILt | OpCode::ILe | OpCode::IGt | OpCode::IGe | OpCode::IEq => {
++                            let w = match op {
++                                OpCode::ILt => "i64.lt_s",
++                                OpCode::ILe => "i64.le_s",
++                                OpCode::IGt => "i64.gt_s",
++                                OpCode::IGe => "i64.ge_s",
++                                _ => "i64.eq",
++                            };
++                            fx.line(format!("i64.const\t{TRUE}"));
++                            fx.line(format!("i64.const\t{FALSE}"));
++                            fx.helper("rt_int_cmp", args)?;
++                            fx.line("i64.const\t0");
++                            fx.line(w);
++                            fx.line("i64.select");
++                            fx.def(*dst);
++                            continue;
++                        }
++                        OpCode::CleanupTable => {
++                            fx.line(format!("local.get\t{vm}"));
++                            fx.line(format!("i64.const\t{}", args.len()));
++                            fx.array(args);
++                            fx.line("call\trt_cleanup_table");
++                            fx.helpers.insert("rt_cleanup_table".into());
++                            fx.restore_sp();
++                            fx.def(*dst);
++                            continue;
++                        }
++                        OpCode::ListNew => {
++                            fx.line(format!("local.get\t{vm}"));
++                            fx.line(format!("i64.const\t{}", args.len()));
++                            fx.array(args);
++                            fx.line("call\trt_list_new");
++                            fx.helpers.insert("rt_list_new".into());
++                            fx.restore_sp();
++                            fx.check(tmp);
++                            fx.def(*dst);
++                            continue;
++                        }
++                        _ => {}
++                    }
++                    let (h, fallible) = op_helper(*op).ok_or_else(|| format!("function {}: op {op:?} (prototype)", f.id))?;
++                    fx.helper(h, args)?;
++                    if fallible {
++                        fx.check(tmp);
++                    }
++                    fx.def(*dst);
++                }
++                Inst::Call { dst, func, args, may_error, .. } | Inst::CallEnv { dst, func, args, may_error, .. } => {
++                    let callee = &program.functions[*func as usize];
++                    let status = callee.scalar_result() && callee.may_error;
++                    fx.line(format!("local.get\t{vm}"));
++                    if let Inst::CallEnv { closure, .. } = inst {
++                        fx.get(*closure);
++                    }
++                    for a in args {
++                        fx.get(*a);
++                    }
++                    fx.line(format!("call\tbotlish_fn_{func}"));
++                    if status {
++                        // (value, status): status 0 is a failure.
++                        let tmp2 = tmp + 1;
++                        fx.line(format!("local.set\t{tmp}"));
++                        fx.line(format!("local.set\t{tmp2}"));
++                        fx.line(format!("local.get\t{tmp}"));
++                        fx.line("i64.eqz");
++                        fx.line("if");
++                        match *fx.errors.last().unwrap() {
++                            Some(l) => fx.goto(l, 1),
++                            None => {
++                                fx.leave();
++                                fx.zeros();
++                                fx.line("return");
++                            }
++                        }
++                        fx.line("end_if");
++                        fx.line(format!("local.get\t{}", tmp + 1));
++                    } else if *may_error && !callee.scalar_result() {
++                        fx.check(tmp);
++                    }
++                    fx.def(*dst);
++                }
++                Inst::CallValue { dst, callee, args } => {
++                    fx.line(format!("local.get\t{vm}"));
++                    fx.get(*callee);
++                    fx.line(format!("i64.const\t{}", args.len()));
++                    fx.array(args);
++                    fx.line("call\trt_call_value");
++                    fx.helpers.insert("rt_call_value".into());
++                    fx.restore_sp();
++                    fx.check(tmp);
++                    fx.def(*dst);
++                }
++                Inst::Br { cond, then, otherwise } => {
++                    let (bt, bo) = (fx.block_of[then], fx.block_of[otherwise]);
++                    fx.line(format!("i32.const\t{bt}"));
++                    fx.line(format!("i32.const\t{bo}"));
++                    fx.get(*cond);
++                    fx.line(format!("i64.const\t{TRUE}"));
++                    fx.line("i64.eq");
++                    fx.line("i32.select");
++                    fx.line(format!("local.set\t{pc}"));
++                    let d = fx.depth_to_loop();
++                    fx.line(format!("br\t{d}"));
++                    terminated = true;
++                }
++                Inst::Jump(l) => {
++                    fx.goto(*l, 0);
++                    terminated = true;
++                }
++                Inst::Switch { value, default, cases } => {
++                    for (lo, hi, l) in cases {
++                        fx.get(*value);
++                        fx.line(format!("i64.const\t{lo}"));
++                        fx.line("i64.ge_s");
++                        fx.get(*value);
++                        fx.line(format!("i64.const\t{hi}"));
++                        fx.line("i64.le_s");
++                        fx.line("i32.and");
++                        fx.line("if");
++                        fx.goto(*l, 1);
++                        fx.line("end_if");
++                    }
++                    fx.goto(*default, 0);
++                    terminated = true;
++                }
++                Inst::Ret(r) => {
++                    fx.leave();
++                    fx.get(*r);
++                    if f.scalar_result() && f.may_error {
++                        fx.line("i64.const\t1");
++                    }
++                    fx.line("return");
++                    terminated = true;
++                }
++                Inst::Unreachable => {
++                    fx.line("unreachable");
++                    terminated = true;
++                }
++                Inst::PushErrorExit(l) => fx.errors.push(Some(*l)),
++                Inst::CallMulti { dsts, func, args, may_error, .. } | Inst::CallEnvMulti { dsts, func, args, may_error, .. } => {
++                    fx.line(format!("local.get\t{vm}"));
++                    if let Inst::CallEnvMulti { closure, .. } = inst {
++                        fx.get(*closure);
++                    }
++                    for a in args {
++                        fx.get(*a);
++                    }
++                    fx.line(format!("call\tbotlish_fn_{func}"));
++                    // Results pop last-first; the first is the checked one.
++                    for d in dsts.iter().skip(1).rev() {
++                        fx.def(*d);
++                    }
++                    if *may_error {
++                        fx.check(tmp);
++                    }
++                    fx.def(dsts[0]);
++                }
++                Inst::RetMulti(regs) => {
++                    fx.leave();
++                    for r in regs {
++                        fx.get(*r);
++                    }
++                    fx.line("return");
++                    terminated = true;
++                }
++                Inst::StructNew { dst, shape, fields } => {
++                    fx.line(format!("local.get\t{vm}"));
++                    fx.line(format!("i64.const\t{shape}"));
++                    fx.line(format!("i64.const\t{}", fields.len()));
++                    fx.array(fields);
++                    fx.line("call\trt_struct_new");
++                    fx.helpers.insert("rt_struct_new".into());
++                    fx.restore_sp();
++                    fx.def(*dst);
++                }
++                Inst::StructGet { dst, slot, value } => {
++                    fx.line(format!("local.get\t{vm}"));
++                    fx.get(*value);
++                    fx.line(format!("i32.const\t{slot}"));
++                    fx.line("call\tproto_struct_get");
++                    fx.helpers.insert("proto_struct_get".into());
++                    fx.def(*dst);
++                }
++                Inst::ContextLoad { dst, offset } => {
++                    fx.line(format!("local.get\t{vm}"));
++                    fx.line(format!("i32.const\t{offset}"));
++                    fx.line("call\tproto_ctx_load");
++                    fx.helpers.insert("proto_ctx_load".into());
++                    fx.def(*dst);
++                }
++                Inst::ContextStore { offset, value } => {
++                    fx.line(format!("local.get\t{vm}"));
++                    fx.line(format!("i32.const\t{offset}"));
++                    fx.get(*value);
++                    fx.line("call\tproto_ctx_store");
++                    fx.helpers.insert("proto_ctx_store".into());
++                }
++                Inst::Fail { id, name, shape, payload } => {
++                    fx.line(format!("local.get\t{vm}"));
++                    fx.line(format!("i64.const\t{id}"));
++                    fx.constant(Const::Str(name.clone()));
++                    if payload.is_empty() {
++                        fx.line("call\trt_fail_declared");
++                        fx.helpers.insert("rt_fail_declared".into());
++                    } else {
++                        fx.line(format!("i64.const\t{shape}"));
++                        fx.line(format!("i64.const\t{}", payload.len()));
++                        fx.array(payload);
++                        fx.line("call\trt_fail_declared_payload");
++                        fx.helpers.insert("rt_fail_declared_payload".into());
++                        fx.restore_sp();
++                    }
++                    fx.line("drop");
++                    fx.to_error_exit(0);
++                    terminated = true;
++                }
++                Inst::DeclaredPayload { dst, index } => {
++                    fx.line(format!("local.get\t{vm}"));
++                    fx.line(format!("i64.const\t{index}"));
++                    fx.line("call\trt_declared_payload");
++                    fx.helpers.insert("rt_declared_payload".into());
++                    fx.def(*dst);
++                }
++                Inst::DeclaredErrorEq { dst, id } => {
++                    fx.line(format!("i64.const\t{TRUE}"));
++                    fx.line(format!("i64.const\t{FALSE}"));
++                    fx.line(format!("local.get\t{vm}"));
++                    fx.line("call\trt_declared_error");
++                    fx.helpers.insert("rt_declared_error".into());
++                    fx.line(format!("i64.const\t{id}"));
++                    fx.line("i64.eq");
++                    fx.line("i64.select");
++                    fx.def(*dst);
++                }
++                Inst::ClearDeclaredError => {
++                    fx.line(format!("local.get\t{vm}"));
++                    fx.line("call\trt_clear_declared_error");
++                    fx.helpers.insert("rt_clear_declared_error".into());
++                    fx.line("drop");
++                }
++                Inst::Reraise => {
++                    fx.to_error_exit(0);
++                    terminated = true;
++                }
++                Inst::Construct { dst, list, plan, pieces } => {
++                    use crate::runtime::construct::{MODE_LIST, MODE_PLAN, TAG_ELEM, TAG_REGION, TAG_SPAN};
++                    // The words as registers: a tag constant, then the piece's operands.
++                    let mut words: Vec<Option<Reg>> = Vec::new();
++                    let mut tags: Vec<u64> = Vec::new();
++                    for piece in pieces {
++                        let tag = match piece {
++                            crate::nir::Piece::Span(_) => TAG_SPAN,
++                            crate::nir::Piece::Region(..) => TAG_REGION,
++                            crate::nir::Piece::Elem(_) => TAG_ELEM,
++                        };
++                        tags.push(tag);
++                        words.push(None);
++                        for r in piece.regs() {
++                            words.push(Some(r));
++                        }
++                    }
++                    let mode = (if *list { MODE_LIST } else { 0 }) | (if *plan { MODE_PLAN } else { 0 });
++                    fx.line(format!("local.get\t{vm}"));
++                    fx.line(format!("i64.const\t{mode}"));
++                    fx.line(format!("i64.const\t{}", words.len()));
++                    let spl = fx.sp;
++                    fx.line("global.get\t__stack_pointer");
++                    fx.line(format!("local.tee\t{spl}"));
++                    fx.line(format!("i32.const\t{}", ((8 * words.len() + 15) / 16) * 16));
++                    fx.line("i32.sub");
++                    fx.line("global.set\t__stack_pointer");
++                    let mut t = tags.into_iter();
++                    for (i, w) in words.iter().enumerate() {
++                        fx.line("global.get\t__stack_pointer");
++                        match w {
++                            Some(r) => fx.get(*r),
++                            None => fx.line(format!("i64.const\t{}", t.next().unwrap())),
++                        }
++                        fx.line(format!("i64.store\t{}", 8 * i));
++                    }
++                    fx.line("global.get\t__stack_pointer");
++                    fx.line("call\trt_construct");
++                    fx.helpers.insert("rt_construct".into());
++                    fx.restore_sp();
++                    fx.check(tmp);
++                    fx.def(*dst);
++                }
++                Inst::PopErrorExit => {
++                    if fx.errors.len() > 1 {
++                        fx.errors.pop();
++                    }
++                }
++                other => return Err(format!("function {}: {:?} (prototype)", f.id, std::mem::discriminant(other))),
++            }
++        }
++        if !terminated {
++            fx.line("unreachable");
++        }
++        fx.line("end_loop");
++        fx.line("unreachable");
++        fx.line("end_function");
++        let _ = fx.bool_of_i32();
++        let _ = kind_scalar(f, 0);
++        body.push_str(&fx.out);
++        // The generic entry: (vm, closure, args) -> i64.
++        let ename = format!("botlish_entry_{}", f.id);
++        writeln!(body, "\t.globl\t{ename}\n\t.type\t{ename},@function\n{ename}:\n\t.functype\t{ename} (i32, i64, i32) -> (i64)\n\t.local\ti64, i64").unwrap();
++        if f.results > 1 {
++            writeln!(body, "\tunreachable\n\tend_function").unwrap();
++            continue;
++        }
++        writeln!(body, "\tlocal.get\t0").unwrap();
++        if f.env {
++            writeln!(body, "\tlocal.get\t1").unwrap();
++        }
++        for p in 0..f.params {
++            writeln!(body, "\tlocal.get\t2\n\ti64.load\t{}", 8 * p).unwrap();
++            if f.raw_params[p as usize] {
++                writeln!(body, "\ti64.const\t1\n\ti64.shr_s").unwrap();
++            }
++        }
++        writeln!(body, "\tcall\tbotlish_fn_{}", f.id).unwrap();
++        if f.scalar_result() && f.may_error {
++            // (value, status) -> the value, or 0 on failure.
++            writeln!(body, "\tlocal.set\t3\n\tlocal.set\t4\n\tlocal.get\t3\n\ti64.eqz\n\tif\n\ti64.const\t0\n\treturn\n\tend_if\n\tlocal.get\t4").unwrap();
++        }
++        if f.raw_result {
++            writeln!(body, "\ti64.const\t1\n\ti64.shl\n\ti64.const\t1\n\ti64.or").unwrap();
++        }
++        writeln!(body, "\tend_function").unwrap();
++    }
++    // Declarations: helpers and the glue's functions.
++    let mut asm = String::new();
++    asm.push_str("\t.globaltype\t__stack_pointer, i32\n");
++    for h in &helpers {
++        let sig = match h.as_str() {
++            "proto_ss_enter" => "(i32, i32) -> (i32)".to_string(),
++            "proto_ss_leave" => "(i32, i32) -> ()".to_string(),
++            "proto_const" => "(i32, i32) -> (i64)".to_string(),
++            "proto_capture" => "(i32, i64, i32) -> (i64)".to_string(),
++            "proto_struct_get" => "(i32, i64, i32) -> (i64)".to_string(),
++            "proto_ctx_load" => "(i32, i32) -> (i64)".to_string(),
++            "proto_ctx_store" => "(i32, i32, i64) -> ()".to_string(),
++            name => {
++                let s = helper_sig(name).ok_or_else(|| format!("no signature for {name}"))?;
++                let mut ps = vec!["i32"];
++                ps.extend(s.chars().map(|c| if c == 'p' { "i32" } else { "i64" }));
++                format!("({}) -> (i64)", ps.join(", "))
++            }
++        };
++        writeln!(asm, "\t.functype\t{h} {sig}").unwrap();
++    }
++    for f in &program.functions {
++        writeln!(asm, "\t.functype\tbotlish_fn_{} {}", f.id, direct_type(f)).unwrap();
++        writeln!(asm, "\t.functype\tbotlish_entry_{} (i32, i64, i32) -> (i64)", f.id).unwrap();
++    }
++    asm.push_str("\t.text\n");
++    asm.push_str(&body);
++    use crate::runtime::program::{program_info, FunctionShape, ProgramDescriptor};
++    let descriptor = ProgramDescriptor {
++        info: std::sync::Arc::new(program_info(program)),
++        constants: pool.entries.clone(),
++        statics: program.statics,
++        context_bytes: program.context_bytes,
++        functions: program.functions.iter().map(|_| FunctionShape { direct_size: 0, entry_size: 0, safepoints: vec![] }).collect(),
++        exports: program.exports.clone(),
++    }
++    .encode();
++    // The startup crate (wasm32): the code table and the run.
++    let mut startup = String::new();
++    startup.push_str("use botlish_native::runtime::{program, show, value::*, vm::Vm};\nunsafe extern \"C\" {\n    fn botlish_fn_0(vm: *mut Vm) -> u64;\n");
++    for f in &program.functions {
++        writeln!(startup, "    fn botlish_entry_{}(vm: *mut Vm, c: u64, a: *const u64) -> u64;", f.id).unwrap();
++    }
++    startup.push_str("}\n");
++    startup.push_str(GLUE);
++    startup.push_str("fn code() -> Vec<(usize, usize)> {\n    vec![\n");
++    for f in &program.functions {
++        if f.id == 0 {
++            writeln!(startup, "        (botlish_fn_0 as usize, botlish_entry_0 as usize),").unwrap();
++        } else {
++            writeln!(startup, "        (botlish_entry_{0} as usize, botlish_entry_{0} as usize),", f.id).unwrap();
++        }
++    }
++    startup.push_str("    ]\n}\n");
++    Ok(Emitted { asm, descriptor, startup })
++}
++
++const GLUE: &str = r#"
++static DESCRIPTOR: &[u8] = include_bytes!("descriptor.bin");
++
++#[unsafe(no_mangle)]
++pub extern "C" fn proto_ss_enter(vm: *mut Vm, n: u32) -> *mut u64 {
++    let vm = unsafe { &mut *vm };
++    let base = vm.ss_top;
++    let top = unsafe { base.add(n as usize) };
++    if top > vm.ss_limit {
++        eprintln!("error {{NATIVE LIMIT STACK}} {{native stack exhausted: too many nested calls}}");
++        std::process::exit(1);
++    }
++    for i in 0..n as usize {
++        unsafe { *base.add(i) = 0 };
++    }
++    vm.ss_top = top;
++    base
++}
++
++#[unsafe(no_mangle)]
++pub extern "C" fn proto_ss_leave(vm: *mut Vm, base: *mut u64) {
++    unsafe { (*vm).ss_top = base };
++}
++
++#[unsafe(no_mangle)]
++pub extern "C" fn proto_const(vm: *mut Vm, i: u32) -> u64 {
++    unsafe { *(*vm).consts.add(i as usize) }
++}
++
++#[unsafe(no_mangle)]
++pub extern "C" fn proto_struct_get(_vm: *mut Vm, v: u64, slot: u32) -> u64 {
++    struct_of(v).fields()[slot as usize]
++}
++
++#[unsafe(no_mangle)]
++pub extern "C" fn proto_ctx_load(vm: *mut Vm, offset: u32) -> u64 {
++    unsafe { *(((*vm).context_ptr as *mut u8).add(offset as usize) as *const u64) }
++}
++
++#[unsafe(no_mangle)]
++pub extern "C" fn proto_ctx_store(vm: *mut Vm, offset: u32, v: u64) {
++    unsafe { *(((*vm).context_ptr as *mut u8).add(offset as usize) as *mut u64) = v };
++}
++
++#[unsafe(no_mangle)]
++pub extern "C" fn proto_str_len(_vm: *mut Vm, v: u64) -> u64 {
++    ((str_of(v).chars as u64) << 1) | 1
++}
++
++#[unsafe(no_mangle)]
++pub extern "C" fn proto_capture(_vm: *mut Vm, closure: u64, i: u32) -> u64 {
++    let c = closure_of(closure);
++    unsafe { *c.caps.add(i as usize) }
++}
++
++fn main() {
++    let descriptor = program::ProgramDescriptor::decode(DESCRIPTOR).expect("descriptor");
++    let (mut vm, entry) = program::instantiate(&descriptor, &code());
++    let v = entry(&mut *vm);
++    if v == NO_VALUE {
++        let e = vm.error.take().map(|e| e.message(&vm.info)).unwrap_or_default();
++        println!("error {e}");
++        std::process::exit(1);
++    }
++    println!("value {}", show::show(&vm.info, v));
++    println!("collections {}", vm.heap.collections);
++}
++"#;
+diff -ruN a/native/src/main.rs b/native/src/main.rs
+--- a/native/src/main.rs	2026-11-15 18:34:53.000000000 +0000
++++ b/native/src/main.rs	2026-11-15 19:11:35.000000000 +0000
+@@ -753,7 +753,7 @@
+             Ok(n) if n > 0 => (n, file),
+             _ => return usage(),
+         },
+-        ("object" | "executable" | "aot-run", [_, file, ..]) => (1, file),
++        ("object" | "executable" | "aot-run" | "wasm-asm", [_, file, ..]) => (1, file),
+         ("library" | "library-dll", [_, _, file, ..]) => (1, file),
+         ("vms", [n, file, ..]) => match n.parse::<usize>() {
+             Ok(n) if (1..=32).contains(&n) => (n, file),
+@@ -779,6 +779,20 @@
+     // Coroutine fusion (codegen::fusion, COROUTINE-FUSION-MILESTONE-1.md):
+     // every command sees the program code generation compiles.
+     let fusion = if codegen::fusion::enabled() { codegen::fusion::fuse(&mut program) } else { Vec::new() };
++    // WASM-ARCH PROTOTYPE: resumable coroutines where no stack switch exists.
++    if codegen::resumable::enabled() {
++        match codegen::resumable::lower(&mut program) {
++            Ok(report) => {
++                if std::env::var("BOTLISH_NATIVE_RESUMABLE_REPORT").is_ok() && report.functions > 0 {
++                    eprintln!("resumable {report:?}");
++                }
++            }
++            Err(message) => {
++                emit_error(&["NATIVE", "UNSUPPORTED"], &format!("resumable coroutine lowering: {message}"));
++                return 0;
++            }
++        }
++    }
+     // BOTLISH_NATIVE_COROUTINE_FUSION_LOG=FILE appends the `fusion`
+     // command's report of every program the driver loads: a census of a
+     // whole test run (audit/coroutine-fusion/tools/census.tcl).
+@@ -831,6 +845,23 @@
+             emit(codegen::nirtext::program_text(&text, &program).trim_end());
+             0
+         }
++        // WASM-ARCH PROTOTYPE: OUT/program.s, OUT/descriptor.bin, OUT/startup.rs.
++        "wasm-asm" => {
++            let dir = std::path::Path::new(&rest[0]);
++            match codegen::wasmemit::emit(&program) {
++                Ok(e) => {
++                    let _ = std::fs::create_dir_all(dir);
++                    std::fs::write(dir.join("program.s"), e.asm).unwrap();
++                    std::fs::write(dir.join("descriptor.bin"), e.descriptor).unwrap();
++                    std::fs::write(dir.join("startup.rs"), e.startup).unwrap();
++                    0
++                }
++                Err(message) => {
++                    emit_error(&["NATIVE", "UNSUPPORTED"], &format!("wasm-asm: {message}"));
++                    1
++                }
++            }
++        }
+         "roots" => {
+             emit(&codegen::roots::report(&program));
+             0
+diff -ruN a/native/src/nir.rs b/native/src/nir.rs
+--- a/native/src/nir.rs	2026-11-15 18:34:53.000000000 +0000
++++ b/native/src/nir.rs	2026-11-15 19:20:54.000000000 +0000
+@@ -504,6 +504,22 @@
+     /// (runtime/coroutine.rs's `reraise`). Allocates (a safepoint), never
+     /// fails, never runs code and holds no stack.
+     CoFailed,
++    // WASM-ARCH PROTOTYPE: resumable coroutine frames (codegen::resumable).
++    FrTake,
++    FrIsFrame,
++    FrEnsure,
++    FrPut,
++    FrPutRaw,
++    FrFinish,
++    FrGet,
++    FrGetRaw,
++    FrPoint,
++    FrCallee,
++    FrPending,
++    FrSetResume,
++    FrIsSuspend,
++    CoSuspend,
++    CoMsg,
+     /// C addresses (C-ABI-TYPES.md; runtime/value.rs's immediate C address
+     /// word). `cptrnull`: the null pointer (a constant word). `cptrisnull
+     /// %p`: Bool, %p is null (a word comparison; no memory is read).
+@@ -1115,6 +1131,21 @@
+     "corelease" => CoRelease,
+     "coabandon" => CoAbandon,
+     "cofailed" => CoFailed,
++    "frtake" => FrTake,
++    "frisframe" => FrIsFrame,
++    "frensure" => FrEnsure,
++    "frput" => FrPut,
++    "frputraw" => FrPutRaw,
++    "frfinish" => FrFinish,
++    "frget" => FrGet,
++    "frgetraw" => FrGetRaw,
++    "frpoint" => FrPoint,
++    "frcallee" => FrCallee,
++    "frpending" => FrPending,
++    "frsetresume" => FrSetResume,
++    "frissuspend" => FrIsSuspend,
++    "cosuspend" => CoSuspend,
++    "comsg" => CoMsg,
+     "affinedrop" => AffineDrop,
+     "affinedroprun" => AffineDropRun,
+     "cleanupcall" => CleanupCall,
+@@ -1241,7 +1272,11 @@
+         use OpCode::*;
+         match self {
+             ListNew | CleanupTable => None,
+-            Argv | CPtrNull | CoFailed | EnumUnmatched => Some(0),
++            Argv | CPtrNull | CoFailed | EnumUnmatched | FrTake | FrPending | CoMsg => Some(0),
++            FrIsFrame | FrPoint | FrCallee | FrSetResume | FrIsSuspend | CoSuspend => Some(1),
++            FrGet | FrGetRaw => Some(2),
++            FrEnsure | FrPut | FrPutRaw => Some(3),
++            FrFinish => Some(4),
+             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
+             StrLen | StrLower | ListLen | ListFlat | TreeChildren | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
+             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
+@@ -1272,7 +1307,7 @@
+         matches!(self, OpCode::RUnbox | OpCode::RIAdd | OpCode::RISub | OpCode::RIMul
+             | OpCode::RIShr | OpCode::RIShl | OpCode::RIAnd | OpCode::RIOr | OpCode::RIXor
+             | OpCode::RIMod | OpCode::RIModTotal | OpCode::RTabLoad8 | OpCode::RTabLoad16
+-            | OpCode::ShortLen | OpCode::AsciiLen)
++            | OpCode::ShortLen | OpCode::AsciiLen | OpCode::FrPoint | OpCode::FrGetRaw)
+     }
+ 
+     /// 1 if OP's operands are raw (untagged) machine integers, not Values.
+@@ -1298,6 +1333,12 @@
+             if i == 0 { RegKind::I64 } else { RegKind::Tagged }
+         } else if matches!(self, RTabLoad8 | RTabLoad16) {
+             if i == 0 { RegKind::Tagged } else { RegKind::Raw }
++        } else if matches!(self, FrEnsure) {
++            if i == 0 { RegKind::Tagged } else { RegKind::Raw }
++        } else if matches!(self, FrPut | FrGet | FrGetRaw | FrPutRaw) {
++            if i == 1 { RegKind::Raw } else { RegKind::Tagged }
++        } else if matches!(self, FrFinish) {
++            if i == 1 || i == 3 { RegKind::Raw } else { RegKind::Tagged }
+         } else if self.raw_operands() {
+             RegKind::Raw
+         } else if matches!(self, ShortToStr | ShortLen | ShortEq) {
+@@ -3891,6 +3932,9 @@
+                         return fail(ctx(format!("op {op:?}: result %{dst} is declared {}, must be tagged", kind(*dst).name())));
+                     }
+                 }
++                Inst::Op { dst, op, args } if matches!(op, OpCode::FrPutRaw | OpCode::FrGetRaw) => {
++                    let _ = (dst, args);
++                }
+                 Inst::Op { dst, op, args } => {
+                     if let Some((i, a)) = args.iter().enumerate().find(|(i, a)| kind(**a) != op.operand_kind_at(*i)) {
+                         return fail(ctx(format!(
+@@ -4086,6 +4130,17 @@
+                 Inst::ContextStore { value, .. } => used.push(*value),
+                 Inst::Closure { captures, .. } => used.extend(captures),
+                 Inst::Guard { value, .. } | Inst::GuardBool { value } => used.push(*value),
++                // WASM-ARCH PROTOTYPE: a resume frame takes a plan live across a
++                // suspension (consumed: the frame owns it until frget redefines it).
++                Inst::Op { op: OpCode::FrPut, args, .. } => {
++                    used.push(args[0]);
++                    used.push(args[1]);
++                    if plan[args[2] as usize] {
++                        consumed.push(args[2]);
++                    } else {
++                        used.push(args[2]);
++                    }
++                }
+                 Inst::Op { args, .. } => used.extend(args),
+                 Inst::StructNew { fields, .. } => used.extend(fields),
+                 Inst::Fail { payload, .. } => used.extend(payload),
+diff -ruN a/native/src/runtime/aot.rs b/native/src/runtime/aot.rs
+--- a/native/src/runtime/aot.rs	2026-11-14 16:03:38.000000000 +0000
++++ b/native/src/runtime/aot.rs	2026-11-15 19:11:59.000000000 +0000
+@@ -75,6 +75,10 @@
+         use std::os::unix::ffi::OsStringExt;
+         std::env::args_os().map(|a| a.into_vec()).collect()
+     }
++    #[cfg(target_family = "wasm")]
++    {
++        std::env::args().map(|a| a.into_bytes()).collect()
++    }
+     #[cfg(windows)]
+     {
+         use std::os::windows::ffi::OsStrExt;
+diff -ruN a/native/src/runtime/bytesobj.rs b/native/src/runtime/bytesobj.rs
+--- a/native/src/runtime/bytesobj.rs	2026-11-14 16:03:38.000000000 +0000
++++ b/native/src/runtime/bytesobj.rs	2026-11-15 19:11:59.000000000 +0000
+@@ -71,7 +71,10 @@
+ 
+ pub const BYTES_LEN_OFFSET: i32 = offset_of!(BytesObj, len) as i32;
+ 
++#[cfg(target_pointer_width = "64")]
+ const _: () = assert!(std::mem::size_of::<BytesObj>() == BYTES_PAYLOAD_OFFSET);
++#[cfg(target_pointer_width = "32")]
++const _: () = assert!(std::mem::size_of::<BytesObj>() <= BYTES_PAYLOAD_OFFSET);
+ const _: () = assert!(BYTES_PAYLOAD_OFFSET % BYTES_ALIGN == 0);
+ const _: () = assert!(offset_of!(BytesObj, hdr) == 0);
+ 
+diff -ruN a/native/src/runtime/coroutine.rs b/native/src/runtime/coroutine.rs
+--- a/native/src/runtime/coroutine.rs	2026-11-14 16:03:38.000000000 +0000
++++ b/native/src/runtime/coroutine.rs	2026-11-15 18:55:23.000000000 +0000
+@@ -124,6 +124,174 @@
+     all(windows, target_arch = "x86_64", target_env = "msvc")
+ )) && super::framewalk::NATIVE_FRAME_ROOTS;
+ 
++/// WASM-ARCH PROTOTYPE: where no stack switch exists, coroutines run as
++/// resumable state machines (codegen::resumable): every yielding function
++/// keeps the values live across a suspension in a heap frame (FrameObj), and
++/// a suspension returns (SUSPEND) through every activation to the segment.
++pub const RESUMABLE: bool = !STACK_SWITCHING;
++
++/// WASM-ARCH PROTOTYPE: one suspended activation of a resumable function.
++#[repr(C)]
++pub struct FrameObj {
++    pub hdr: Header,
++    /// The resume point the activation suspended at (1-based).
++    pub point: u64,
++    /// How many of `tagged` the suspension stored (the only ones traced).
++    pub ntagged: u64,
++    /// The suspended callee's frame (a call site), or UNIT (a yield site).
++    pub callee: Value,
++    pub tagged: Vec<Value>,
++    pub raw: Vec<u64>,
++}
++
++fn frame_of<'a>(v: Value) -> &'a mut FrameObj {
++    debug_assert_eq!(heap_kind(v), KIND_FRAME);
++    unsafe { &mut *(v as *mut FrameObj) }
++}
++
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_fr_take(p: *mut Vm) -> Value {
++    std::mem::replace(&mut vm(p).resume_frame, UNIT)
++}
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_fr_is_frame(_p: *mut Vm, v: Value) -> Value {
++    if is_pointer(v) && heap_kind(v) == KIND_FRAME { TRUE } else { FALSE }
++}
++/// RF itself when it is a frame (an activation suspending again reuses its
++/// frame), else a new frame with room for NT tagged and NR raw slots.
++/// Nothing is traced until `rt_fr_finish` says how many slots it stored.
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_fr_ensure(p: *mut Vm, rf: Value, nt: u64, nr: u64) -> Value {
++    if is_pointer(rf) && heap_kind(rf) == KIND_FRAME {
++        let f = frame_of(rf);
++        f.ntagged = 0;
++        f.callee = UNIT;
++        return rf;
++    }
++    let bytes = 8 * (nt + nr) as usize;
++    vm(p).alloc(
++        FrameObj { hdr: Header::new(KIND_FRAME, false), point: 0, ntagged: 0, callee: UNIT, tagged: vec![UNIT; nt as usize], raw: vec![0; nr as usize] },
++        bytes,
++    )
++}
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_fr_put(_p: *mut Vm, fr: Value, i: u64, v: Value) -> Value {
++    frame_of(fr).tagged[i as usize] = v;
++    UNIT
++}
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_fr_put_raw(_p: *mut Vm, fr: Value, i: u64, v: u64) -> Value {
++    frame_of(fr).raw[i as usize] = v;
++    UNIT
++}
++/// Ends a suspension: the resume point K, the suspended callee's frame CF
++/// and the NT tagged slots stored; the frame is left for the caller.
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_fr_finish(p: *mut Vm, fr: Value, k: u64, cf: Value, nt: u64) -> Value {
++    let f = frame_of(fr);
++    f.point = k;
++    f.callee = cf;
++    f.ntagged = nt;
++    vm(p).pending_frame = fr;
++    SUSPEND
++}
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_fr_get(_p: *mut Vm, fr: Value, i: u64) -> Value {
++    frame_of(fr).tagged[i as usize]
++}
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_fr_get_raw(_p: *mut Vm, fr: Value, i: u64) -> u64 {
++    frame_of(fr).raw[i as usize]
++}
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_fr_point(_p: *mut Vm, fr: Value) -> u64 {
++    frame_of(fr).point
++}
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_fr_callee(_p: *mut Vm, fr: Value) -> Value {
++    frame_of(fr).callee
++}
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_fr_pending(p: *mut Vm) -> Value {
++    std::mem::replace(&mut vm(p).pending_frame, UNIT)
++}
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_fr_set_resume(p: *mut Vm, cf: Value) -> Value {
++    vm(p).resume_frame = cf;
++    UNIT
++}
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_fr_is_suspend(_p: *mut Vm, v: Value) -> Value {
++    if v == SUSPEND { TRUE } else { FALSE }
++}
++/// A yield's outward value, stored in the running coroutine before its
++/// activations return SUSPEND.
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_co_suspend(p: *mut Vm, value: Value) -> Value {
++    let co = vm(p).co_current;
++    if co.is_null() {
++        return vm(p).fail(RtError::Semantic { kind: "YIELD-OUTSIDE-COROUTINE", message: "yield outside a coroutine: no coroutine is running here".to_string() });
++    }
++    unsafe { (*co).value = value };
++    UNIT
++}
++/// A resumed yield's value: the resume message (NO_VALUE: abandoned, the
++/// abandonment pending in the Vm).
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_co_msg(p: *mut Vm) -> Value {
++    let co = vm(p).co_current;
++    if co.is_null() {
++        return vm(p).fail(RtError::Bug("a resumed yield outside a coroutine".to_string()));
++    }
++    unsafe { (*co).value }
++}
++
++/// Runs one segment of resumable coroutine CO: the thunk's activation is
++/// entered with FRAME (UNIT: the start), and every activation of the chain
++/// either returns (the body ended) or returns SUSPEND, leaving the
++/// outermost frame for this segment to keep. No frame of any activation
++/// outlives the call: the suspended state is the frame chain alone.
++unsafe fn segment_resumable(p: *mut Vm, co: *mut CoroutineObj, frame: Value) -> Value {
++    unsafe {
++        (*co).resumer = (*p).co_current;
++        (*p).co_current = co;
++        (*co).state = CO_RUNNING;
++        (*p).resume_frame = frame;
++        let thunk = (*co).thunk;
++        let result = if heap_kind(thunk) == KIND_CLOSURE {
++            let c = closure_of(thunk);
++            let entry: super::ops::GenericEntry = std::mem::transmute(c.code);
++            entry(p, thunk, std::ptr::null())
++        } else {
++            (*p).fail(RtError::Bug("a coroutine's body is not a Block".to_string()))
++        };
++        (*p).resume_frame = UNIT;
++        (*p).co_current = (*co).resumer;
++        (*co).resumer = std::ptr::null_mut();
++        if result == SUSPEND {
++            (*co).frame = std::mem::replace(&mut (*p).pending_frame, UNIT);
++            (*co).state = CO_SUSPENDED;
++            return (*co).value;
++        }
++        (*co).frame = UNIT;
++        (*co).thunk = UNIT;
++        if result == NO_VALUE {
++            let error = (*p).error.take().unwrap_or_else(|| RtError::Bug("a coroutine body failed without recording an error".to_string()));
++            let id = (*p).declared_error;
++            (*p).declared_error = 0;
++            let payload = std::mem::take(&mut (*p).declared_payload);
++            let shape = (*p).declared_payload_shape;
++            (*co).failure = Some(Box::new((error, id, payload, shape)));
++            (*co).state = CO_FAILED;
++            reraise(p, co)
++        } else {
++            (*co).value = result;
++            (*co).state = CO_COMPLETED;
++            result
++        }
++    }
++}
++
+ pub const CO_FRESH: u8 = 0;
+ pub const CO_RUNNING: u8 = 1;
+ pub const CO_SUSPENDED: u8 = 2;
+@@ -184,6 +352,8 @@
+     /// The coroutine whose segment resumed this one (null: the main stack),
+     /// while this one runs.
+     pub resumer: *mut CoroutineObj,
++    /// WASM-ARCH PROTOTYPE: a suspended resumable coroutine's outermost frame.
++    pub frame: Value,
+ }
+ 
+ pub fn coroutine_of<'a>(v: Value) -> &'a mut CoroutineObj {
+@@ -193,7 +363,7 @@
+ 
+ /// Values a coroutine object refers to directly (not its stack's roots).
+ pub fn fields(co: &CoroutineObj) -> Vec<Value> {
+-    let mut values = vec![co.thunk, co.value];
++    let mut values = vec![co.thunk, co.value, co.frame];
+     if let Some(failure) = &co.failure {
+         values.extend(failure.0.values());
+         values.extend(failure.2.iter().copied());
+@@ -643,6 +813,7 @@
+             saved_sp: SwitchPoint::default(),
+             resumer_sp: SwitchPoint::default(),
+             resumer: std::ptr::null_mut(),
++            frame: UNIT,
+         },
+         0,
+     )
+@@ -658,6 +829,10 @@
+         if (*co).state != CO_FRESH {
+             return vm(p).fail(RtError::Semantic { kind: "COROUTINE-STATE", message: "the coroutine was already started".to_string() });
+         }
++        if RESUMABLE {
++            vm(p).heap.note_growth(256);
++            return segment_resumable(p, co, UNIT);
++        }
+         if !super::framewalk::NATIVE_FRAME_ROOTS {
+             return vm(p).fail(RtError::Unsupported(
+                 "native coroutines need GC roots in native frames: the fallback root plan (a fallback-roots build) runs none (COROUTINES.md)"
+@@ -796,7 +971,7 @@
+         match (*co).state {
+             CO_SUSPENDED => {
+                 (*co).value = message;
+-                segment(p, co)
++                if RESUMABLE { segment_resumable(p, co, (*co).frame) } else { segment(p, co) }
+             }
+             // Stable terminal success: the cached result, no body code.
+             CO_COMPLETED => (*co).value,
+@@ -871,7 +1046,7 @@
+     // SAFETY: as in rt_co_start: HANDLE is a live coroutine object, touched
+     // through the raw pointer around the switch; it is rooted meanwhile.
+     unsafe {
+-        if (*co).state != CO_SUSPENDED || (*co).stack.is_none() {
++        if (*co).state != CO_SUSPENDED || (!RESUMABLE && (*co).stack.is_none()) {
+             return rt_co_release(p, handle);
+         }
+         vm(p).metrics.record_coroutine_abandoned();
+@@ -882,7 +1057,7 @@
+             vm(p).declared_payload.clear();
+             vm(p).fail(RtError::Semantic { kind: "COROUTINE-ABANDONED", message: "a coroutine was abandoned".to_string() });
+             (*co).value = NO_VALUE;
+-            let outcome = segment(p, co);
++            let outcome = if RESUMABLE { segment_resumable(p, co, (*co).frame) } else { segment(p, co) };
+             if outcome != NO_VALUE {
+                 // A body that completed instead: it caught nothing (no
+                 // handler can name the abandonment), so it cannot have.
+@@ -930,6 +1105,7 @@
+     }
+     vm(p).metrics.record_coroutine_release(co.state == CO_SUSPENDED && co.stack.is_some());
+     co.stack = None;
++    co.frame = UNIT;
+     co.thunk = UNIT;
+     co.value = UNIT;
+     co.failure = None;
+@@ -960,6 +1136,7 @@
+             saved_sp: SwitchPoint::default(),
+             resumer_sp: SwitchPoint::default(),
+             resumer: std::ptr::null_mut(),
++            frame: UNIT,
+         },
+         0,
+     );
+diff -ruN a/native/src/runtime/heap.rs b/native/src/runtime/heap.rs
+--- a/native/src/runtime/heap.rs	2026-11-14 16:03:38.000000000 +0000
++++ b/native/src/runtime/heap.rs	2026-11-15 18:54:48.000000000 +0000
+@@ -217,6 +217,14 @@
+                 // of every frame on its stack, from where it switched away
+                 // (runtime/coroutine.rs). A running one's stack is walked
+                 // with the running chain (Vm::collect_with).
++                // WASM-ARCH PROTOTYPE: a resume frame holds its callee frame and
++                // exactly its first `ntagged` tagged slots (the values live
++                // across its suspension point); raw slots are never traced.
++                KIND_FRAME => {
++                    let f = unsafe { &*(v as *const super::coroutine::FrameObj) };
++                    stack.push(f.callee);
++                    stack.extend_from_slice(&f.tagged[..f.ntagged as usize]);
++                }
+                 KIND_COROUTINE => {
+                     let co = super::coroutine::coroutine_of(v);
+                     stack.extend(super::coroutine::fields(co));
+@@ -337,6 +345,7 @@
+             KIND_STRPLAN => size_of::<StrPlanObj>() + super::construct::strplan_of(v).buf.len(),
+             KIND_LISTPLAN => size_of::<ListPlanObj>() + super::construct::listplan_of(v).items.capacity() * 8,
+             KIND_COROUTINE => size_of::<super::coroutine::CoroutineObj>(),
++            KIND_FRAME => { let f = as_ref::<super::coroutine::FrameObj>(v); size_of::<super::coroutine::FrameObj>() + 8 * (f.tagged.len() + f.raw.len()) }
+             KIND_MUTVEC => super::mutvec::object_size(v),
+             KIND_FLOAT | KIND_DECIMAL | KIND_RAWF32 | KIND_RAWF64 => size_of::<FloatObj>(),
+             kind => panic!("bad heap object kind {kind}"),
+@@ -397,6 +406,7 @@
+             // Its stack, if it still has one (an abandoned suspended
+             // coroutine), goes back to the pool: nothing on it runs.
+             KIND_COROUTINE => drop(Box::from_raw(object as *mut super::coroutine::CoroutineObj)),
++            KIND_FRAME => drop(Box::from_raw(object as *mut super::coroutine::FrameObj)),
+             // The header's share of its backing goes back (the backing is
+             // freed with its last header).
+             KIND_MUTVEC => drop(Box::from_raw(object as *mut super::mutvec::MutVecObj)),
+diff -ruN a/native/src/runtime/library.rs b/native/src/runtime/library.rs
+--- a/native/src/runtime/library.rs	2026-11-14 16:03:38.000000000 +0000
++++ b/native/src/runtime/library.rs	2026-11-15 19:11:59.000000000 +0000
+@@ -559,7 +559,7 @@
+ /// NULs are kept: LEN is authoritative), registered as live.
+ fn owned_buffer(text: &[u8]) -> Bytes {
+     // SAFETY: a fresh allocation of len + 1 bytes, filled before use.
+-    let ptr = unsafe { libc::malloc(text.len() + 1) } as *mut u8;
++    let ptr = unsafe { proto_malloc(text.len() + 1) } as *mut u8;
+     if ptr.is_null() {
+         std::alloc::handle_alloc_error(std::alloc::Layout::array::<u8>(text.len() + 1).unwrap());
+     }
+@@ -845,7 +845,7 @@
+         return STATUS_INVOCATION;
+     }
+     // SAFETY: removed from the live set: this is its one release.
+-    unsafe { libc::free(b.ptr as *mut c_void) };
++    unsafe { proto_free(b.ptr as *mut c_void) };
+     b.ptr = std::ptr::null_mut();
+     b.len = 0;
+     STATUS_OK
+@@ -1077,3 +1077,13 @@
+         assert!(ENTRY_INDEX_INITIALIZE_ONLY < 0);
+     }
+ }
++
++#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
++unsafe fn proto_malloc(n: usize) -> *mut c_void { unsafe { libc::malloc(n) as *mut c_void } }
++#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
++unsafe fn proto_free(p: *mut c_void) { unsafe { libc::free(p as _) } }
++// WASM-ARCH PROTOTYPE: wasm32-unknown-unknown has no C allocator; an 8-byte length prefix over Rust's.
++#[cfg(all(target_family = "wasm", target_os = "unknown"))]
++unsafe fn proto_malloc(n: usize) -> *mut c_void { unsafe { let l = std::alloc::Layout::from_size_align(n + 8, 8).unwrap(); let p = std::alloc::alloc(l); *(p as *mut usize) = n; p.add(8) as *mut c_void } }
++#[cfg(all(target_family = "wasm", target_os = "unknown"))]
++unsafe fn proto_free(p: *mut c_void) { unsafe { let b = (p as *mut u8).sub(8); let n = *(b as *mut usize); std::alloc::dealloc(b, std::alloc::Layout::from_size_align(n + 8, 8).unwrap()) } }
+diff -ruN a/native/src/runtime/metrics.rs b/native/src/runtime/metrics.rs
+--- a/native/src/runtime/metrics.rs	2026-11-14 16:03:38.000000000 +0000
++++ b/native/src/runtime/metrics.rs	2026-11-15 18:54:48.000000000 +0000
+@@ -40,7 +40,7 @@
+ 
+ use super::show::tcl_list;
+ use super::value::{
+-    KIND_BIGINT, KIND_BYTES, KIND_CLOSURE, KIND_COROUTINE, KIND_DECIMAL, KIND_FLOAT, KIND_LIST, KIND_LISTPLAN, KIND_MUTARRAY, KIND_MUTBYTES, KIND_MUTVEC,
++    KIND_BIGINT, KIND_BYTES, KIND_CLOSURE, KIND_COROUTINE, KIND_FRAME, KIND_DECIMAL, KIND_FLOAT, KIND_LIST, KIND_LISTPLAN, KIND_MUTARRAY, KIND_MUTBYTES, KIND_MUTVEC,
+     KIND_NATIVE, KIND_RAWF32, KIND_RAWF64, KIND_RESULT, KIND_SET, KIND_STR, KIND_STRPLAN, KIND_STRUCT, KIND_ENUMCASE,
+ };
+ use std::collections::HashMap;
+@@ -48,7 +48,7 @@
+ 
+ /// One more than the largest `Header::kind` value: `by_kind`/`static_by_kind`
+ /// are indexed directly by kind byte (index 0 unused).
+-pub const KIND_COUNT: usize = 22;
++pub const KIND_COUNT: usize = 23;
+ 
+ pub fn kind_name(kind: u8) -> &'static str {
+     match kind {
+@@ -72,6 +72,7 @@
+         KIND_RAWF32 => "RawFloat",
+         KIND_RAWF64 => "RawDouble",
+         KIND_ENUMCASE => "EnumCase",
++        KIND_FRAME => "ResumeFrame",
+         _ => "?",
+     }
+ }
+diff -ruN a/native/src/runtime/mod.rs b/native/src/runtime/mod.rs
+--- a/native/src/runtime/mod.rs	2026-11-15 18:34:53.000000000 +0000
++++ b/native/src/runtime/mod.rs	2026-11-15 19:11:59.000000000 +0000
+@@ -25,6 +25,18 @@
+ pub mod nview;
+ #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+ pub mod platform;
++#[cfg(target_family = "wasm")]
++pub mod platform {
++    //! WASM-ARCH PROTOTYPE STUB: no guard records, so std::thread::start is refused (ThreadLimit).
++    pub struct OverflowGuard;
++    pub fn reserve_guard() -> Option<usize> { None }
++    pub fn unreserve_guard(_index: usize) {}
++    pub fn free_guards() -> usize { 0 }
++    pub fn guard_mode() -> (bool, usize) { (true, 2) }
++    pub fn install_reserved_guard(_r: usize, _e: bool, _d: usize, _l: &[u8]) -> std::io::Result<OverflowGuard> {
++        Err(std::io::Error::other("no guard on wasm"))
++    }
++}
+ pub mod ops;
+ pub mod program;
+ pub mod show;
+diff -ruN a/native/src/runtime/ops.rs b/native/src/runtime/ops.rs
+--- a/native/src/runtime/ops.rs	2026-11-15 18:34:53.000000000 +0000
++++ b/native/src/runtime/ops.rs	2026-11-15 18:56:01.000000000 +0000
+@@ -94,7 +94,7 @@
+     rt_mv_at, rt_mv_clear, rt_mv_clear_drop, rt_mv_empty, rt_mv_from_list, rt_mv_len, rt_mv_pop, rt_mv_push, rt_mv_share,
+     rt_mv_swap, rt_mv_swap_drop, rt_mv_take, rt_mv_take_front, rt_mv_to_list,
+ };
+-use super::coroutine::{rt_co_abandon, rt_co_create, rt_co_done, rt_co_failed, rt_co_release, rt_co_resume, rt_co_resume0, rt_co_start, rt_co_yield};
++use super::coroutine::{rt_co_abandon, rt_co_create, rt_co_done, rt_co_failed, rt_co_release, rt_co_resume, rt_co_resume0, rt_co_start, rt_co_yield, rt_fr_take, rt_fr_is_frame, rt_fr_ensure, rt_fr_put, rt_fr_put_raw, rt_fr_finish, rt_fr_get, rt_fr_get_raw, rt_fr_point, rt_fr_callee, rt_fr_pending, rt_fr_set_resume, rt_fr_is_suspend, rt_co_suspend, rt_co_msg};
+ use super::error::{semantic_kind, RtError};
+ use super::ffifixture::{
+     rt_ffi_fixture_copy, rt_ffi_fixture_fill, rt_ffi_fixture_fill_checked, rt_ffi_fixture_mixed, rt_ffi_fixture_read,
+@@ -210,6 +210,8 @@
+             // in particular must be a safepoint -- a suspended frame's roots
+             // are found only through its stack map.
+             | CoCreate | CoStart | CoResume | CoResume0 | CoYield
++            // WASM-ARCH PROTOTYPE: a frame is allocated at a suspension.
++            | FrEnsure
+             // A fused coroutine's cached failure (codegen::fusion): one
+             // terminal coroutine object.
+             | CoFailed
+@@ -359,7 +361,9 @@
+         // A segment ends with the body's unhandled error; a yield outside a
+         // running coroutine is a defensive runtime check a checked program
+         // never reaches.
+-        | CoStart | CoResume | CoResume0 | CoYield)
++        | CoStart | CoResume | CoResume0 | CoYield
++        // WASM-ARCH PROTOTYPE: an abandoned yield fails on resume.
++        | CoSuspend | CoMsg)
+ }
+ 
+ pub type GenericEntry = extern "C" fn(*mut Vm, Value, *const Value) -> Value;
+@@ -4389,6 +4393,7 @@
+         // A fused coroutine's failure cache exists only in the code the
+         // fusion pass writes (codegen::fusion).
+         | CoFailed
++        | FrTake | FrIsFrame | FrEnsure | FrPut | FrPutRaw | FrFinish | FrGet | FrGetRaw | FrPoint | FrCallee | FrPending | FrSetResume | FrIsSuspend | CoSuspend | CoMsg
+         // The fixed-layout ops exist only in the straight-line code of one
+         // statically known layout (native/lower.tcl's LayoutParse /
+         // LayoutEmit): a binary operation is never a value.
+@@ -4606,6 +4611,21 @@
+     (rt_co_release, 2),
+     (rt_co_abandon, 2),
+     (rt_co_failed, 1),
++    (rt_fr_take, 1),
++    (rt_fr_is_frame, 2),
++    (rt_fr_ensure, 4),
++    (rt_fr_put, 4),
++    (rt_fr_put_raw, 4),
++    (rt_fr_finish, 5),
++    (rt_fr_get, 3),
++    (rt_fr_get_raw, 3),
++    (rt_fr_point, 2),
++    (rt_fr_callee, 2),
++    (rt_fr_pending, 1),
++    (rt_fr_set_resume, 2),
++    (rt_fr_is_suspend, 2),
++    (rt_co_suspend, 2),
++    (rt_co_msg, 1),
+     (rt_affine_drop, 3),
+     (rt_affine_drop_run, 3),
+     (rt_cleanup_call, 3),
+diff -ruN a/native/src/runtime/strobj.rs b/native/src/runtime/strobj.rs
+--- a/native/src/runtime/strobj.rs	2026-11-14 16:03:38.000000000 +0000
++++ b/native/src/runtime/strobj.rs	2026-11-15 19:11:59.000000000 +0000
+@@ -80,9 +80,15 @@
+ use std::ptr;
+ 
+ /// Size of the sized prefix (header + metadata); also where the text starts.
++#[cfg(target_pointer_width = "64")]
+ pub const STR_HEADER_SIZE: usize = 25;
++#[cfg(target_pointer_width = "32")]
++pub const STR_HEADER_SIZE: usize = 17;
+ /// Offset of the UTF-8 bytes within the object.
++#[cfg(target_pointer_width = "64")]
+ pub const STR_TEXT_OFFSET: usize = 25;
++#[cfg(target_pointer_width = "32")]
++pub const STR_TEXT_OFFSET: usize = 17;
+ /// Alignment of the allocation (the header's; the text needs none).
+ pub const STR_ALIGN: usize = 8;
+ /// The smallest a String allocation can be: the header, no text.
+diff -ruN a/native/src/runtime/value.rs b/native/src/runtime/value.rs
+--- a/native/src/runtime/value.rs	2026-11-15 18:34:53.000000000 +0000
++++ b/native/src/runtime/value.rs	2026-11-15 18:54:48.000000000 +0000
+@@ -260,6 +260,12 @@
+ /// case's immediate word, which stays the representation of every
+ /// payload-free case: the two forms are one semantic kind.
+ pub const KIND_ENUMCASE: u8 = 21;
++/// WASM-ARCH PROTOTYPE: a suspended activation of a resumable (state-machine)
++/// yielding function: runtime/coroutine.rs's FrameObj.
++pub const KIND_FRAME: u8 = 22;
++/// WASM-ARCH PROTOTYPE: what a resumable function returns when it suspended
++/// (never a program value: low five bits 0b11010 are no kind's tag).
++pub const SUSPEND: Value = 26;
+ 
+ #[repr(C)]
+ pub struct Header {
+diff -ruN a/native/src/runtime/vm.rs b/native/src/runtime/vm.rs
+--- a/native/src/runtime/vm.rs	2026-11-14 16:03:38.000000000 +0000
++++ b/native/src/runtime/vm.rs	2026-11-15 18:54:48.000000000 +0000
+@@ -334,6 +334,11 @@
+     /// `resumer` link it is the chain of running coroutines: every one a GC
+     /// root, and every stack on it walked by `collect_with`.
+     pub co_current: *mut super::coroutine::CoroutineObj,
++    /// WASM-ARCH PROTOTYPE: the frame a resumable function's prologue takes
++    /// (UNIT: a fresh call) and the frame a suspending callee left for its
++    /// caller. Both GC roots.
++    pub resume_frame: Value,
++    pub pending_frame: Value,
+     /// The transfer plans this Vm's code has used (runtime/transfer.rs), by
+     /// the address of their static String constant: parsed once per
+     /// program, not once per encode or decode. Only static constants are
+@@ -416,6 +421,8 @@
+             foreign_open: Vec::new(),
+             callback_segments: Vec::new(),
+             co_current: std::ptr::null_mut(),
++            resume_frame: UNIT,
++            pending_frame: UNIT,
+             transfer_plans: std::collections::HashMap::new(),
+             collection_hook: None,
+             thread: super::thread::VmThread::default(),
+@@ -790,6 +797,7 @@
+             .chain(error_values)
+             .chain(self.declared_payload.iter().copied())
+             .chain(self.temp_roots.iter().copied())
++            .chain([self.resume_frame, self.pending_frame])
+             .chain(self.context_roots.iter().copied())
+             .chain(self.cleanups.iter().copied())
+             .chain(self.statics_table.iter().copied());

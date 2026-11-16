@@ -1,0 +1,38 @@
+# A deep yield (three yielding functions deep, one recursive) and a
+# coroutine whose segments resume another coroutine (a nested chain).
+import std::coroutine
+
+fn leaf(n: int) -> int:
+    yield n
+    n * 2
+
+fn middle(n: int) -> int:
+    a = leaf(n)
+    b = leaf(n + 1)
+    a + b
+
+fn down(depth: int, n: int) -> int:
+    if depth == 0:
+        return middle(n)
+    r = down(depth - 1, n + 10)
+    yield r
+    r + 1
+
+fn driver(limit: int) -> int:
+    coroutine {step: inner, first: x} = down(3, 0)
+    total = fold i from 0 to limit with intermediate acc x:
+        yield acc
+        if std::coroutine::done?(inner):
+            break
+        acc + inner()
+    total
+
+coroutine {step: outer, first: o0} = driver(10)
+o1 = outer()
+o2 = outer()
+o3 = outer()
+o4 = outer()
+o5 = outer()
+o6 = outer()
+o7 = outer()
+[o0, o1, o2, o3, o4, o5, o6, o7, std::coroutine::done?(outer)]

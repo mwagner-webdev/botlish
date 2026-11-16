@@ -1,0 +1,61 @@
+== E1 before the patches: wasm32-unknown-unknown
+      1     --> src/runtime/thread.rs:1188:23
+      1    --> src/runtime/library.rs:562:30
+      1    --> src/runtime/library.rs:848:20
+      1    --> src/runtime/strobj.rs:108:15
+      1    --> src/runtime/thread.rs:294:36
+      1    --> src/runtime/thread.rs:298:44
+      1    --> src/runtime/thread.rs:320:20
+      1    --> src/runtime/thread.rs:355:20
+      1    --> src/runtime/thread.rs:388:30
+      1    --> src/runtime/thread.rs:391:20
+      1   --> src/runtime/aot.rs:72:26
+      1   --> src/runtime/bytesobj.rs:74:15
+      1 error: could not compile `botlish-native` (lib) due to 12 previous errors
+      1 error[E0080]: evaluation panicked: assertion failed: offset_of!(StrObj, ascii) + 1 == STR_TEXT_OFFSET
+      1 error[E0080]: evaluation panicked: assertion failed: std::mem::size_of::<BytesObj>() == BYTES_PAYLOAD_OFFSET
+      1 error[E0308]: mismatched types
+      1 error[E0425]: cannot find function `free` in crate `libc`
+      1 error[E0425]: cannot find function `malloc` in crate `libc`
+      7 error[E0433]: cannot find `platform` in `super`
+== E1 before the patches: wasm32-wasip1
+      1     --> src/runtime/thread.rs:1188:23
+      1    --> src/runtime/strobj.rs:108:15
+      1    --> src/runtime/thread.rs:294:36
+      1    --> src/runtime/thread.rs:298:44
+      1    --> src/runtime/thread.rs:320:20
+      1    --> src/runtime/thread.rs:355:20
+      1    --> src/runtime/thread.rs:388:30
+      1    --> src/runtime/thread.rs:391:20
+      1   --> src/runtime/aot.rs:72:26
+      1   --> src/runtime/bytesobj.rs:74:15
+      1 error: could not compile `botlish-native` (lib) due to 10 previous errors
+      1 error[E0080]: evaluation panicked: assertion failed: offset_of!(StrObj, ascii) + 1 == STR_TEXT_OFFSET
+      1 error[E0080]: evaluation panicked: assertion failed: std::mem::size_of::<BytesObj>() == BYTES_PAYLOAD_OFFSET
+      1 error[E0308]: mismatched types
+      7 error[E0433]: cannot find `platform` in `super`
+== E1 before the patches: wasm32-wasip2
+      1     --> src/runtime/thread.rs:1188:23
+      1    --> src/runtime/strobj.rs:108:15
+      1    --> src/runtime/thread.rs:294:36
+      1    --> src/runtime/thread.rs:298:44
+      1    --> src/runtime/thread.rs:320:20
+      1    --> src/runtime/thread.rs:355:20
+      1    --> src/runtime/thread.rs:388:30
+      1    --> src/runtime/thread.rs:391:20
+      1   --> src/runtime/aot.rs:72:26
+      1   --> src/runtime/bytesobj.rs:74:15
+      1 error: could not compile `botlish-native` (lib) due to 10 previous errors
+      1 error[E0080]: evaluation panicked: assertion failed: offset_of!(StrObj, ascii) + 1 == STR_TEXT_OFFSET
+      1 error[E0080]: evaluation panicked: assertion failed: std::mem::size_of::<BytesObj>() == BYTES_PAYLOAD_OFFSET
+      1 error[E0308]: mismatched types
+      7 error[E0433]: cannot find `platform` in `super`
+== E1 after the patches: wasm32-unknown-unknown
+    Finished `release` profile [optimized + debuginfo] target(s) in 15.86s
+== E1 after the patches: wasm32-wasip1
+    Finished `release` profile [optimized + debuginfo] target(s) in 13.40s
+== E1 after the patches: wasm32-wasip2
+    Finished `release` profile [optimized + debuginfo] target(s) in 11.50s
+    Finished `release` profile [optimized + debuginfo] target(s) in 2m 04s
+    Finished `release` profile [optimized + debuginfo] target(s) in 11.40s
+    Finished `release` profile [optimized + debuginfo] target(s) in 10.99s
