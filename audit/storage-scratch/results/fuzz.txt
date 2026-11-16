@@ -1,0 +1,9 @@
+# tclsh9.0 audit/storage-scratch/tools/fuzz.tcl -seeds 1-12 -count 6
+programs 72, failures 0, invalid 0
+sites selected 1002, emitted 396; Strings in scratch storage 7923; heap allocations 41741 without scratch storage, 33818 with it
+exit 0
+
+# tclsh9.0 audit/storage-scratch/tools/fuzz.tcl -seeds 13-40 -count 6
+programs 168, failures 0, invalid 0
+sites selected 2561, emitted 978; Strings in scratch storage 19808; heap allocations 99318 without scratch storage, 79510 with it
+exit 0

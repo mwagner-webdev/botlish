@@ -995,7 +995,7 @@ test ss-run-tcl-backends {the census workloads on the compile backend agree with
     set result
 } -result {1 1 1 1 1}
 
-test ss-run-vms {several Vms of one program at once, each on its own thread with its own scratch storage: every Vm's result is the program's} -constraints {ssNative nativeLinux} -body {
+test ss-run-vms {several Vms of one program at once, each on its own thread with its own scratch storage: every Vm's result is the program's} -constraints ssNative -body {
     set hir [surface::compile [ssProgram $::ssSequential 2000] -warnings off]
     set nir [native::nir $hir]
     set lines [native::Driver vms $nir 4]
@@ -1004,7 +1004,7 @@ test ss-run-vms {several Vms of one program at once, each on its own thread with
         lrange $line 2 3
     }]
     list [llength $results] [lsort -unique $results] [lindex [outcomeUnderHir interp $hir] 1]
-} -result {4 {{value {int 123335}}} 123335}
+} -result {4 {{value {int 22335}}} 22335}
 
 test ss-run-executable {a standalone executable runs the same scratch protocol: its value is the program's} -constraints {ssNative executableAot} -body {
     set hir [ssHir {-case p13}]

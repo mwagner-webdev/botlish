@@ -350,6 +350,7 @@ set failures 0
 set invalid 0
 set programs 0
 set totals [dict create selected 0 emitted 0 scratch 0 heapOn 0 heapOff 0]
+set missed [dict create]
 foreach seed [Seeds [dict get $options -seeds]] {
     expr {srand($seed)}
     for {set c 0} {$c < [dict get $options -count]} {incr c} {
@@ -401,7 +402,11 @@ foreach seed [Seeds [dict get $options -seeds]] {
         }
         dict for {id sites} [dict get $lowered storagePlan emitted] {
             dict for {site st} $sites {
-                if {[dict get $st status] eq "emitted"} { dict incr totals emitted }
+                if {[dict get $st status] eq "emitted"} {
+                    dict incr totals emitted
+                } else {
+                    dict incr missed [dict get $st reason]
+                }
             }
         }
         dict incr totals scratch [dict getdef $s allocations 0]
@@ -419,4 +424,12 @@ foreach seed [Seeds [dict get $options -seeds]] {
 }
 puts "programs $programs, failures $failures, invalid $invalid"
 puts "sites selected [dict get $totals selected], emitted [dict get $totals emitted]; Strings in scratch storage [dict get $totals scratch]; heap allocations [dict get $totals heapOff] without scratch storage, [dict get $totals heapOn] with it"
+set recorded [dict get $totals emitted]
+dict for {reason n} $missed {
+    puts "    not emitted, $n: $reason"
+    incr recorded $n
+}
+if {[dict get $totals selected] > $recorded} {
+    puts "    not lowered, [expr {[dict get $totals selected] - $recorded}]: no function of the site's instance was lowered (inlined, or never compiled)"
+}
 exit [expr {$failures || $invalid ? 1 : 0}]
