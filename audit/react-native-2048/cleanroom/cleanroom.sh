@@ -76,7 +76,7 @@ cat >"$room/botlish-steps.sh" <<'EOF'
 set -eu
 cd project
 printf '{"schema": 1, "dependencies": {}}\n' >botlish.json
-for package in game2048 botlish_target_android_aarch64; do
+for package in game2048 game2048_play botlish_target_android_aarch64; do
     ../bin/botlish add "$package" -repository ../repo -target android-aarch64
 done
 ../bin/botlish add botlish_react_native -repository ../repo

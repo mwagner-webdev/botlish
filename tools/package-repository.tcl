@@ -73,7 +73,7 @@ foreach arg $argv {
 }
 if {$out eq ""} usage
 if {$names eq ""} {
-    set names {sdl3 sdlkit raven event_loop_linux boringssl http process_linux}
+    set names {sdl3 sdlkit raven event_loop_linux boringssl http process_linux android_io sdlscreen}
 }
 
 namespace eval author {
@@ -126,7 +126,25 @@ proc author::ar {target} {
 
 proc author::strip {target} {
     if {$target eq [pm::target::host]} { return strip }
+    if {[dict get [pm::target::facts $target] os] eq "android"} {
+        return [file join [ndk] toolchains llvm prebuilt linux-x86_64 bin llvm-strip]
+    }
     return [dict get [pm::target::facts $target] arch]-linux-gnu-strip
+}
+
+# The Android NDK an Android target's build uses (ANDROID_NDK_ROOT: the
+# author's, never searched for).
+proc author::ndk {} {
+    if {![info exists ::env(ANDROID_NDK_ROOT)] || $::env(ANDROID_NDK_ROOT) eq ""} {
+        error "an Android target's build needs the Android NDK: set ANDROID_NDK_ROOT"
+    }
+    return $::env(ANDROID_NDK_ROOT)
+}
+
+# The NDK's revision (source.properties' Pkg.Revision).
+proc author::ndkRevision {} {
+    regexp -line {^Pkg.Revision *= *(\S+)} [pm::ReadBytes [file join [ndk] source.properties]] -> revision
+    return $revision
 }
 
 # The first line of a tool's version, for the evidence ("" when it has none).
@@ -448,7 +466,11 @@ proc author::sdl3 {dir targets} {
                     -DSDL_EXAMPLES=OFF -DSDL_INSTALL=OFF -DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_X11=OFF -DSDL_WAYLAND=OFF] \
                 [list "tclsh9.0 \$BOTLISH/tests/cffi/sdl3.tcl (cmake, ninja SDL3-shared)" "[strip $target] --strip-unneeded libSDL3.so.0"]
         }
-        botlish native require SDL3 -target $target -origin system -identity libSDL3.so.0 -version 3 -pkg-config sdl3 -package $dir
+        if {$target eq "android-aarch64"} {
+            sdl3Android $dir $target $checkout $tag
+        } else {
+            botlish native require SDL3 -target $target -origin system -identity libSDL3.so.0 -version 3 -pkg-config sdl3 -package $dir
+        }
         foreach archive $archives {
             # The generator names its archive libNAME.a, NAME the binding's
             # extern c library: the author's knowledge, stated here.
@@ -459,6 +481,83 @@ proc author::sdl3 {dir targets} {
                 [list "tclsh9.0 \$BOTLISH/tools/c-bindgen.tcl build sdl3 -target $target"]
         }
     }
+}
+
+# sdl3's Android view (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md,
+# "SDL3 Android distribution"): the pinned SDL3 built for arm64-v8a at API
+# 21 with the NDK (tests/cffi/sdl3.tcl android: every LOAD segment 16 KiB-
+# aligned), stripped and bundled as libSDL3.so; and, as files under
+# android/, what an Android application needs of SDL besides it and that
+# must match it exactly -- SDL's own Java classes (org.libsdl.app, whose
+# native methods are this libSDL3.so's JNI registrations), the resources,
+# ProGuard rules and Gradle wrapper of SDL's android-project template, and
+# SDL's license -- with sdl3-android.json, the descriptor an Android
+# project generator checks them against (each file's SHA-256, SDL's version
+# and commit). Nothing Android-specific enters the binding: it is the
+# committed generated one, as for every target.
+proc author::sdl3Android {dir target checkout tag} {
+    variable root
+    variable stage
+    set built [cffi::SdlAndroidBuild]
+    set library [stripped $target [file join $built libSDL3.so] [file join $stage sdl3-$target libSDL3.so]]
+    botlish native add $library -target $target -name SDL3 -symbol SDL_Init -symbol SDL_RunApp -symbol JNI_OnLoad -package $dir
+    build "sdl3 $target" [list $target] [list targets/$target/native/libSDL3.so] {sdl3} android \
+        [dict create ndk [ndkRevision] cmake [version cmake --version] ninja [version ninja --version] \
+            strip [version [strip $target] --version]] \
+        [list -GNinja -DCMAKE_TOOLCHAIN_FILE=\$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-21 -DCMAKE_BUILD_TYPE=Release -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST_LIBRARY=OFF \
+            -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL=OFF] \
+        [list "tclsh9.0 \$BOTLISH/tests/cffi/sdl3.tcl android (cmake, ninja SDL3-shared)" "llvm-strip --strip-unneeded libSDL3.so"]
+    # The files under android/, and their descriptor.
+    set files [file join $stage sdl3-android android]
+    file delete -force [file dirname $files]
+    set project [file join $checkout android-project]
+    set java [file join $project app src main java org libsdl app]
+    set entries {}
+    file mkdir [file join $files java org libsdl app]
+    foreach source [lsort [glob -directory $java *.java]] {
+        set to [file join $files java org libsdl app [file tail $source]]
+        pm::WriteNew $to [pm::ReadBytes $source]
+        lappend entries java [list android/java/org/libsdl/app/[file tail $source] [pm::sha256::hex [pm::ReadBytes $to]]]
+    }
+    set res [file join $project app src main res]
+    foreach sub [lsort [glob -tails -directory $res -type d *]] {
+        file mkdir [file join $files res $sub]
+        foreach source [lsort [glob -directory [file join $res $sub] -type f *]] {
+            set to [file join $files res $sub [file tail $source]]
+            pm::WriteNew $to [pm::ReadBytes $source]
+            lappend entries res [list android/res/$sub/[file tail $source] [pm::sha256::hex [pm::ReadBytes $to]]]
+        }
+    }
+    file mkdir [file join $files gradle]
+    foreach {from to key} [list [file join $project gradle wrapper gradle-wrapper.jar] gradle/gradle-wrapper.jar wrapper \
+            [file join $project gradlew] gradle/gradlew gradlew [file join $checkout LICENSE.txt] LICENSE.txt license \
+            [file join $project app proguard-rules.pro] proguard-rules.pro proguard] {
+        pm::WriteNew [file join $files $to] [pm::ReadBytes $from]
+        dict set single $key [list android/$to [pm::sha256::hex [pm::ReadBytes [file join $files $to]]]]
+    }
+    regexp {release-([0-9.]+)} $tag -> version
+    set S {apply {{text} {list str $text}}}
+    set entry {apply {{pair} {list obj [list path [list str [lindex $pair 0]] sha256 [list str [lindex $pair 1]]]}}}
+    set javaList {}
+    set resList {}
+    foreach {kind pair} $entries {
+        if {$kind eq "java"} { lappend javaList [{*}$entry $pair] } else { lappend resList [{*}$entry $pair] }
+    }
+    set descriptor [list obj [list \
+        schema {num 1} kind [{*}$S botlish-sdl3-android] target [{*}$S $target] abi [{*}$S arm64-v8a] \
+        sdl [list obj [list version [{*}$S $version] tag [{*}$S $tag] commit [{*}$S [exec git -C $checkout rev-parse HEAD]] \
+            repository [{*}$S https://github.com/libsdl-org/SDL]]] \
+        minimumApi {num 21} \
+        library [list obj [list path [{*}$S native/libSDL3.so] soname [{*}$S libSDL3.so] sha256 [{*}$S [pm::sha256::hex [pm::ReadBytes $library]]]]] \
+        java [list obj [list package [{*}$S org.libsdl.app] files [list arr $javaList]]] \
+        resources [list arr $resList] \
+        gradle [list obj [list wrapper [{*}$entry [dict get $single wrapper]] gradlew [{*}$entry [dict get $single gradlew]]]] \
+        license [{*}$entry [dict get $single license]] \
+        proguard [{*}$entry [dict get $single proguard]]]]
+    pm::WriteNew [file join $files sdl3-android.json] [pm::json::encode $descriptor]\n
+    botlish package stage $dir -target $target -files $files -as android
+    generator "sdl3 android-project files $target" [revision] [list "\$CACHE/c-header-src/sdl3/android-project (SDL $tag)"] [list targets/$target/android/]
 }
 
 proc author::raven {dir targets} {
@@ -564,7 +663,10 @@ proc author::process_linux {dir targets} {
 # libstdc++ (libssl is C++) stated as the system's.
 proc author::boringssl {dir targets} {
     variable root
-    source [file join $root tools http-package.tcl]
+    # At the global level: sourced in this procedure, its namespaces
+    # (httppkg, and rust-unit.tcl's rustunit) would be ::author's, where
+    # httppkg's own calls of rustunit:: do not find them.
+    uplevel #0 [list source [file join $root tools http-package.tcl]]
     set pin [httppkg::Pin]
     set commit [dict get $pin commit]
     set src [file join [httppkg::CacheDir] src boringssl-$commit]
@@ -666,7 +768,10 @@ proc author::httpCrates {dir triple} {
 # licenses; the project's license for the unit's own code.
 proc author::http {dir targets} {
     variable root
-    source [file join $root tools http-package.tcl]
+    # At the global level: sourced in this procedure, its namespaces
+    # (httppkg, and rust-unit.tcl's rustunit) would be ::author's, where
+    # httppkg's own calls of rustunit:: do not find them.
+    uplevel #0 [list source [file join $root tools http-package.tcl]]
     botlish package stage $dir -files [file join $root LICENSE] -as licenses/http
     set rustc [version rustc --version]
     set cargo [version cargo --version]
@@ -698,7 +803,7 @@ proc author::prepare {name stage} {
         file copy [file join $package $entry] [file join $dir $entry]
     }
     set descriptor [pm::descriptor::read [file join $dir botlish.json] pack]
-    set targets [dict getdef [dict create sdl3 {linux-aarch64 linux-x86_64} raven {linux-aarch64 linux-x86_64} \
+    set targets [dict getdef [dict create sdl3 {android-aarch64 linux-aarch64 linux-x86_64} raven {linux-aarch64 linux-x86_64} \
         event_loop_linux {linux-aarch64 linux-x86_64} boringssl {linux-x86_64} http {linux-x86_64} process_linux {linux-x86_64}] $name {}]
     if {$targets eq ""} {
         return [list $dir ""]

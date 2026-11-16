@@ -1,0 +1,291 @@
+# app.bot -- the 2048 application (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-
+# MILESTONE-1.md, "Botlish application architecture"): its state, its loop,
+# its lifecycle policy and its persistence, in Botlish. SDL3 (through the
+# sdlscreen airlock) supplies the window, the renderer, the events and a
+# file in the application's private storage; the platform's entry program
+# (main.bot on Android, main-linux.bot on Linux) installs the contexts and
+# calls `main`. The game's rules are game2048_play's, the screen's layout
+# and frame board.bot's, a gesture's meaning input.bot's.
+#
+# The loop draws when something changed while the application is visible,
+# then waits for the next event in SDL -- at most a second while visible,
+# indefinitely while hidden: an idle board costs no CPU, and a hidden one
+# none. Every event is read here, on SDL's thread (SDLThread on Android):
+# touch events Android produces on its UI thread reach the program through
+# SDL's queue only.
+#
+# Lifecycle (SDL_ANDROID_BLOCK_ON_PAUSE is 0, so the loop sees the events
+# when they happen; SDL 3.4.18 queues a pause and a resume as the window's
+# Minimized and Restored, its application events reach watchers only):
+#
+#   Minimized            the gesture in progress dropped, the game saved,
+#                        drawing stopped (the surface may go)
+#   Restored             drawing resumed, the layout measured again
+#   Resized, RenderReset the layout measured again, a redraw
+#   LowMemory            the game saved
+#   Quit, Terminating    the game saved, the loop ends; SDL is closed and
+#                        the entry returns (the Activity is going)
+#   Back                 the same: the program returns, and SDLActivity
+#                        finishes the Activity (SDL3 leaves the back key to
+#                        the application)
+#
+# Persistence: the game's snapshot (game2048_play's versioned text) in
+# SDL's private storage, written whole (sdlscreen::save: a temporary file
+# renamed over the old one) after every change and on the lifecycle events
+# above; read at start and validated by game2048_play (an invalid or
+# unsupported save is a fresh game, never a failure).
+#
+# Arguments: --seed N starts a new game from N (else from SDL's counter),
+# --fresh ignores a saved game. Every line the application prints is a
+# protocol line the acceptance harness reads ("2048: ...").
+import board
+import game2048
+import game2048_play
+import input
+import render
+import sdlscreen
+import sdlscreen::gesture
+import sdlscreen::layout
+import std::int
+import std::io
+import std::list
+import std::str
+
+struct State:
+    game: game2048_play::Played
+    tracker: sdlscreen::gesture::Tracker
+    layout: board::Layout
+    visible: bool
+    dirty: bool
+    frames: int
+    path: str
+    saved: str
+
+# What an event does: the state after it, and whether the loop ends.
+struct Reaction:
+    done: bool
+    state: State
+
+fn say(text: str, context io: std::io::IO):
+    std::io::print_line("2048: ".concat(text)):
+        on std::io::WriteFailed:
+            unit
+
+# ---------------------------------------------------------------------------
+# State
+
+fn with_game(s: State, game: game2048_play::Played) -> State:
+    State {game: game, tracker: s.tracker, layout: s.layout, visible: s.visible, dirty: true, frames: s.frames, path: s.path, saved: s.saved}
+
+fn with_tracker(s: State, tracker: sdlscreen::gesture::Tracker) -> State:
+    State {game: s.game, tracker: tracker, layout: s.layout, visible: s.visible, dirty: s.dirty, frames: s.frames, path: s.path, saved: s.saved}
+
+fn shown(s: State, visible: bool) -> State:
+    State {game: s.game, tracker: s.tracker.reset(), layout: s.layout, visible: visible, dirty: visible, frames: s.frames, path: s.path, saved: s.saved}
+
+fn drawn(s: State) -> State:
+    State {game: s.game, tracker: s.tracker, layout: s.layout, visible: s.visible, dirty: false, frames: s.frames + 1, path: s.path, saved: s.saved}
+
+fn with_saved(s: State, saved: str) -> State:
+    State {game: s.game, tracker: s.tracker, layout: s.layout, visible: s.visible, dirty: s.dirty, frames: s.frames, path: s.path, saved: saved}
+
+fn with_layout(s: State, layout: board::Layout) -> State:
+    State {game: s.game, tracker: s.tracker, layout: layout, visible: s.visible, dirty: true, frames: s.frames, path: s.path, saved: s.saved}
+
+fn next(s: State) -> Reaction:
+    Reaction {done: false, state: s}
+
+fn finished(s: State) -> Reaction:
+    Reaction {done: true, state: s}
+
+# ---------------------------------------------------------------------------
+# Measuring, saving
+
+# The layout of the screen as it is now.
+fn measured(context screen: sdlscreen::Screen) -> board::Layout:
+    size = sdlscreen::size()
+    area = sdlscreen::safe_area()
+    safe = if area.width > 0 and area.height > 0 and area.width <= size.width and area.height <= size.height:
+        sdlscreen::layout::Rect {x: area.x, y: area.y, w: area.width, h: area.height}
+    else:
+        sdlscreen::layout::whole(size.width, size.height)
+    board::layout(size.width, size.height, safe)
+
+fn describe(l: board::Layout) -> str:
+    b = l.board
+    "layout ".concat(l.width.to_string()).append_char('x').concat(l.height.to_string()).concat(" board ").concat(b.x.to_string()).append_char(' ').concat(b.y.to_string()).append_char(' ').concat(b.w.to_string()).concat(" gap ").concat(l.gap.to_string()).concat(" restart ").concat(l.restart.x.to_string()).append_char(' ').concat(l.restart.y.to_string()).append_char(' ').concat(l.restart.w.to_string()).append_char(' ').concat(l.restart.h.to_string())
+
+# S with its game saved, when it changed since the last save (WHY names
+# the occasion in the log).
+fn saving(s: State, why: str, context io: std::io::IO, screen: sdlscreen::Screen) -> State:
+    text = game2048_play::snapshot(s.game)
+    if text != s.saved and s.path != "":
+        if sdlscreen::save(s.path, text):
+            say("saved ".concat(why))
+            return s.with_saved(text)
+        say("save failed ".concat(why))
+    s
+
+# ---------------------------------------------------------------------------
+# Events
+
+# S after the action A.
+fn acted(s: State, a: input::Action, context io: std::io::IO, screen: sdlscreen::Screen) -> State:
+    match a:
+        case input::Action::Nothing:
+            s
+        case input::Action::Move {direction}:
+            game = s.game.moved(direction)
+            say("move ".concat(input::code(direction).to_string()).append_char(' ').concat(game2048_play::snapshot(game)))
+            s.with_game(game).saving("move")
+        case input::Action::Restart:
+            game = game2048_play::start(sdlscreen::counter())
+            say("restart ".concat(game2048_play::snapshot(game)))
+            s.with_game(game).saving("restart")
+
+# S after a gesture step: the tracker it leaves, and its gesture's action.
+fn stepped(s: State, step: sdlscreen::gesture::Step, context io: std::io::IO, screen: sdlscreen::Screen) -> State:
+    s.with_tracker(step.tracker).acted(step.gesture.action(s.layout))
+
+# S after the event E.
+fn react(s: State, e: sdlscreen::Event, context io: std::io::IO, screen: sdlscreen::Screen) -> Reaction:
+    match e:
+        case sdlscreen::Event::Quit:
+            say("quit")
+            finished(s.saving("quit"))
+        case sdlscreen::Event::Terminating:
+            say("terminating")
+            finished(s.saving("terminating"))
+        case sdlscreen::Event::Back:
+            say("back")
+            finished(s.saving("back"))
+        case sdlscreen::Event::FingerDown {finger, x, y}:
+            next(s.stepped(s.tracker.down(finger, x, y)))
+        case sdlscreen::Event::FingerMotion {finger, x, y}:
+            next(s.stepped(s.tracker.motion(finger, x, y)))
+        case sdlscreen::Event::FingerUp {finger, x, y}:
+            next(s.stepped(s.tracker.up(finger, x, y, input::threshold(s.layout))))
+        case sdlscreen::Event::FingerCanceled {finger}:
+            next(s.stepped(s.tracker.cancel(finger)))
+        case sdlscreen::Event::Minimized:
+            say("background")
+            next(s.saving("background").shown(false))
+        case sdlscreen::Event::Restored:
+            say("foreground")
+            next(s.shown(true).with_layout(measured()))
+        case sdlscreen::Event::WillEnterBackground:
+            next(s)
+        case sdlscreen::Event::DidEnterBackground:
+            next(s)
+        case sdlscreen::Event::WillEnterForeground:
+            next(s)
+        case sdlscreen::Event::DidEnterForeground:
+            next(s)
+        case sdlscreen::Event::LowMemory:
+            next(s.saving("low memory"))
+        case sdlscreen::Event::Resized:
+            l = measured()
+            say(describe(l))
+            next(s.with_layout(l))
+        case sdlscreen::Event::RenderReset:
+            say("render reset")
+            next(s.with_layout(measured()))
+        case sdlscreen::Event::Idle:
+            next(s)
+        case sdlscreen::Event::Other:
+            next(s)
+
+# The loop: a frame when something changed and the application is visible,
+# then the next event.
+fn run(s: State, context io: std::io::IO, screen: sdlscreen::Screen) -> State:
+    current = if s.dirty and s.visible:
+        ok = render::draw(board::frame(s.game, s.layout))
+        if s.frames == 0:
+            outcome = if ok:
+                "drawn"
+            else:
+                "not drawn"
+            say("ready ".concat(s.layout.width.to_string()).append_char('x').concat(s.layout.height.to_string()).append_char(' ').concat(outcome))
+        s.drawn()
+    else:
+        s
+    timeout = if current.visible:
+        1000
+    else:
+        -1
+    r = current.react(sdlscreen::wait(timeout))
+    if r.done:
+        return r.state
+    run(r.state)
+
+# ---------------------------------------------------------------------------
+# Starting
+
+# The value of the option NAME among ARGS ("" when absent).
+nomethod fn option(args: List[str], name: str) -> str:
+    n = std::list::length(args)
+    found = fold i from 0 to n with intermediate value "":
+        if args.get(i, "") == name:
+            args.get(i + 1, "")
+        else:
+            value
+    found
+
+nomethod fn flag?(args: List[str], name: str) -> bool:
+    found = fold a in args with intermediate seen false:
+        seen or a == name
+    found
+
+# The game to start with: the saved one at PATH when there is a valid one
+# and ARGS do not say --fresh, else a new game from --seed's value or SDL's
+# counter.
+fn initial(args: List[str], path: str, context io: std::io::IO, screen: sdlscreen::Screen) -> game2048_play::Played:
+    seeded = std::int::from_string(option(args, "--seed")):
+        on InvalidIntegerText:
+            sdlscreen::counter()
+    if not flag?(args, "--fresh") and path != "":
+        loaded = sdlscreen::load(path)
+        if loaded.found:
+            game = game2048_play::played(loaded.text):
+                on game2048_play::InvalidSnapshot:
+                    say("invalid save ignored")
+                    fresh = game2048_play::start(seeded)
+                    say("new ".concat(game2048_play::snapshot(fresh)))
+                    return fresh
+            say("restored ".concat(game2048_play::snapshot(game)))
+            return game
+    game = game2048_play::start(seeded)
+    say("new ".concat(game2048_play::snapshot(game)))
+    game
+
+# The application: SDL opened (vertical sync, Android's lifecycle events
+# delivered to the loop; not fullscreen: Android shows its immersive-mode
+# notice over a fullscreen window until it is dismissed, which covered the
+# board on the 16 KiB emulator image), the game restored or started, the
+# loop, the game saved, SDL closed. Whether it ran to its end.
+fn main(context io: std::io::IO, screen: sdlscreen::Screen) -> bool:
+    args = argv():
+        on InvalidArgumentEncoding:
+            []
+    sdlscreen::open("Botlish 2048", 480, 800, [sdlscreen::nonblocking_pause()], :sync):
+        on sdlscreen::ScreenFailed {call, reason}:
+            say("failed ".concat(call).concat(": ").concat(reason))
+            return false
+    dir = sdlscreen::storage("Botlish", "2048")
+    path = if dir == "":
+        ""
+    else:
+        dir.concat("game.txt")
+    shown_path = if path == "":
+        "(none)"
+    else:
+        path
+    say("storage ".concat(shown_path))
+    game = args.initial(path)
+    l = measured()
+    say(describe(l))
+    start = State {game: game, tracker: sdlscreen::gesture::idle(), layout: l, visible: true, dirty: true, frames: 0, path: path, saved: ""}
+    finished = run(start.saving("start"))
+    reason = sdlscreen::close("")
+    say("done frames ".concat(finished.frames.to_string()).append_char(' ').concat(game2048_play::snapshot(finished.game)))
+    true

@@ -1,0 +1,29 @@
+device: sdk_gphone64_x86_64 sdk 34 abilist x86_64,arm64-v8a bridge libndk_translation.so page 4096
+  adb root: 1
+  settled: boot completed, SIM "LOADED"
+ok install
+  launch: TotalTime: 997 WaitTime: 1020 
+ok start: counter: ready 320x616
+  environment api 34 heap-pointer-tag 0x00
+  entering counter_main with 1 argument(s)
+  libcounter.so pinned (RTLD_NODELETE)
+  pid 3992
+ok the program runs on SDLThread (tid 4040)
+  mapped: libnblog.so libndk_translation.so libndk_translation_exec_region.so libndk_translation_proxy_libEGL.so libndk_translation_proxy_libGLESv1_CM.so libndk_translation_proxy_libGLESv2.so libndk_translation_proxy_libOpenSLES.so libndk_translation_proxy_libandroid.so libndk_translation_proxy_libandroid_runtime.so libndk_translation_proxy_libc.so libndk_translation_proxy_libnativewindow.so 
+ok libcounter.so is mapped in the application process, from base.apk at offset 0x00258000 (stored uncompressed, loaded in place)
+ok libSDL3.so is mapped in the application process, from base.apk at offset 0x0000c000 (stored uncompressed, loaded in place)
+ok libmain.so is mapped in the application process, from base.apk at offset 0x00328000 (stored uncompressed, loaded in place)
+  screen 320x640
+ok a tap counted once (taps 1)
+ok the screen changed after the tap
+ok a swipe is no tap
+  background: 0 clock ticks of CPU in 5 s
+ok the hidden app is idle (0 ticks in 5 s)
+ok the process survives the background
+ok back in the foreground: the count kept (taps 2)
+  foreground idle: 1 clock ticks of CPU in 5 s; threads: SDLActivity(3992)=2 
+ok the idle program does not spin (SDLThread: 0 ticks in 5 s)
+ok exit: counter: back; counter: done 2 frames 5; counter_main returned 0
+  the process lives on after the Activity finished (Android keeps it cached)
+ok no crash of org.botlish.counter
+status 0

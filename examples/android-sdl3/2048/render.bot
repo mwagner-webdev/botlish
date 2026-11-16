@@ -1,0 +1,33 @@
+# render.bot -- draws a frame board.bot decided
+# (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md, "Rendering"): each
+# rectangle and text through the sdlscreen airlock, then presents it. It
+# decides nothing: the list is the frame.
+import board
+import sdlscreen
+import std::int
+import std::list
+
+fn red(color: int) -> int:
+    color.shift_right(16).mod(256)
+
+fn green(color: int) -> int:
+    color.shift_right(8).mod(256)
+
+fn blue(color: int) -> int:
+    color.mod(256)
+
+fn paint(color: int, context screen: sdlscreen::Screen) -> bool:
+    sdlscreen::color(color.red(), color.green(), color.blue())
+
+fn one(d: board::Draw, context screen: sdlscreen::Screen) -> bool:
+    match d:
+        case board::Draw::Fill {x, y, w, h, color}:
+            color.paint() and sdlscreen::fill(x, y, w, h)
+        case board::Draw::Text {x, y, scale, text, color}:
+            color.paint() and sdlscreen::text(x, y, scale, text)
+
+# Draws FRAME and presents it; whether every part was drawn.
+fn draw(frame: List[board::Draw], context screen: sdlscreen::Screen) -> bool:
+    drawn = fold d in frame with intermediate ok true:
+        d.one() and ok
+    drawn and sdlscreen::present()

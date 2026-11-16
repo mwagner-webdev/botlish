@@ -1,0 +1,11 @@
+# main.bot -- the counter's Android entry: installs Android's IO and the SDL
+# screen, runs the application. Built as an application library
+# (-emit-native-library counter -application) for android-aarch64.
+import android_io
+import counter
+import sdlscreen
+
+with context android_io::create_tagged("BotlishCounter")
+with context sdlscreen::create()
+
+counter::main()

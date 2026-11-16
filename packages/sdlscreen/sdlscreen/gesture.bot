@@ -1,0 +1,114 @@
+# sdlscreen::gesture -- swipes and taps from touch fingers
+# (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md, "Touch input and
+# gestures"): a pure module, no SDL, no clock. An application feeds it each
+# finger event it receives (in integer pixels) and receives at most one gesture per
+# finger lifted: a swipe in one of four directions, or a tap.
+#
+# Policy (one finger at a time):
+#
+# * The first finger down starts a gesture; it is tracked by SDL's finger
+#   identity, its start and its latest position.
+# * A second finger down while one is tracked cancels the gesture: it
+#   produces nothing, and nothing more is tracked until a finger goes down
+#   with no gesture in progress (every finger up is ignored until then).
+# * Motion only moves the latest position: nothing is produced while a
+#   finger is down, so one swipe is at most one gesture however long it is.
+# * The tracked finger's up produces the gesture: a tap when it moved less
+#   than THRESHOLD pixels from its start on both axes, else a swipe in the
+#   direction of the larger movement (a tie: horizontal).
+# * A cancel of the tracked finger (SDL_EVENT_FINGER_CANCELED), or `reset`
+#   (the application going to the background), drops the gesture.
+
+# The direction of a swipe, in screen terms: Up is toward the top.
+enum Direction:
+    Left,
+    Right,
+    Up,
+    Down,
+
+# What a finger produced.
+enum Gesture:
+    Nothing,
+    Swipe {direction: Direction},
+    Tap {x: int, y: int},
+
+# The tracking state between events.
+struct Tracker:
+    active: bool
+    cancelled: bool
+    finger: int
+    start_x: int
+    start_y: int
+    last_x: int
+    last_y: int
+
+# One event's outcome: the tracker after it, and what it produced.
+struct Step:
+    tracker: Tracker
+    gesture: Gesture
+
+# No finger tracked.
+fn idle() -> Tracker:
+    Tracker {active: false, cancelled: false, finger: 0, start_x: 0, start_y: 0, last_x: 0, last_y: 0}
+
+# The tracker after an application stops listening (background, a lost
+# surface): whatever was in progress produces nothing.
+fn reset(t: Tracker) -> Tracker:
+    idle()
+
+fn nothing(t: Tracker) -> Step:
+    Step {tracker: t, gesture: Gesture::Nothing}
+
+# The finger FINGER went down at X, Y.
+fn down(t: Tracker, finger: int, x: int, y: int) -> Step:
+    if t.active:
+        # A second finger: the gesture is cancelled, and stays so until its
+        # finger is up.
+        return nothing(Tracker {active: true, cancelled: true, finger: t.finger, start_x: t.start_x, start_y: t.start_y, last_x: t.last_x, last_y: t.last_y})
+    nothing(Tracker {active: true, cancelled: false, finger: finger, start_x: x, start_y: y, last_x: x, last_y: y})
+
+# The finger FINGER moved to X, Y.
+fn motion(t: Tracker, finger: int, x: int, y: int) -> Step:
+    if not t.active or finger != t.finger:
+        return nothing(t)
+    nothing(Tracker {active: true, cancelled: t.cancelled, finger: t.finger, start_x: t.start_x, start_y: t.start_y, last_x: x, last_y: y})
+
+fn magnitude(v: int) -> int:
+    if v < 0:
+        return 0 - v
+    v
+
+# The gesture of a finger that went down at SX, SY and up at X, Y.
+nomethod fn classify(sx: int, sy: int, x: int, y: int, threshold: int) -> Gesture:
+    dx = x - sx
+    dy = y - sy
+    ax = magnitude(dx)
+    ay = magnitude(dy)
+    if ax < threshold and ay < threshold:
+        return Gesture::Tap {x: sx, y: sy}
+    if ax >= ay:
+        if dx < 0:
+            return Gesture::Swipe {direction: Direction::Left}
+        return Gesture::Swipe {direction: Direction::Right}
+    if dy < 0:
+        return Gesture::Swipe {direction: Direction::Up}
+    Gesture::Swipe {direction: Direction::Down}
+
+# The finger FINGER went up at X, Y; THRESHOLD is the least movement in
+# pixels a swipe needs.
+fn up(t: Tracker, finger: int, x: int, y: int, threshold: int) -> Step:
+    if not t.active or finger != t.finger:
+        return nothing(t)
+    if t.cancelled:
+        return nothing(idle())
+    Step {tracker: idle(), gesture: classify(t.start_x, t.start_y, x, y, threshold)}
+
+# SDL cancelled the finger FINGER (the system took the touch).
+fn cancel(t: Tracker, finger: int) -> Step:
+    if not t.active or finger != t.finger:
+        return nothing(t)
+    nothing(idle())
+
+# Whether a finger is being tracked.
+fn active?(t: Tracker) -> bool:
+    t.active

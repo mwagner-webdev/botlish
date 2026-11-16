@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "name": "game2048_play",
+  "version": "0.1.0",
+  "dependencies": {
+    "game2048": "0.1"
+  },
+  "lock": {
+    "game2048": "0.1.0"
+  }
+}

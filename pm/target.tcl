@@ -151,7 +151,7 @@ proc pm::target::platformLibrary {name identity} {
             # (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md): on every
             # device of the target's minimum API level, never bundled.
             return [expr {$identity in {libc.so libm.so libdl.so liblog.so libandroid.so
-                libz.so libjnigraphics.so libEGL.so libGLESv2.so libGLESv3.so libvulkan.so
+                libz.so libjnigraphics.so libEGL.so libGLESv1_CM.so libGLESv2.so libGLESv3.so libvulkan.so
                 libOpenSLES.so libaaudio.so libmediandk.so libnativewindow.so libbinder_ndk.so}}]
         }
         windows {

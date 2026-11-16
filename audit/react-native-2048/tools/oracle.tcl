@@ -1,7 +1,8 @@
 # oracle.tcl -- the 2048 oracle of BOTLISH-REACT-NATIVE-2048-PACKAGE-
 # MILESTONE-1.md: the snapshots the Botlish interpreter computes for a seed
-# and a sequence of moves, from examples/react-native/2048/game.bot and the
-# unchanged engine (examples/games/2048/game2048.bot), one per line -- the
+# and a sequence of moves, from examples/react-native/2048/game.bot, the
+# played game's rules it delegates to (examples/games/2048/game2048_play.bot)
+# and the unchanged engine (examples/games/2048/game2048.bot), one per line -- the
 # new game's, then one per move. Every other run (the host harness, the
 # Android self-test, the hook, the played UI) is compared with it.
 #
@@ -21,6 +22,9 @@ set dir [file tempdir]
 try {
     file copy [file join $root examples react-native 2048 game.bot] $dir
     file copy [file join $root examples games 2048 game2048.bot] $dir
+    # The played game's rules (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-
+    # MILESTONE-1.md): the package game.bot delegates to.
+    file copy [file join $root examples games 2048 game2048_play.bot] $dir
     set list [join [split $directions ""] ", "]
     set f [open [file join $dir oracle.bot] w]
     puts $f [string map [list @SEED@ $seed @DIRECTIONS@ $list] {import std::list

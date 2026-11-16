@@ -1,0 +1,211 @@
+name: android sdl3 2048
+
+# RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md: a standalone Android
+# SDL3 application written in Botlish, built from independently packed
+# packages -- the Android AArch64 target support package, sdl3 (its
+# android-aarch64 view: binding, libSDL3.so, SDL's Java classes),
+# android_io, sdlscreen, game2048 and game2048_play -- and the external tool
+# package botlish_android, which generates the Android Gradle project.
+#
+#   build    the packages as their authors pack them, the applications
+#            (counter and the 2048 game) built as application libraries for
+#            android-aarch64, the tool run explicitly (generate, build), what
+#            each APK holds (audit/android-sdl3-2048/tools/build.sh); the
+#            Linux host checks of the same applications under SDL_RunApp
+#            (tests/android-sdl3-2048.test); then the single-file compiler and
+#            the clean room (cleanroom/cleanroom.sh)
+#   android  the APKs on an Android emulator, per image: SDLActivity,
+#            SDLThread, NAME_main, SDL's window and renderer, touch, the
+#            background and the foreground, Activity recreation, a process
+#            restart, a clean exit (tools/acceptance-*.sh). The images are
+#            x86_64 (GitHub's Linux runners have KVM for x86_64 guests only):
+#            the arm64-v8a APK runs through Android's ARM native bridge,
+#            translated, which emulator.sh requires the image to have. One
+#            job's images have 4 KiB pages, the other's 16 KiB pages.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "integrations/android/**"
+      - "examples/android-sdl3/**"
+      - "examples/react-native/2048/**"
+      - "examples/games/2048/game2048.bot"
+      - "packages/sdl3/**"
+      - "packages/sdlscreen/**"
+      - "packages/android_io/**"
+      - "packages/game2048_play/**"
+      - "generated/c/sdl3/android-aarch64/**"
+      - "audit/android-sdl3-2048/**"
+      - "!audit/android-sdl3-2048/evidence/**"
+      - "audit/android-aarch64-target/tools/package.sh"
+      - "native/library.tcl"
+      - "tools/package-repository.tcl"
+      - "tests/android-sdl3-2048.test"
+      - ".github/workflows/android-sdl3-2048.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push (or run on the same ref) cancels the running one, on main
+# too (CI-RUNS.md).
+concurrency:
+  group: android-sdl3-2048-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  LANG: C.utf8
+  LC_ALL: C.utf8
+
+jobs:
+  build:
+    name: build (packages, tool, applications, APKs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 17
+
+      - name: Toolchains (the NDK r29, the platform and build tools, CMake; the arm64 GNU C library for sdl3's linux-aarch64 thunks)
+        run: |
+          sm=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$sm" --licenses > /dev/null || true
+          for _ in 1 2 3; do
+            "$sm" --install "ndk;29.0.14206865" "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" > /dev/null && break || sleep 15
+          done
+          rustup target add aarch64-linux-android
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu libc6-dev-arm64-cross cmake ninja-build clang strace > /dev/null
+
+      - name: Tool versions
+        run: |
+          tclsh9.0 <<< 'puts "Tcl [info patchlevel]"'
+          rustc --version; java -version 2>&1 | head -1; cmake --version | head -1; clang --version | head -1
+          grep Revision "$ANDROID_HOME/ndk/29.0.14206865/source.properties"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: sdl3-2048-gradle-${{ hashFiles('integrations/android/templates/*.in') }}
+
+      - name: Build (audit/android-sdl3-2048/tools/build.sh)
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/29.0.14206865"
+          audit/android-sdl3-2048/tools/build.sh "$RUNNER_TEMP/sdl3-2048"
+
+      - name: The records of the generated projects
+        run: |
+          for f in "$RUNNER_TEMP"/sdl3-2048/android/*/botlish-android.json; do echo "== $f"; head -8 "$f"; done
+
+      - name: Linux host checks (tests/android-sdl3-2048.test)
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/29.0.14206865"
+          if [ -f tests/android-sdl3-2048.test ]; then
+            BOTLISH_SDL3_2048_PACKAGES="$RUNNER_TEMP/sdl3-2048/repo" tclsh9.0 tests/android-sdl3-2048.test -tmpdir "$RUNNER_TEMP/tcltest"
+          fi
+
+      - name: The single-file compiler (single/build.sh)
+        run: bash single/build.sh
+
+      - name: Clean room (audit/android-sdl3-2048/cleanroom/cleanroom.sh)
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/29.0.14206865"
+          if [ -x audit/android-sdl3-2048/cleanroom/cleanroom.sh ]; then
+            audit/android-sdl3-2048/cleanroom/cleanroom.sh single/out/botlish "$RUNNER_TEMP/sdl3-2048/repo" "$RUNNER_TEMP/sdl3-2048/cleanroom"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdl3-2048-build
+          path: |
+            ${{ runner.temp }}/sdl3-2048/*.apk
+            ${{ runner.temp }}/sdl3-2048/*.txt
+            ${{ runner.temp }}/sdl3-2048/*.json
+            ${{ runner.temp }}/sdl3-2048/repo/*.botpkg
+            ${{ runner.temp }}/sdl3-2048/android/*/botlish-android.json
+            ${{ runner.temp }}/sdl3-2048/cleanroom/*.txt
+            ${{ runner.temp }}/sdl3-2048/cleanroom/*.apk
+
+  android:
+    name: android (${{ matrix.name }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 4 KiB pages
+            images: "system-images;android-34;google_apis;x86_64 system-images;android-33;google_apis;x86_64 system-images;android-30;google_apis;x86_64"
+          - name: 16 KiB pages
+            images: "system-images;android-35;google_apis_ps16k;x86_64 system-images;android-36;google_apis_ps16k;x86_64"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdl3-2048-build
+          path: ${{ runner.temp }}/sdl3-2048
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Boot the emulator (the first image that runs arm64-v8a code)
+        id: boot
+        env:
+          IMAGES: ${{ matrix.images }}
+        run: |
+          read -r -a images <<< "$IMAGES"
+          audit/react-native-2048/tools/emulator.sh "${images[@]}"
+
+      - name: The counter (tools/acceptance-counter.sh)
+        if: ${{ !cancelled() && steps.boot.outcome == 'success' }}
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          audit/android-sdl3-2048/tools/acceptance-counter.sh "$RUNNER_TEMP/sdl3-2048/counter.apk" "$RUNNER_TEMP/acceptance/counter"
+
+      - name: The 2048 game (tools/acceptance-2048.sh)
+        if: ${{ !cancelled() && steps.boot.outcome == 'success' && hashFiles('audit/android-sdl3-2048/tools/acceptance-2048.sh') != '' }}
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          audit/android-sdl3-2048/tools/acceptance-2048.sh "$RUNNER_TEMP/sdl3-2048" "$RUNNER_TEMP/acceptance/2048"
+
+      - name: The clean room's APK
+        if: ${{ !cancelled() && steps.boot.outcome == 'success' && hashFiles('audit/android-sdl3-2048/tools/acceptance-2048.sh') != '' }}
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          if [ -f "$RUNNER_TEMP/sdl3-2048/cleanroom/game-test.apk" ]; then
+            audit/android-sdl3-2048/tools/acceptance-2048.sh "$RUNNER_TEMP/sdl3-2048" "$RUNNER_TEMP/acceptance/cleanroom" "$RUNNER_TEMP/sdl3-2048/cleanroom/game-test.apk"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          for f in "$RUNNER_TEMP"/acceptance/*/summary.txt; do echo "== $f"; cat "$f"; done || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdl3-2048-android-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/acceptance

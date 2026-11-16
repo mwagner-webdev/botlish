@@ -1,0 +1,11 @@
+# main-linux.bot -- the 2048 application's Linux entry: the same
+# application with Linux's IO (a host test runs it under SDL_RunApp on a
+# thread named SDLThread, the shape of SDL's Android bootstrap).
+import app
+import sdlscreen
+import std::linux::io
+
+with context std::linux::io::create()
+with context sdlscreen::create()
+
+app::main()

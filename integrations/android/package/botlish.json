@@ -1,0 +1,21 @@
+{
+  "schema": 4,
+  "name": "botlish_android",
+  "version": "0.1.0",
+  "dependencies": {},
+  "tools": {
+    "android": {
+      "protocol": 1,
+      "summary": "generates an Android Gradle project (SDLActivity, SDL_main shim, arm64-v8a) that starts a Botlish SDL3 application library",
+      "programs": {
+        "linux-x86_64": "tools/linux-x86_64/android"
+      },
+      "inputs": [
+        "native-library"
+      ],
+      "environment": [
+        "ANDROID_HOME"
+      ]
+    }
+  }
+}

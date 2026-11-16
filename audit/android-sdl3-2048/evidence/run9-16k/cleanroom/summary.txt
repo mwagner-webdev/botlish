@@ -1,0 +1,47 @@
+device: sdk_gphone16k_x86_64 sdk 35 abilist x86_64,arm64-v8a bridge libndk_translation.so page 16384
+  adb root: 1
+  settled: boot completed, SIM "LOADED"
+ok install game-test.apk
+  launch: TotalTime: 776 WaitTime: 784 
+ok start: 2048: ready 320x640 drawn
+  environment api 35 heap-pointer-tag 0x00
+  entering game_main with 4 argument(s)
+  libgame.so pinned yes
+ok seed 42's new game is the interpreter's
+  2048: layout 320x640 board 40 206 240 gap 6 restart 165 34 115 40
+  screen 320x640, window 320x640: the window starts 0 px down
+ok the program runs on SDLThread (pid 6667, tid 6708)
+  mapped: libnblog.so libndk_translation.so libndk_translation_proxy_libEGL.so libndk_translation_proxy_libGLESv1_CM.so libndk_translation_proxy_libGLESv2.so libndk_translation_proxy_libOpenSLES.so libndk_translation_proxy_libandroid.so libndk_translation_proxy_libandroid_runtime.so libndk_translation_proxy_libc.so libndk_translation_proxy_libnativewindow.so 
+ok libgame.so is mapped in the application process, from base.apk at offset 0x00258000 (stored uncompressed, loaded in place)
+ok libSDL3.so is mapped in the application process, from base.apk at offset 0x0000c000 (stored uncompressed, loaded in place)
+ok libmain.so is mapped in the application process, from base.apk at offset 0x00344000 (stored uncompressed, loaded in place)
+ok the screen shows the new game (screen: 16 of 16 cells show the snapshot's tiles)
+ok the restart button in a fresh process: a new game
+ok seed 42's new game again in a new process
+ok play12: 12 swipes, each applied once, every snapshot the interpreter's
+ok the screen shows the twelfth state
+ok burst: 20 swipes, each applied once, every snapshot the interpreter's
+ok a short gesture moves nothing
+ok background: the program saw the pause (SDL's queued SDL_EVENT_WINDOW_MINIMIZED; SDL_ANDROID_BLOCK_ON_PAUSE 0)
+  background: 0 clock ticks of CPU in 5 s; threads: 
+ok the hidden app is idle (0 ticks in 5 s)
+ok foreground: the program saw the resume (SDL_EVENT_WINDOW_RESTORED)
+ok the same process, the same game
+ok play24: 24 swipes, each applied once, every snapshot the interpreter's
+ok the screen shows the 24th state after the foreground
+  foreground idle: 2 clock ticks of CPU in 5 s; threads: SDLActivity(6801)=3 
+ok the idle program does not spin (SDLThread: 0 ticks in 5 s)
+ok restart: a new game (2048/1 3535476704 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 0 0 0 0)
+ok after the process was killed, the saved game is restored
+  storage /data/data/org.botlish.sdl2048.test/files/game.txt
+ok win: 2048/1 71072467 2048 1 1 0 1 2048 0 0 2 0 0 0 0 0 0 0 0 0 0 0 0, the interpreter's
+ok win: the screen shows it
+ok over: 2048/1 71072467 1000 1 1 1 0 8 4 2 4 16 2 4 2 32 4 2 4 2 64 128 256, the interpreter's
+ok over: the screen shows it
+ok the Activity destroyed by a configuration change (density 160 -> 200): the program saw quit, saved and returned
+ok SDL ended the process when the new Activity was created ("activity finished": recreation not allowed, SDL's default)
+ok the saved game is the one played last
+ok the next launch (a new process) restored the game played last
+ok exit: the back key -- 2048: back; 2048: done frames 2 2048/1 71072467 1000...; game_main returned 0
+ok no crash of org.botlish.sdl2048.test
+status 0

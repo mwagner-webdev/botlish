@@ -147,8 +147,8 @@ Macros
   function: statement                                                          1
 
 Generated source
-  Botlish files                                                               59
-  lines                                                                    10696
+  Botlish files                                                               60
+  lines                                                                    10701
   extern c fn declarations                                                  1244
   opaque types                                                               104
   constants                                                                 1657

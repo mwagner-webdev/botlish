@@ -1,0 +1,446 @@
+# Mutants of the standalone Android SDL3 2048 application, its packages and
+# its generator (audit/android-sdl3-2048/tools/mutate.tcl;
+# RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md, "Mutation testing"):
+# the 35 defects the milestone names, in its order -- the shared game logic
+# (game2048_play, the React Native facade), the application loop
+# (examples/android-sdl3/2048/app.bot), its UI and input (board.bot,
+# sdlscreen::gesture), the native lifetime (botlish_android's SDL_main shim
+# and manifest templates, sdlscreen's teardown), the packaging (the
+# generator's checks and copies, the package manager's tools command).
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...        the tests that must kill it (as-* of
+#                      tests/android-sdl3-2048.test, et-* of
+#                      tests/external-tools.test)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Static detectors check source and distribution invariants (the game's one
+# source, the shim's contents, the order of SDL's teardown); the others run
+# the code: the pure modules on the interpreter, both applications under the
+# Linux host shaped like SDL's Android bootstrap, the generator against
+# damaged inputs. A mutant is killed only by a detector its !! line names
+# failing. Lines starting with # outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# Shared game logic
+
+@@ facade-own-spawn the React Native facade's new_game spawns its tile itself instead of asking game2048_play
+!! as-play-single-source as-play-oracle
+## examples/react-native/2048/game.bot
+<<<<
+exported c fn new_game(seed: int) -> str:
+    game2048_play::new_game(seed)
+====
+exported c fn new_game(seed: int) -> str:
+    empty = game2048::new_game()
+    at = game2048::Position {row: seed.mod(4), column: seed.shift_right(2).mod(4)}
+    first = empty.spawn(at, game2048::SpawnTile::Two):
+        on game2048::CellOccupied:
+            empty
+    game2048_play::snapshot(game2048_play::Played {game: first, rng: seed.mod(4294967296), moves: 0, changed: false})
+>>>>
+
+@@ app-own-spawn the SDL application's restart spawns its tile itself instead of starting a game2048_play game
+!! as-play-single-source as-2048-host
+## examples/android-sdl3/2048/app.bot
+<<<<
+            game = game2048_play::start(sdlscreen::counter())
+            say("restart ".concat(game2048_play::snapshot(game)))
+====
+            empty = game2048::new_game()
+            seed = sdlscreen::counter()
+            at = game2048::Position {row: seed.mod(4), column: seed.shift_right(2).mod(4)}
+            placed = empty.spawn(at, game2048::SpawnTile::Two):
+                on game2048::CellOccupied:
+                    empty
+            game = game2048_play::Played {game: placed, rng: seed.mod(4294967296), moves: 0, changed: false}
+            say("restart ".concat(game2048_play::snapshot(game)))
+>>>>
+
+@@ spawn-without-change a move that does not change the board still spawns a tile
+!! as-play-oracle as-2048-host
+## examples/games/2048/game2048_play.bot
+<<<<
+    m = game2048::move(p.game, d)
+    if not m.changed:
+        return Played {game: p.game, rng: p.rng, moves: p.moves, changed: false}
+    s = m.game.spawned(p.rng)
+====
+    m = game2048::move(p.game, d)
+    s = m.game.spawned(p.rng)
+>>>>
+
+@@ snapshot-without-rng the snapshot does not save the generator's state (a restored game spawns elsewhere)
+!! as-play-snapshot as-play-oracle
+## examples/games/2048/game2048_play.bot
+<<<<
+    fields = [p.rng.to_string(), p.game.score.to_string(),
+====
+    fields = ["0", p.game.score.to_string(),
+>>>>
+
+@@ snapshot-unvalidated a snapshot is accepted when its fields are numbers, whatever its flags and cells
+!! as-play-snapshot as-2048-restore
+## examples/games/2048/game2048_play.bot
+<<<<
+    if not (shaped and flagged and game2048::rows(board) == rows and facts):
+====
+    if not shaped:
+>>>>
+
+@@ game-over-in-ui the application decides the game is over itself, not by game2048_play
+!! as-play-single-source
+## examples/android-sdl3/2048/board.bot
+<<<<
+    if game2048_play::over?(p):
+====
+    if not p.changed and p.moves > 0:
+>>>>
+
+# ---------------------------------------------------------------------------
+# Application loop
+
+@@ shim-drains-events the native shim reads SDL's events before the Botlish program does
+!! as-tool-shim
+## integrations/android/templates/main.c.in
+<<<<
+    @LIBRARY@_error *error = NULL;
+    int32_t status = @LIBRARY@_main(argc, argv, &error);
+====
+    extern _Bool SDL_PollEvent(void *event);
+    { unsigned char event[128]; while (SDL_PollEvent(event)) {} }
+    @LIBRARY@_error *error = NULL;
+    int32_t status = @LIBRARY@_main(argc, argv, &error);
+>>>>
+
+@@ loop-busy-spins the visible loop polls instead of waiting (a timeout of 0)
+!! as-2048-lifecycle
+## examples/android-sdl3/2048/app.bot
+<<<<
+    timeout = if current.visible:
+        1000
+====
+    timeout = if current.visible:
+        0
+>>>>
+
+@@ move-twice one swipe moves the game twice
+!! as-2048-host
+## examples/android-sdl3/2048/app.bot
+<<<<
+            game = s.game.moved(direction)
+====
+            game = s.game.moved(direction).moved(direction)
+>>>>
+
+@@ cancel-retained a cancelled finger stays tracked: its later up still makes a gesture
+!! as-gesture-exactly-once as-counter-host
+## packages/sdlscreen/sdlscreen/gesture.bot
+<<<<
+    if not t.active or finger != t.finger:
+        return nothing(t)
+    nothing(idle())
+====
+    if not t.active or finger != t.finger:
+        return nothing(t)
+    nothing(t)
+>>>>
+
+@@ draw-while-hidden the loop draws whenever something changed, also in the background with no surface
+!! as-2048-lifecycle
+## examples/android-sdl3/2048/app.bot
+<<<<
+    current = if s.dirty and s.visible:
+====
+    current = if s.dirty:
+>>>>
+
+@@ shim-exits a failed application ends the process with exit() instead of returning from SDL_main
+!! as-tool-shim
+## integrations/android/templates/main.c.in
+<<<<
+        @LIBRARY@_error_release(&error);
+        return 1;
+====
+        @LIBRARY@_error_release(&error);
+        exit(1);
+>>>>
+
+@@ termination-ignored the loop goes on after SDL_EVENT_QUIT and SDL_EVENT_TERMINATING
+!! as-2048-terminate
+## examples/android-sdl3/2048/app.bot
+<<<<
+            finished(s.saving("quit"))
+====
+            next(s.saving("quit"))
+>>>>
+<<<<
+            finished(s.saving("terminating"))
+====
+            next(s.saving("terminating"))
+>>>>
+
+# ---------------------------------------------------------------------------
+# UI and input
+
+@@ swipe-reversed a horizontal swipe is read the wrong way round
+!! as-gesture-classify as-2048-host
+## packages/sdlscreen/sdlscreen/gesture.bot
+<<<<
+        if dx < 0:
+            return Gesture::Swipe {direction: Direction::Left}
+====
+        if dx > 0:
+            return Gesture::Swipe {direction: Direction::Left}
+>>>>
+
+@@ threshold-ignored any movement at all makes a swipe (the threshold is not read)
+!! as-gesture-classify
+## packages/sdlscreen/sdlscreen/gesture.bot
+<<<<
+    if ax < threshold and ay < threshold:
+====
+    if ax < 1 and ay < 1:
+>>>>
+
+@@ gesture-per-motion every motion of a finger is classified: one touch makes several gestures
+!! as-gesture-exactly-once as-2048-host
+## packages/sdlscreen/sdlscreen/gesture.bot
+<<<<
+    nothing(Tracker {active: true, cancelled: t.cancelled, finger: t.finger, start_x: t.start_x, start_y: t.start_y, last_x: x, last_y: y})
+====
+    Step {tracker: Tracker {active: true, cancelled: t.cancelled, finger: t.finger, start_x: t.start_x, start_y: t.start_y, last_x: x, last_y: y}, gesture: classify(t.start_x, t.start_y, x, y, 24)}
+>>>>
+
+@@ geometry-hardcoded the board's size is one phone's, whatever the screen
+!! as-layout as-2048-frames
+## examples/android-sdl3/2048/board.bot
+<<<<
+    side = sdlscreen::layout::smaller(safe.w, safe.h)
+====
+    side = 1080
+>>>>
+
+@@ stale-frame a move changes the game but not the screen: the score and board shown stay the previous state's
+!! as-2048-frames
+## examples/android-sdl3/2048/app.bot
+<<<<
+    State {game: game, tracker: s.tracker, layout: s.layout, visible: s.visible, dirty: true, frames: s.frames, path: s.path, saved: s.saved}
+====
+    State {game: game, tracker: s.tracker, layout: s.layout, visible: s.visible, dirty: s.dirty, frames: s.frames, path: s.path, saved: s.saved}
+>>>>
+
+@@ restart-ui-only the restart button logs and redraws a restart but keeps the game
+!! as-2048-host
+## examples/android-sdl3/2048/app.bot
+<<<<
+            game = game2048_play::start(sdlscreen::counter())
+====
+            game = s.game
+>>>>
+
+@@ win-in-ui the win message reads the board itself, not game2048_play's won?
+!! as-play-single-source
+## examples/android-sdl3/2048/board.bot
+<<<<
+    if game2048_play::won?(p.game):
+====
+    if p.game.score >= 20000:
+>>>>
+
+# ---------------------------------------------------------------------------
+# Native lifetime
+
+@@ library-unloaded the shim closes the application library instead of pinning it while SDLThread runs
+!! as-tool-shim
+## integrations/android/templates/main.c.in
+<<<<
+        void *pin = dlopen("lib@LIBRARY@.so", RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE);
+====
+        void *pin = dlopen("lib@LIBRARY@.so", RTLD_NOW | RTLD_NOLOAD);
+        if (pin) { dlclose(pin); dlclose(pin); }
+>>>>
+
+@@ create-not-main the shim makes an instance (NAME_create) instead of running the entry program (NAME_main)
+!! as-tool-shim
+## integrations/android/templates/main.c.in
+<<<<
+    int32_t status = @LIBRARY@_main(argc, argv, &error);
+====
+    @LIBRARY@_instance *instance = NULL;
+    int32_t status = @LIBRARY@_create(&instance, &error);
+    if (status == @LIBRARY@_STATUS_OK) @LIBRARY@_destroy(instance);
+>>>>
+
+@@ renderer-after-quit sdlscreen quits SDL before destroying the renderer and the window
+!! as-sdlscreen-teardown
+## packages/sdlscreen/sdlscreen.bot
+<<<<
+    if not renderer.null?():
+        renderer.SDL_DestroyRenderer()
+    window.SDL_DestroyWindow()
+    free_scratch(rect, line, event, wide, high, area, first, second, data, count)
+    sdl3::init::SDL_Quit()
+    reason
+====
+    free_scratch(rect, line, event, wide, high, area, first, second, data, count)
+    sdl3::init::SDL_Quit()
+    if not renderer.null?():
+        renderer.SDL_DestroyRenderer()
+    window.SDL_DestroyWindow()
+    reason
+>>>>
+
+@@ foreign-thread the shim runs the entry program on a thread of its own, not on SDLThread
+!! as-tool-shim
+## integrations/android/templates/main.c.in
+<<<<
+__attribute__((visibility("default"))) int SDL_main(int argc, char *argv[]) {
+====
+#include <pthread.h>
+struct botlish_call { int argc; char **argv; @LIBRARY@_error **error; int32_t status; };
+static void *botlish_run(void *p) {
+    struct botlish_call *c = p;
+    c->status = @LIBRARY@_main(c->argc, c->argv, c->error);
+    return NULL;
+}
+
+__attribute__((visibility("default"))) int SDL_main(int argc, char *argv[]) {
+>>>>
+<<<<
+    int32_t status = @LIBRARY@_main(argc, argv, &error);
+====
+    struct botlish_call call = {argc, argv, &error, 0};
+    pthread_t worker;
+    pthread_create(&worker, NULL, botlish_run, &call);
+    pthread_join(worker, NULL);
+    int32_t status = call.status;
+>>>>
+
+@@ tag-masked the shim clears the top byte of the argument pointers before handing them to Botlish
+!! as-tool-shim
+## integrations/android/templates/main.c.in
+<<<<
+    @LIBRARY@_error *error = NULL;
+    int32_t status = @LIBRARY@_main(argc, argv, &error);
+====
+    for (int i = 0; i < argc; i++) argv[i] = (char *)((uintptr_t)argv[i] & 0x00ffffffffffffffull);
+    @LIBRARY@_error *error = NULL;
+    int32_t status = @LIBRARY@_main(argc, argv, &error);
+>>>>
+
+@@ tagging-disabled the generated manifest turns Bionic's heap pointer tagging off
+!! as-tool-shim
+## integrations/android/templates/AndroidManifest.xml.in
+<<<<
+        android:hardwareAccelerated="true">
+====
+        android:hardwareAccelerated="true"
+        android:allowNativeHeapPointerTagging="false">
+>>>>
+
+@@ wrong-architecture the generator accepts an x86-64 library as the arm64-v8a one
+!! as-tool-refusals
+## integrations/android/src/main.c
+<<<<
+    if (f.machine != 183)
+====
+    if (f.machine != 183 && f.machine != 62)
+>>>>
+
+# ---------------------------------------------------------------------------
+# Packaging
+
+@@ reads-source the generator reads the application's Botlish source beside its artifacts
+!! as-tool-reads
+## integrations/android/src/main.c
+<<<<
+    sdlpkg sdl = openSdl(r.project, o.sdl3);
+====
+    sdlpkg sdl = openSdl(r.project, o.sdl3);
+    {
+        size_t sourceLen;
+        char *sourceFile = xprintf("%s/main.bot", r.project);
+        free(readFile(sourceFile, &sourceLen));
+        free(sourceFile);
+    }
+>>>>
+
+@@ java-omitted the generator leaves SDL's SDLActivity out of the project
+!! as-tool-generate
+## integrations/android/src/main.c
+<<<<
+    for (size_t i = 0; i < sdl.njava; i++) {
+        char *from = xprintf("%s/%s", sdl.view, sdl.java[i]);
+====
+    for (size_t i = 0; i < sdl.njava; i++) {
+        if (strstr(sdl.java[i], "/SDLActivity.java")) continue;
+        char *from = xprintf("%s/%s", sdl.view, sdl.java[i]);
+>>>>
+
+@@ stale-sdl-accepted the generator takes the SDL3 package's files without comparing their digests
+!! as-tool-refusals
+## integrations/android/src/main.c
+<<<<
+    if (strcmp(hex, sha))
+        die(1, "AN-SDL3", file,
+====
+    if (0 && strcmp(hex, sha))
+        die(1, "AN-SDL3", file,
+>>>>
+
+@@ manifest-digests-skipped the generator takes the library's files without comparing their digests with the manifest's
+!! as-tool-refusals
+## integrations/android/src/main.c
+<<<<
+        if (strcmp(hex, recorded))
+====
+        if (0 && strcmp(hex, recorded))
+>>>>
+
+@@ wrong-library the project gets the library's static archive under the shared library's name
+!! as-tool-generate
+## integrations/android/src/main.c
+<<<<
+    copyFile(sharedFile, out, appDest, 0644);
+====
+    copyFile(xprintf("%s/%s", lib.dir, lib.staticName), out, appDest, 0644);
+>>>>
+
+@@ alignment-4k the generator accepts a library whose segments are aligned for 4 KiB pages only
+!! as-tool-refusals
+## integrations/android/src/main.c
+<<<<
+    if (f.minAlign < 16384)
+====
+    if (f.minAlign < 4096)
+>>>>
+
+@@ install-runs-tool listing a project's tools makes each runnable program executable and runs it
+!! as-tool-not-run-by-install et-install-runs-nothing
+## pm/tools.tcl
+<<<<
+        puts $line
+        puts "    [dict get $entry summary]"
+====
+        puts $line
+        puts "    [dict get $entry summary]"
+        if {[dict get $entry direct] && $host ne "" && [dict exists $entry programs $host]} {
+            set program [file join [dict get $entry dir] [dict get $entry programs $host]]
+            catch {file attributes $program -permissions 0755; exec $program}
+        }
+>>>>
+
+@@ names-of-the-game the generator's default application ID is the game's, whatever library it is given
+!! as-tool-generate
+## integrations/android/src/main.c
+<<<<
+    if (!o.applicationId) o.applicationId = xprintf("org.botlish.%s", lib->library);
+====
+    if (!o.applicationId) o.applicationId = xprintf("org.botlish.sdl2048");
+>>>>

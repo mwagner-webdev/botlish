@@ -1,0 +1,85 @@
+# sdlscreen::layout -- rectangles for laying out a screen
+# (RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md, "Screen size and
+# density"): a pure module of integer pixel rectangles -- the drawable
+# area, cut into parts, a square fitted in a part, a grid of cells, a point
+# tested against a part -- so an application computes its geometry from the
+# drawable size it measured, never from one screen's pixel dimensions.
+# Every function is total.
+import std::float64
+
+# A rectangle: its top left corner X, Y and its size W x H, in pixels.
+struct Rect:
+    x: int
+    y: int
+    w: int
+    h: int
+
+nomethod fn ratio(a: int, b: int) -> int errors NonFiniteFloat:
+    std::float64::truncate(std::float64::from_int(a) / std::float64::from_int(b))
+
+# A divided by B, rounded toward zero (Botlish has no integer division:
+# pixel counts fit Float64's 53 bits exactly). 0 for a divisor of 0.
+nomethod fn quotient(a: int, b: int) -> int:
+    if b == 0:
+        return 0
+    q = ratio(a, b):
+        on NonFiniteFloat:
+            0
+    q
+
+# The rectangle of a drawable area WIDTH x HEIGHT.
+nomethod fn whole(width: int, height: int) -> Rect:
+    Rect {x: 0, y: 0, w: width, h: height}
+
+nomethod fn smaller(a: int, b: int) -> int:
+    if a < b:
+        return a
+    b
+
+nomethod fn larger(a: int, b: int) -> int:
+    if a > b:
+        return a
+    b
+
+# R with D pixels removed on every side (never a negative size).
+fn inset(r: Rect, d: int) -> Rect:
+    Rect {x: r.x + d, y: r.y + d, w: larger(r.w - d - d, 0), h: larger(r.h - d - d, 0)}
+
+# The top H pixels of R (all of R when it is lower).
+fn top(r: Rect, h: int) -> Rect:
+    Rect {x: r.x, y: r.y, w: r.w, h: smaller(larger(h, 0), r.h)}
+
+# R without its top H pixels.
+fn below(r: Rect, h: int) -> Rect:
+    taken = smaller(larger(h, 0), r.h)
+    Rect {x: r.x, y: r.y + taken, w: r.w, h: r.h - taken}
+
+# The bottom H pixels of R.
+fn bottom(r: Rect, h: int) -> Rect:
+    taken = smaller(larger(h, 0), r.h)
+    Rect {x: r.x, y: r.y + r.h - taken, w: r.w, h: taken}
+
+# R without its bottom H pixels.
+fn above(r: Rect, h: int) -> Rect:
+    taken = smaller(larger(h, 0), r.h)
+    Rect {x: r.x, y: r.y, w: r.w, h: r.h - taken}
+
+# The largest square centered in R.
+fn square(r: Rect) -> Rect:
+    side = smaller(r.w, r.h)
+    Rect {x: r.x + quotient(r.w - side, 2), y: r.y + quotient(r.h - side, 2), w: side, h: side}
+
+# A rectangle of W x H centered in R.
+nomethod fn centered(r: Rect, w: int, h: int) -> Rect:
+    Rect {x: r.x + quotient(r.w - w, 2), y: r.y + quotient(r.h - h, 2), w: w, h: h}
+
+# Cell COLUMN, ROW of R cut into N x N equal cells, GAP pixels between
+# neighbours and at R's edges.
+nomethod fn cell(r: Rect, n: int, column: int, row: int, gap: int) -> Rect:
+    side = larger(quotient(r.w - gap * (n + 1), n), 0)
+    tall = larger(quotient(r.h - gap * (n + 1), n), 0)
+    Rect {x: r.x + gap + column * (side + gap), y: r.y + gap + row * (tall + gap), w: side, h: tall}
+
+# Whether the point X, Y lies in R.
+fn contains?(r: Rect, x: int, y: int) -> bool:
+    x >= r.x and x < r.x + r.w and y >= r.y and y < r.y + r.h
