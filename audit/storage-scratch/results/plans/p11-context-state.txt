@@ -17,4 +17,4 @@ unit note<int>
 unit count<generic>
 unit record<int>
 
-# What lowering emitted
+# What lowering emitted, and what ran

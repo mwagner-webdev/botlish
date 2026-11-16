@@ -24,4 +24,4 @@ unit grow<int>
     semantic: confined to activation
     representable: no (the native std::mutable_vector::from_list)
 
-# What lowering emitted
+# What lowering emitted, and what ran

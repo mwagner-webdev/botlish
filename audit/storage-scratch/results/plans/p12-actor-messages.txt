@@ -745,4 +745,4 @@ unit the coroutine of client constructed at p12-actor-messages.bot:54:9 -- no re
   call of client (struct) at p12-actor-messages.bot:54:35: rejected -- it may suspend: a region is never live across a suspension
     semantic: escapes to activation (error: the payload of an error the call lets through (at p12-actor-messages.bot:54:35); result: the unit's value (at p12-actor-messages.bot:54:9))
 
-# What lowering emitted
+# What lowering emitted, and what ran

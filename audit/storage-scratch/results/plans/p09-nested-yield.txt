@@ -11,4 +11,4 @@ unit inner<int> -- no region: it may suspend: a region is never live across a su
 unit outer<int> -- no region: it may suspend: a region is never live across a suspension
 unit the coroutine of outer constructed at p09-nested-yield.bot:17:1 -- no region: it may suspend: a region is never live across a suspension
 
-# What lowering emitted
+# What lowering emitted, and what ran

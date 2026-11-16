@@ -518,39 +518,55 @@ unit handle<int> -- an activation region
   call of parse (struct) at p13-request-handler.bot:39:9: selected -- its callee's result in activation
   call of respond (str) at p13-request-handler.bot:42:22: selected -- its callee's result in activation
 
-# What lowering emitted
+# What lowering emitted, and what ran
   raw<int>: call of std::int::to_string at p13-request-handler.bot:16:26: emitted (1 instruction(s))
+    released by: its caller's region: the function exits with scratchexit, which leaves it there when the caller gave a destination; the caller's own boundaries release it
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 200 in scratch storage, 0 fell back to the heap, 0 on the heap
   raw<int>: call of std::str::concat at p13-request-handler.bot:16:5: not emitted -- no instruction of its own (virtual, inlined or a companion call)
-  raw<int>: call of std::str::concat at p13-request-handler.bot:16:5: emitted (1 instruction(s))
+  ...
   handle<int>: call of raw at p13-request-handler.bot:39:15: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    ...
+    ran: its callee placed what it returns (the callee's sites count it)
 ```
+
+Each emitted site states the boundary actions that release it, its size
+class (dynamic: a String's size is its own, at run time) and its fallback;
+the run (the native allocation report's sites, scratch storage on) says how
+many times it executed through its region, through the fallback, or on the
+heap. The report keeps apart, per site, the brief's six stages:
+semantically eligible (`semantic:`), backend-representable
+(`representable:`), selected (`selected`/`rejected`), emitted (`emitted` or
+why not), executed through the region and executed through the fallback
+(`ran:`).
 
 The census summary (`results/plans/summary.md`):
 
-| program | units | framed | String sites | selected | emitted | not emitted | rejected: not confined | rejected: unit has no region | rejected: not representable |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| p01-sequential-temps | 2 | 1 | 4 | 4 | 4 | 0 | 0 | 0 | 0 |
-| p02-simultaneous-temps | 2 | 1 | 5 | 5 | 3 | 2 | 0 | 0 | 0 |
-| p03-exclusive-branches | 2 | 1 | 4 | 4 | 2 | 2 | 0 | 0 | 0 |
-| p04-loop-reuse | 2 | 1 | 2 | 1 | 1 | 0 | 0 | 0 | 1 |
-| p05-escape-result | 3 | 2 | 4 | 4 | 4 | 0 | 0 | 0 | 0 |
-| p06-retained-aggregate | 2 | 0 | 6 | 0 | 0 | 0 | 2 | 0 | 4 |
-| p07-across-suspension | 3 | 0 | 3 | 0 | 0 | 0 | 0 | 0 | 3 |
-| p07b-string-across-suspension | 4 | 1 | 7 | 1 | 1 | 0 | 0 | 4 | 2 |
-| p08-two-coroutines | 4 | 0 | 7 | 0 | 0 | 0 | 0 | 0 | 7 |
-| p09-nested-yield | 4 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 2 |
-| p10-handle-moved | 4 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 2 |
-| p10b-handle-returned | 4 | 0 | 4 | 0 | 0 | 0 | 1 | 0 | 3 |
-| p11-context-state | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 4 |
-| p12-actor-messages | 178 | 0 | 249 | 0 | 0 | 0 | 137 | 44 | 68 |
-| p13-request-handler | 5 | 4 | 18 | 17 | 11 | 6 | 0 | 0 | 1 |
-| p14-errors-early-exit | 3 | 2 | 6 | 4 | 4 | 0 | 1 | 0 | 1 |
-| p15-bounded-collections | 4 | 0 | 7 | 0 | 0 | 0 | 2 | 0 | 5 |
-| p16-foreign-noescape | 2 | 0 | 4 | 0 | 0 | 0 | 1 | 0 | 3 |
-| p16b-foreign-captures | rejected by the compiler | | | | | | | | |
-| p17-explicit-return | 3 | 0 | 5 | 0 | 0 | 0 | 2 | 0 | 3 |
-| p18-persist-precision | 4 | 0 | 3 | 0 | 0 | 0 | 0 | 0 | 3 |
-| p19-context-scratch-vector | 2 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 4 |
+| program | units | framed | sites | selected | emitted | not emitted | rejected: not confined | rejected: unit has no region | rejected: not representable | ran in scratch storage | ran through the fallback |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| p01-sequential-temps | 2 | 1 | 4 | 4 | 4 | 0 | 0 | 0 | 0 | 4000 | 0 |
+| p02-simultaneous-temps | 2 | 1 | 5 | 5 | 3 | 2 | 0 | 0 | 0 | 3000 | 0 |
+| p03-exclusive-branches | 2 | 1 | 4 | 4 | 2 | 2 | 0 | 0 | 0 | 1000 | 0 |
+| p04-loop-reuse | 2 | 1 | 2 | 1 | 1 | 0 | 0 | 0 | 1 | 1000 | 0 |
+| p05-escape-result | 3 | 2 | 4 | 4 | 4 | 0 | 0 | 0 | 0 | 4000 | 0 |
+| p06-retained-aggregate | 2 | 0 | 6 | 0 | 0 | 0 | 2 | 0 | 4 | 0 | 0 |
+| p07-across-suspension | 3 | 0 | 3 | 0 | 0 | 0 | 0 | 0 | 3 | 0 | 0 |
+| p07b-string-across-suspension | 4 | 1 | 7 | 1 | 1 | 0 | 0 | 4 | 2 | 1000 | 0 |
+| p08-two-coroutines | 4 | 0 | 7 | 0 | 0 | 0 | 0 | 0 | 7 | 0 | 0 |
+| p09-nested-yield | 4 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 0 |
+| p10-handle-moved | 4 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 0 |
+| p10b-handle-returned | 4 | 0 | 4 | 0 | 0 | 0 | 1 | 0 | 3 | 0 | 0 |
+| p11-context-state | 4 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 4 | 0 | 0 |
+| p12-actor-messages | 178 | 0 | 249 | 0 | 0 | 0 | 137 | 44 | 68 | 0 | 0 |
+| p13-request-handler | 5 | 4 | 18 | 17 | 11 | 6 | 0 | 0 | 1 | 1600 | 0 |
+| p14-errors-early-exit | 3 | 2 | 6 | 4 | 4 | 0 | 1 | 0 | 1 | 3666 | 0 |
+| p15-bounded-collections | 4 | 0 | 7 | 0 | 0 | 0 | 2 | 0 | 5 | 0 | 0 |
+| p16-foreign-noescape | 2 | 0 | 4 | 0 | 0 | 0 | 1 | 0 | 3 | 0 | 0 |
+| p16b-foreign-captures | rejected by the compiler | | | | | | | | | | |
+| p17-explicit-return | 3 | 0 | 5 | 0 | 0 | 0 | 2 | 0 | 3 | 0 | 0 |
+| p18-persist-precision | 4 | 0 | 3 | 0 | 0 | 0 | 0 | 0 | 3 | 0 | 0 |
+| p19-context-scratch-vector | 2 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 4 | 0 | 0 |
 
 A blocked unit's report says why (p07b: `unit worker<int> -- no region:
 it may suspend: a region is never live across a suspension`).

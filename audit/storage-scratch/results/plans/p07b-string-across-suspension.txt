@@ -21,5 +21,8 @@ unit drive<int> -- a region per iteration of the fold at p07b-string-across-susp
     semantic: confined to iteration of the fold at p07b-string-across-suspension.bot:16:5
 unit the coroutine of worker constructed at p07b-string-across-suspension.bot:17:9 -- no region: it may suspend: a region is never live across a suspension
 
-# What lowering emitted
+# What lowering emitted, and what ran
   drive<int>: call of std::int::to_string at p07b-string-across-suspension.bot:18:17: emitted (1 instruction(s))
+    released by: its loop's reset at the head and at the exit (and its function's error exit when an error leaves the loop)
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 1000 in scratch storage, 0 fell back to the heap, 0 on the heap

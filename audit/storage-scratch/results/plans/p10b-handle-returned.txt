@@ -16,4 +16,4 @@ unit make<int>
     representable: no (the native coroutine#create)
 unit the coroutine of gen constructed at p10b-handle-returned.bot:13:5 -- no region: it may suspend: a region is never live across a suspension
 
-# What lowering emitted
+# What lowering emitted, and what ran

@@ -43,21 +43,54 @@ unit handle<int> -- an activation region
   call of respond (str) at p13-request-handler.bot:42:22: selected -- its callee's result in activation
     semantic: confined to activation
 
-# What lowering emitted
+# What lowering emitted, and what ran
   raw<int>: call of std::int::to_string at p13-request-handler.bot:16:26: emitted (1 instruction(s))
+    released by: its caller's region: the function exits with scratchexit, which leaves it there when the caller gave a destination; the caller's own boundaries release it
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 200 in scratch storage, 0 fell back to the heap, 0 on the heap
   raw<int>: call of std::str::concat at p13-request-handler.bot:16:5: not emitted -- no instruction of its own (virtual, inlined or a companion call)
   raw<int>: call of std::str::concat at p13-request-handler.bot:16:5: emitted (1 instruction(s))
+    released by: its caller's region: the function exits with scratchexit, which leaves it there when the caller gave a destination; the caller's own boundaries release it
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 200 in scratch storage, 0 fell back to the heap, 0 on the heap
   parse<str, int>: call of std::str::substring at p13-request-handler.bot:22:12: emitted (1 instruction(s))
+    released by: its caller's region: the function exits with scratchexit, which leaves it there when the caller gave a destination; the caller's own boundaries release it
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 200 in scratch storage, 0 fell back to the heap, 0 on the heap
   parse<str, int>: call of std::str::substring at p13-request-handler.bot:27:12: emitted (1 instruction(s))
+    released by: its caller's region: the function exits with scratchexit, which leaves it there when the caller gave a destination; the caller's own boundaries release it
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 200 in scratch storage, 0 fell back to the heap, 0 on the heap
   respond<Request>: call of std::str::concat at p13-request-handler.bot:35:12: not emitted -- no instruction of its own (virtual, inlined or a companion call)
   respond<Request>: call of std::str::concat at p13-request-handler.bot:35:12: not emitted -- no instruction of its own (virtual, inlined or a companion call)
   respond<Request>: call of std::int::to_string at p13-request-handler.bot:35:77: emitted (1 instruction(s))
+    released by: its caller's region: the function exits with scratchexit, which leaves it there when the caller gave a destination; the caller's own boundaries release it
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 200 in scratch storage, 0 fell back to the heap, 0 on the heap
   respond<Request>: call of std::str::concat at p13-request-handler.bot:35:12: not emitted -- no instruction of its own (virtual, inlined or a companion call)
   respond<Request>: call of std::str::concat at p13-request-handler.bot:35:12: emitted (1 instruction(s))
+    released by: its caller's region: the function exits with scratchexit, which leaves it there when the caller gave a destination; the caller's own boundaries release it
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 200 in scratch storage, 0 fell back to the heap, 0 on the heap
   respond<Request>: call of std::int::to_string at p13-request-handler.bot:36:50: emitted (1 instruction(s))
+    released by: its caller's region: the function exits with scratchexit, which leaves it there when the caller gave a destination; the caller's own boundaries release it
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 200 in scratch storage, 0 fell back to the heap, 0 on the heap
   respond<Request>: call of std::str::concat at p13-request-handler.bot:36:5: not emitted -- no instruction of its own (virtual, inlined or a companion call)
   respond<Request>: call of std::str::concat at p13-request-handler.bot:36:5: not emitted -- no instruction of its own (virtual, inlined or a companion call)
   respond<Request>: call of std::str::concat at p13-request-handler.bot:36:5: emitted (1 instruction(s))
+    released by: its caller's region: the function exits with scratchexit, which leaves it there when the caller gave a destination; the caller's own boundaries release it
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 200 in scratch storage, 0 fell back to the heap, 0 on the heap
   handle<int>: call of raw at p13-request-handler.bot:39:15: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: its callee placed what it returns (the callee's sites count it)
   handle<int>: call of parse at p13-request-handler.bot:39:9: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: its callee placed what it returns (the callee's sites count it)
   handle<int>: call of respond at p13-request-handler.bot:42:22: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: its callee placed what it returns (the callee's sites count it)

@@ -15,7 +15,9 @@ native/Cargo.toml`. Each keeps its scratch files in a temporary directory.
 
 * `tools/plan.tcl ?-out DIR? ?FILE.bot ...?` -- the storage-use plan of
   each program (the census's cases by default) as native lowering reads
-  it, and what lowering emitted for each selected site:
+  it, what lowering emitted for each selected site (its boundary actions,
+  size class and fallback) and, from one native run, how often each ran
+  through its region, through the fallback or on the heap:
   `results/plans/NAME.txt` and `results/plans/summary.md`.
 * `tools/measure.tcl ?-sizes {...}? ?-runs R? ?-time-size N? ?-memory 0|1?`
   -- the census's workloads at N = 1 .. 10000 with scratch storage off

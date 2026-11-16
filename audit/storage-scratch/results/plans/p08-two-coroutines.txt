@@ -26,4 +26,4 @@ unit counter<int> -- no region: it may suspend: a region is never live across a 
 unit the coroutine of counter constructed at p08-two-coroutines.bot:15:1 -- no region: it may suspend: a region is never live across a suspension
 unit the coroutine of counter constructed at p08-two-coroutines.bot:16:1 -- no region: it may suspend: a region is never live across a suspension
 
-# What lowering emitted
+# What lowering emitted, and what ran

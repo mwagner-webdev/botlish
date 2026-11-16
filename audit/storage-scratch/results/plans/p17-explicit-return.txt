@@ -17,4 +17,4 @@ unit explicit<int>
     semantic: escapes to activation (result: returned (at p17-explicit-return.bot:15:5))
     representable: no (a struct (only Strings are placed))
 
-# What lowering emitted
+# What lowering emitted, and what ran

@@ -15,4 +15,4 @@ unit <program>
     representable: no (the native mutable_vector#share)
 unit handle<int>
 
-# What lowering emitted
+# What lowering emitted, and what ran

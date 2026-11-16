@@ -11,8 +11,14 @@ unit label<int> -- an activation region
   call of std::str::concat (str) at p03-exclusive-branches.bot:10:9: selected -- activation
     semantic: confined to activation
 
-# What lowering emitted
+# What lowering emitted, and what ran
   label<int>: call of std::int::to_string at p03-exclusive-branches.bot:8:9: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 500 in scratch storage, 0 fell back to the heap, 0 on the heap
   label<int>: call of std::str::concat at p03-exclusive-branches.bot:8:9: not emitted -- no instruction of its own (virtual, inlined or a companion call)
   label<int>: call of std::int::to_string at p03-exclusive-branches.bot:10:9: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 500 in scratch storage, 0 fell back to the heap, 0 on the heap
   label<int>: call of std::str::concat at p03-exclusive-branches.bot:10:9: not emitted -- no instruction of its own (virtual, inlined or a companion call)

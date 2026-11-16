@@ -13,4 +13,4 @@ unit <program>
 unit worker<int> -- no region: it may suspend: a region is never live across a suspension
 unit the coroutine of worker constructed at p07-across-suspension.bot:17:1 -- no region: it may suspend: a region is never live across a suspension
 
-# What lowering emitted
+# What lowering emitted, and what ran

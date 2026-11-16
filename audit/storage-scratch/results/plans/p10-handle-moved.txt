@@ -11,4 +11,4 @@ unit gen<int> -- no region: it may suspend: a region is never live across a susp
 unit advance<coroutine>
 unit the coroutine of gen constructed at p10-handle-moved.bot:15:1 -- no region: it may suspend: a region is never live across a suspension
 
-# What lowering emitted
+# What lowering emitted, and what ran

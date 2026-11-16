@@ -8,5 +8,8 @@ unit work<int> -- a region per iteration of the fold at p04-loop-reuse.bot:13:5
   call of std::int::to_string (str) at p04-loop-reuse.bot:15:13: selected -- iteration of the fold at p04-loop-reuse.bot:13:5
     semantic: confined to iteration of the fold at p04-loop-reuse.bot:13:5
 
-# What lowering emitted
+# What lowering emitted, and what ran
   work<int>: call of std::int::to_string at p04-loop-reuse.bot:15:13: emitted (1 instruction(s))
+    released by: its loop's reset at the head and at the exit (and its function's error exit when an error leaves the loop)
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 1000 in scratch storage, 0 fell back to the heap, 0 on the heap

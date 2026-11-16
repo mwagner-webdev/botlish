@@ -19,4 +19,4 @@ unit collect<int>
     semantic: escapes to activation (result: the unit's value (at p06-retained-aggregate.bot:13:11))
     representable: no (a struct (only Strings are placed))
 
-# What lowering emitted
+# What lowering emitted, and what ran

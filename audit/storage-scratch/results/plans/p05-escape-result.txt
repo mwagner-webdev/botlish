@@ -12,8 +12,20 @@ unit use_it<int> -- an activation region
   call of make (str) at p05-escape-result.bot:12:13: selected -- its callee's result in activation
     semantic: confined to activation
 
-# What lowering emitted
+# What lowering emitted, and what ran
   make<int>: call of std::int::to_string at p05-escape-result.bot:8:5: emitted (1 instruction(s))
+    released by: its caller's region: the function exits with scratchexit, which leaves it there when the caller gave a destination; the caller's own boundaries release it
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 2000 in scratch storage, 0 fell back to the heap, 0 on the heap
   make<int>: call of std::str::concat at p05-escape-result.bot:8:5: emitted (1 instruction(s))
+    released by: its caller's region: the function exits with scratchexit, which leaves it there when the caller gave a destination; the caller's own boundaries release it
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 2000 in scratch storage, 0 fell back to the heap, 0 on the heap
   use_it<int>: call of make at p05-escape-result.bot:11:12: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: its callee placed what it returns (the callee's sites count it)
   use_it<int>: call of make at p05-escape-result.bot:12:13: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: its callee placed what it returns (the callee's sites count it)

@@ -14,4 +14,4 @@ unit worker<int, bool> -- no region: it may suspend: a region is never live acro
 unit the coroutine of worker constructed at p18-persist-precision.bot:18:1 -- no region: it may suspend: a region is never live across a suspension
 unit the coroutine of worker constructed at p18-persist-precision.bot:19:1 -- no region: it may suspend: a region is never live across a suspension
 
-# What lowering emitted
+# What lowering emitted, and what ran
