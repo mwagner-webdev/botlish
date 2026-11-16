@@ -2081,15 +2081,16 @@ hir/lifetime.tcl, run `tests/scratch-storage.test` (also under
 `BOTLISH_NATIVE_GC_STRESS=1`), `tests/storage-lifetime.test`, `cargo test
 --release --manifest-path native/Cargo.toml --lib scratch`,
 `audit/storage-scratch/tools/fuzz.tcl` (several seeds: the interpreter
-against native runs plain, under GC stress with released storage poisoned,
-and with tiny chunks) and `audit/storage-scratch/tools/mutate.tcl` (every
+against the Tcl compiler and native runs plain, under GC stress with
+released storage poisoned, with tiny chunks and without scratch storage) and `audit/storage-scratch/tools/mutate.tcl` (every
 mutant in its `mutants.txt` must still apply and be killed by a detector
 its `!!` line names: update a mutant's text when you change the code it
 mutates, keeping it a mutant of the same rule).
 `audit/storage-scratch/tools/measure.tcl`, `costs.tcl` and
 `compile-cost.tcl` regenerate the measurements (time them on an otherwise
-idle machine), `plan.tcl` the corpus's plan reports and `memcheck.tcl`
-valgrind's view of the positive workloads.
+idle machine), `plan.tcl` the corpus's plan reports, `sysalloc.tcl` every
+system allocation per unit (not only the managed heap's) and
+`memcheck.tcl` valgrind's view of the positive workloads.
 
 ## Coroutine fusion
 
