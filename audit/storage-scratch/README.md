@@ -31,6 +31,9 @@ native/Cargo.toml`. Each keeps its scratch files in a temporary directory.
 * `tools/compile-cost.tcl ?-runs R? ?FILE.bot ...?` -- native lowering with
   scratch storage off and on (the analysis, the plan and the frames'
   post-processing): `results/compile-cost.md`.
+* `tools/sysalloc.tcl ?-sizes {N1 N2}?` -- every system allocation per unit
+  (valgrind's heap summary of a standalone executable at two sizes),
+  beside the managed heap's: `results/sysalloc.md`.
 * `tools/memcheck.tcl ?CASE ...?` -- standalone executables of the positive
   workloads under valgrind's memcheck, plain and under GC stress:
   `results/memcheck.txt`.
@@ -53,5 +56,6 @@ native/Cargo.toml`. Each keeps its scratch files in a temporary directory.
 
 * `results/plans/` -- the census's plans (`tools/plan.tcl`).
 * `results/measurements.md` -- the measurements (`tools/measure.tcl`).
-* `results/costs.md`, `results/compile-cost.md`, `results/memcheck.txt`,
+* `results/costs.md`, `results/compile-cost.md`, `results/sysalloc.md`,
+  `results/memcheck.txt`,
   `results/fuzz.txt`, `results/mutants.txt` -- the runs the report cites.

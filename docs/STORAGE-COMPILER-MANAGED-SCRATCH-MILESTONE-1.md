@@ -36,7 +36,11 @@ at N = 10,000, scratch storage off and on:
 | p12 actor messages (control) | 120,161 / 120,161 | 7,185,650 / 7,185,650 | 7 / 7 | 0 | -- | 1.01 |
 
 p13's remaining heap allocation is its `Request` struct, one per request;
-every String of a request is placed. p12 places nothing: every actor unit
+every String of a request is placed. Counting the system allocator too
+(section 21): p01, p04 and p05 allocate nothing per unit with scratch
+storage, p13 exactly its struct's two blocks, and p14 two blocks per
+declared failure that the runtime's failure path allocates with or without
+scratch storage -- so "no heap allocation" here means the managed heap. p12 places nothing: every actor unit
 suspends (section 18). One 16 KiB chunk is reserved at the first placement
 and reused for every later one: no reservation and no growth after the
 first region, at every N.
@@ -725,8 +729,9 @@ N = 10,000, whose Strings have more digits); one reservation at every N;
 steady state for p13 needs structs placed (section 26); this milestone does
 not claim one.
 
-**D. p14, errors and early exits.** **[measurement]** 3.67 heap allocations
-per unit without, 0 with; 2 regions per unit (the frames of `check` and
+**D. p14, errors and early exits.** **[measurement]** 3.67 managed-heap
+allocations per unit without, 0 with (the declared failures' own two system
+blocks each remain, section 21); 2 regions per unit (the frames of `check` and
 `early`), peak in use 72 bytes at every N. **[test]** p14 covers normal
 return, early `return`, a declared failure carrying a payload computed from
 a placed String (`fail TooBig {limit: std::str::length(s)}`: the payload is
@@ -811,7 +816,13 @@ their loops; every kept String is folded into the value. Each runs on
 interp (the oracle), on the Tcl compiler and natively in four modes: scratch
 storage on, under GC stress (released storage poisoned), with 48-byte
 chunks (growth on every path), and with scratch storage off.
-**[measurement]** «FUZZ»
+**[measurement]** `tclsh9.0 audit/storage-scratch/tools/fuzz.tcl -seeds 1-40 -count 6`
+(`results/fuzz.txt`): 240 programs, 0 failures, 0 that do not compile --
+every outcome equal to interp's on the Tcl compiler and in all four native
+modes, no stale root and no protocol error. The plan selected 3,563 sites;
+lowering placed 1,374 of them (27,731 Strings in scratch storage over the
+runs); 939 had no instruction of their own and 1,250 were in instances that
+have no canonical function (section 25).
 
 **[probe]** Positive control: with each of the two unsound lifetime facts of
 section 5 reintroduced, 8 of 8 generated programs fail (NATIVE BUG or
@@ -911,7 +922,29 @@ run here). Scratch placements are not heap allocations: they are counted
 as `scratch allocations` (the same number as the heap allocations they
 replace, in p01, p04, p05 and p14).
 
-**[measurement]** The fuzzer's corpus (240 programs, section 19): «FUZZHEAP».
+**[measurement]** The fuzzer's corpus (240 programs, section 19): 141,059 managed-heap allocations without scratch storage, 113,328 with it (27,731 Strings placed).
+
+**[measurement]** Every system allocation, not only the managed heap's
+(`tools/sysalloc.tcl`, `results/sysalloc.md`: valgrind's total heap usage of
+a standalone executable at N = 1,000 and 2,000, per unit):
+
+| workload | system allocations per unit, off / on | managed-heap allocations per unit, off / on |
+|---|---:|---:|
+| p01 | 4.00 / 0.00 | 4.00 / 0.00 |
+| p04 | 1.00 / 0.00 | 1.00 / 0.00 |
+| p13 | 10.00 / 2.00 | 9.00 / 1.00 |
+| p14 | 5.67 / 2.00 | 3.67 / 0.00 |
+| p05 | 4.00 / 0.00 | 4.00 / 0.00 |
+
+**[probe]** Valgrind's DHAT names the rest: p13's two blocks per request are
+its `Request` struct (`Vm::new_struct`: the object, and its fields'
+`to_vec`); p14's two per unit (every unit between N = 1,000 and 2,000 fails,
+`i > 900`) are `rt_fail_declared_payload`'s, which allocates the payload's
+slots and formats a message for every declared failure (ops.rs, lines 445
+and 451), with scratch storage off and on alike. **[inference]** So p01,
+p04 and p05 reach a zero-allocation steady state, the runtime helpers
+included (one 16 KiB chunk at the first placement); p13 and p14 do not, and
+what remains is identified: a struct, and the declared-failure path.
 
 **[inference]** What the counts do not include: the 16 KiB chunk per Vm
 (reserved once, kept until the run ends), the frames' register and the two
@@ -1063,9 +1096,9 @@ difference the collection counts already do.
   String such a variant builds stays on the heap, and a call through a
   function value reaches the generic instance, which takes no destination.
   **[measurement]** In the fuzzer's corpus this is the largest gap: of
-  3,563 sites the plan selected, «NOTLOWERED» are in instances lowered only
+  3,563 sites the plan selected, 1,250 are in instances lowered only
   as a companion (a struct result returned in registers) or an internal
-  variant (a closure's captures passed as parameters), and «NOTEMITTED»
+  variant (a closure's captures passed as parameters), and 939
   have no instruction of their own (the inner sites of a fused
   concatenation, whose one `construct` is placed, and virtual Strings).
 * **Construction plans' own objects.** A unit whose result is a String
