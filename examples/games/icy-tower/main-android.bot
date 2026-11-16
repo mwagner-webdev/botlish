@@ -1,0 +1,25 @@
+# main-android.bot -- main.bot on Android (ICY-TOWER-ANDROID.md): the same
+# game (game.bot) and SDL (sdl.bot), with Android's std::io::IO context
+# installed -- android_io's, whose writes go to Android's log (logcat, tag
+# IcyTower) -- and the touch screen's controls, touch.bot's Touch, in place
+# of a desktop's keyboard.
+#
+# Built as an application library for android-aarch64
+# (-emit-native-library icytower -application): SDL's Android bootstrap
+# (SDLActivity) runs it on SDLThread through icytower_main, and the APK is
+# what integrations/android's tool generates and builds around it.
+#
+#   examples/games/icy-tower/build-android.sh    the APK
+import android_io
+import game
+import sdl
+import std::io
+import touch
+
+with context android_io::create_tagged("IcyTower")
+with context sdl::create()
+with context touch::create()
+
+game::main(game::arguments()):
+    on std::io::WriteFailed:
+        unit

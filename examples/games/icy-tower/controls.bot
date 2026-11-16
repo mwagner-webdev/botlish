@@ -1,0 +1,43 @@
+# controls.bot -- the player's controls as the platform supplies them
+# (ICY-TOWER-ANDROID.md): a context trait, Controls, and the three
+# operations the game calls through it. The entry program installs the one
+# context that implements it -- keyboard.bot's Keyboard on Linux, Windows
+# and macOS, touch.bot's Touch on Android -- beside std::io::IO and
+# sdl::Sdl, and the compiler compiles each call below to a direct call of
+# that context's implementation (CONTEXT-TRAITS.md): no dispatch at run
+# time, and nothing here names a platform.
+#
+# Pure: no SDL. An implementation reaches SDL through sdl.bot's operations,
+# so its own requirement (sdl::Sdl) is the entry program's installation too.
+import tower
+
+# What reading the controls at the start of a frame found: whether the
+# player asked to quit (the window closed, Escape, Android's back key),
+# what they ask of the game in this frame, and what failed ("" when
+# nothing did).
+struct Reading:
+    quit: bool
+    input: tower::Input
+    failure: str
+
+# The player's controls: how a platform reads them, names them and shows
+# them.
+context trait Controls:
+    # Reads the player at the start of a frame (SDL's waiting events are
+    # taken).
+    fn read_controls() -> Reading
+    # The lines the banner shows over WORLD (hud::banner_lines' with this
+    # platform's names for the controls).
+    fn controls_banner(world: tower::World) -> List[str]
+    # Finishes a drawn frame: draws the controls' own parts, if they have
+    # any, then presents it. Whether every SDL call succeeded.
+    fn present_frame() -> bool
+
+fn read(context c: Controls) -> Reading:
+    c.read_controls()
+
+fn banner_lines(world: tower::World, context c: Controls) -> List[str]:
+    c.controls_banner(world)
+
+fn present(context c: Controls) -> bool:
+    c.present_frame()

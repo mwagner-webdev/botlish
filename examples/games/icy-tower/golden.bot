@@ -1,7 +1,7 @@
 # golden.bot -- golden tests of the Icy Tower vertical slice's rules
-# (tower.bot), text (hud.bot) and command line (options.bot), through their
-# public API, as the game uses them (ICY-TOWER-VERTICAL-SLICE-1.md,
-# "Tests").
+# (tower.bot), text (hud.bot), command line (options.bot) and touch
+# controls (touchpad.bot, ICY-TOWER-ANDROID.md), through their public API,
+# as the game uses them (ICY-TOWER-VERTICAL-SLICE-1.md, "Tests").
 #
 # Run with `tclsh9.0 examples/games/icy-tower/run.tcl -suite`
 # (tests/workload-icy-tower.test runs it on every backend): the modules are
@@ -25,6 +25,7 @@ import std::int
 import std::list
 import options
 import std::test
+import touchpad
 import tower
 
 # ---------------------------------------------------------------------------
@@ -580,6 +581,59 @@ fn register_text_tests():
     ], banners)
 
 # ---------------------------------------------------------------------------
+# The touch screen's controls (touchpad.bot)
+
+# B's corner and size, each rounded to the nearest pixel.
+fn rounded(b: touchpad::Box) -> List[int]:
+    [b.x.round(), b.y.round(), b.w.round(), b.h.round()]
+
+# The pads of a WIDTH x HEIGHT screen whose scaled view is GAME, rounded:
+# [left, right, over].
+fn laid_out(game: touchpad::Box, width: Float64, height: Float64) -> list:
+    p = game.pads(width, height):
+        on NonFiniteFloat:
+            return ["non-finite"]
+    [rounded(p.left), rounded(p.right), p.over]
+
+fn steered(xs: List[Float64]) -> List[bool]:
+    s = touchpad::steering(xs)
+    [s.left, s.right]
+
+fn register_touch_tests():
+    fn steering() -> list:
+        [steered([]), steered([0.2]), steered([0.7]), steered([0.5]), steered([0.1, 0.9])]
+    std::test::value("icy-touch-steering-by-halves", [[false, false], [true, false], [false, true], [false, true], [true, true]], steering)
+
+    # A 1080 x 2400 phone held upright: the view 1080 x 1620 in its middle,
+    # the pads in the band below it.
+    fn tall() -> list:
+        view = touchpad::Box {x: 0.0, y: 390.0, w: 1080.0, h: 1620.0}
+        view.laid_out(1080.0, 2400.0)
+    std::test::value("icy-touch-pads-below-on-a-tall-screen", [[32, 2042, 491, 325], [556, 2042, 491, 325], false], tall)
+
+    # The same phone on its side: the view 720 x 1080, the pads beside it.
+    fn wide() -> list:
+        view = touchpad::Box {x: 840.0, y: 0.0, w: 720.0, h: 1080.0}
+        view.laid_out(2400.0, 1080.0)
+    std::test::value("icy-touch-pads-beside-on-a-wide-screen", [[32, 32, 775, 1015], [1592, 32, 775, 1015], false], wide)
+
+    # A screen the view fills: outlines over its lower corners.
+    fn filled() -> list:
+        view = touchpad::Box {x: 0.0, y: 0.0, w: 480.0, h: 720.0}
+        view.laid_out(480.0, 720.0)
+    std::test::value("icy-touch-pads-over-a-filled-screen", [[14, 610, 96, 96], [370, 610, 96, 96], true], filled)
+
+    fn banners() -> list:
+        w = new_world(7)
+        later = w.simulated(190)
+        [touchpad::banner_lines(w), touchpad::banner_lines(w.over()), touchpad::banner_lines(later)]
+    std::test::value("icy-touch-banner-lines", [
+        ["HOLD LEFT/RIGHT TO RUN", "LAND TO BOUNCE - CLIMB!"],
+        ["GAME OVER", "TAP TO PLAY AGAIN", "BACK TO QUIT"],
+        [],
+    ], banners)
+
+# ---------------------------------------------------------------------------
 # The command line
 
 fn register_option_tests():
@@ -629,4 +683,5 @@ register_platform_tests()
 register_game_tests()
 register_text_tests()
 register_option_tests()
+register_touch_tests()
 std::test::report()

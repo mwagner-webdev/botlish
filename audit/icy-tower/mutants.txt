@@ -250,3 +250,37 @@ after.x + player_width >= p.x
 ====
     if headless and frames < 0:
 >>>>
+
+@@ touch-boundary-left a finger exactly in the middle of the screen runs left, not right
+## examples/games/icy-tower/touchpad.bot
+<<<<
+        if x < 0.5:
+====
+        if x <= 0.5:
+>>>>
+
+@@ touch-right-pad-on-the-view on a wide screen the right pad is laid out from the view's left edge, over it
+## examples/games/icy-tower/touchpad.bot
+<<<<
+        right_x = game.x + game.w
+====
+        right_x = game.x
+>>>>
+
+@@ touch-pads-over-filled-not-outlined pads over a view that fills the screen are drawn filled, hiding the game
+## examples/games/icy-tower/touchpad.bot
+<<<<
+        over: true,
+====
+        over: false,
+>>>>
+
+@@ touch-banner-always the touch screen's banner shows its start lines when hud shows none
+## examples/games/icy-tower/touchpad.bot
+<<<<
+    if std::list::length(hud::banner_lines(world)) == 0:
+        return []
+    if world.over:
+====
+    if world.over:
+>>>>

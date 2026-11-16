@@ -1,0 +1,66 @@
+# keyboard.bot -- the controls of a desktop (Linux, Windows, macOS): the
+# keyboard (ICY-TOWER-ANDROID.md). Its context, Keyboard, implements
+# controls::Controls; main.bot, main-windows.bot and main-macos.bot install
+# it. What it does is what game.bot did before the controls became a
+# context: one sdl::poll of the keys the game reads per frame, the
+# keyboard's banner text (hud's), and the frame presented as it was drawn
+# -- the same SDL calls in the same order, so the desktop executables' SDL
+# call trace is unchanged (audit/icy-tower/trace-reference.txt).
+#
+# Controls: Left/A and Right/D run; R starts a new game after a fall;
+# Escape (or closing the window) quits.
+import controls
+import hud
+import sdl
+import sdl3::scancode
+import std::list
+import tower
+
+# The keyboard. It keeps no state of its own (SDL keeps the keyboard's);
+# a struct has at least one field, so it says what it is.
+opaque context struct Keyboard:
+    keyboard: bool
+
+fn create() -> Keyboard:
+    Keyboard {keyboard: true}
+
+# SCANCODE, an SDL scancode, as the Int it is: an index of SDL's keyboard
+# state. (An SDL enumeration constant's C type is the target's: unsigned int
+# on Linux, int on Windows.)
+fn key(scancode: int) -> int:
+    scancode
+
+# The keys the game reads, in the order of `input`'s list.
+fn scancodes() -> List[int]:
+    [
+        key(sdl3::scancode::SDL_SCANCODE_LEFT),
+        key(sdl3::scancode::SDL_SCANCODE_A),
+        key(sdl3::scancode::SDL_SCANCODE_RIGHT),
+        key(sdl3::scancode::SDL_SCANCODE_D),
+        key(sdl3::scancode::SDL_SCANCODE_R),
+        key(sdl3::scancode::SDL_SCANCODE_ESCAPE),
+    ]
+
+# The player's input from HELD, which of scancodes() are held.
+fn input(held: List[bool]) -> tower::Input:
+    tower::Input {
+        left: held.get(0, false) or held.get(1, false),
+        right: held.get(2, false) or held.get(3, false),
+        restart: held.get(4, false),
+    }
+
+fn escape?(held: List[bool]) -> bool:
+    held.get(5, false)
+
+# Takes the waiting events and reads the keys: a quit when the window was
+# closed or Escape is held.
+fn read_controls(context k: Keyboard) -> controls::Reading:
+    {quit, held, failure} = sdl::poll(scancodes())
+    controls::Reading {quit: quit or held.escape?(), input: held.input(), failure: failure}
+
+fn controls_banner(world: tower::World, context k: Keyboard) -> List[str]:
+    hud::banner_lines(world)
+
+# A desktop's controls draw nothing: the frame is presented as drawn.
+fn present_frame(context k: Keyboard) -> bool:
+    sdl::present()

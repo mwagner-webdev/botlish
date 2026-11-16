@@ -1,0 +1,214 @@
+# touch.bot -- the controls of a touch screen: Android's
+# (ICY-TOWER-ANDROID.md). Its context, Touch, implements controls::Controls;
+# main-android.bot installs it in place of keyboard.bot's Keyboard. What a
+# touch means and where the pads go is touchpad.bot's (pure); this module
+# reads the fingers and draws the pads through sdl.bot's operations, so it
+# holds no SDL object and calls no SDL function itself.
+#
+# The screen. sdl.bot's `open` letterboxes the game's 480 x 720 view into
+# the window, which on Android is the whole screen (made fullscreen at the
+# first read: immersive, the system bars hidden), so the view is scaled up
+# to the largest size the screen holds, whatever its size, density or
+# orientation. The pads are drawn in the window's own pixels around it:
+# `present_frame` turns the logical view off, draws them, presents, and
+# turns it on again for the next frame.
+#
+# Controls: hold the left or right half of the screen to run; tap to play
+# again after a fall; Back (or Escape) quits. A keyboard, when the device
+# has one, works as on a desktop. The fingers are read from SDL's finger
+# events (and the back key from its key events: Android's back gesture
+# goes down and up between two frames), never from a polled state.
+import controls
+import keyboard
+import sdl
+import std::ffi::c
+import std::float64
+import std::list
+import std::mutable_vector
+import touchpad
+import tower
+
+# A finger down: SDL's identity of it, and where it is across the window
+# (a fraction of its width).
+struct Held:
+    finger: int
+    x: Float64
+
+# What the touch screen remembers between frames: the fingers down (one
+# entry, the list), whether they held the left and the right half (the
+# pads drawn pressed), and whether the window has been made fullscreen.
+opaque context struct Touch:
+    fingers: MutableVector[List[Held]]
+    flags: MutableVector[bool]
+
+fn create() -> Touch:
+    Touch {fingers: std::mutable_vector::from_list([[]]), flags: std::mutable_vector::from_list([false, false, false])}
+
+# The game's logical view (tower.bot's 480 x 720, as game.bot opens it).
+fn view_width() -> std::ffi::c::Int:
+    480
+
+fn view_height() -> std::ffi::c::Int:
+    720
+
+# Flag I of the remembered state (0 left pressed, 1 right pressed, 2
+# fullscreen).
+fn flag(i: int, context t: Touch) -> bool:
+    t.flags.at(i):
+        on IndexNotFound:
+            false
+
+fn set_flag(i: int, value: bool, context t: Touch):
+    was = t.flags.swap(i, value):
+        on IndexNotFound:
+            false
+
+# The fingers down at the last read.
+fn held_fingers(context t: Touch) -> List[Held]:
+    t.fingers.at(0):
+        on IndexNotFound:
+            []
+
+fn hold(fingers: List[Held], context t: Touch):
+    was = t.fingers.swap(0, fingers):
+        on IndexNotFound:
+            []
+
+# Makes the window fullscreen, once.
+fn cover_screen(context t: Touch):
+    if flag(2):
+        return unit
+    covered = sdl::fullscreen()
+    set_flag(2, true)
+
+# FINGERS without the finger FINGER.
+fn without(fingers: List[Held], finger: int) -> List[Held]:
+    loop h in fingers:
+        if h.finger == finger:
+            continue
+        h
+
+# FINGERS after the finger event T.
+fn touched(fingers: List[Held], t: sdl::Touched) -> List[Held]:
+    match t:
+        case sdl::Touched::Down {finger, x}:
+            fingers.without(finger).append(Held {finger: finger, x: x})
+        case sdl::Touched::Moved {finger, x}:
+            fingers.without(finger).append(Held {finger: finger, x: x})
+        case sdl::Touched::Lifted {finger}:
+            fingers.without(finger)
+
+# Whether T puts a finger down.
+fn down?(t: sdl::Touched) -> bool:
+    match t:
+        case sdl::Touched::Down:
+            true
+        case sdl::Touched::Moved:
+            false
+        case sdl::Touched::Lifted:
+            false
+
+# Takes the waiting events and reads the fingers and the keys: steering
+# from the fingers down after them, a new game from a finger put down among
+# them (so a finger held through a fall does not start one by itself), a
+# quit from the back key.
+fn read_controls(context t: Touch) -> controls::Reading:
+    cover_screen()
+    {quit, back, held, touches, failure} = sdl::poll_touch(keyboard::scancodes())
+    keys = keyboard::input(held)
+    quitting = quit or back or keyboard::escape?(held)
+    if failure != "":
+        return controls::Reading {quit: quitting, input: keys, failure: failure}
+    fingers = fold e in touches with intermediate now held_fingers():
+        now.touched(e)
+    tapped = fold e in touches with intermediate seen false:
+        seen or e.down?()
+    hold(fingers)
+    xs = loop h in fingers:
+        h.x
+    steer = touchpad::steering(xs)
+    set_flag(0, steer.left)
+    set_flag(1, steer.right)
+    controls::Reading {
+        quit: quitting,
+        input: tower::Input {left: keys.left or steer.left, right: keys.right or steer.right, restart: keys.restart or tapped},
+        failure: "",
+    }
+
+fn controls_banner(world: tower::World, context t: Touch) -> List[str]:
+    touchpad::banner_lines(world)
+
+fn box(a: sdl::Area) -> touchpad::Box:
+    touchpad::Box {x: a.x, y: a.y, w: a.w, h: a.h}
+
+# An arrow in the middle of B pointing left (LEFT) or right, a stack of
+# columns from its tip to its base, in the current color.
+fn arrow(b: touchpad::Box, left: bool) -> bool errors NonFiniteFloat:
+    size = std::float64::min(b.w, b.h) * 0.45
+    n = 12
+    column = size / std::float64::from_int(n)
+    tip = if left:
+        b.x + (b.w - size) / 2.0
+    else:
+        b.x + (b.w + size) / 2.0 - column
+    middle = b.y + b.h / 2.0
+    drawn = loop c from 0 to n:
+        h = size * std::float64::from_int(c + 1) / std::float64::from_int(n)
+        x = if left:
+            tip + column * std::float64::from_int(c)
+        else:
+            tip - column * std::float64::from_int(c)
+        sdl::fill(x, middle - h / 2.0, column + 1.0, h)
+    fold ok in drawn with intermediate all true:
+        all and ok
+
+# The border of B, THICK pixels wide, in the current color.
+nomethod fn border(b: touchpad::Box, thick: Float64) -> bool errors NonFiniteFloat:
+    top = sdl::fill(b.x, b.y, b.w, thick)
+    bottom = sdl::fill(b.x, b.y + b.h - thick, b.w, thick)
+    left = sdl::fill(b.x, b.y, thick, b.h)
+    right = sdl::fill(b.x + b.w - thick, b.y, thick, b.h)
+    top and bottom and left and right
+
+# A pad: filled unless it lies OVER the game's view, its border and its
+# arrow, brighter while PRESSED.
+nomethod fn pad(b: touchpad::Box, left: bool, pressed: bool, over: bool) -> bool errors NonFiniteFloat:
+    thick = std::float64::max(2.0, std::float64::min(b.w, b.h) / 40.0)
+    filled = if over:
+        true
+    elif pressed:
+        sdl::color(52, 70, 124) and sdl::fill(b.x, b.y, b.w, b.h)
+    else:
+        sdl::color(28, 34, 60) and sdl::fill(b.x, b.y, b.w, b.h)
+    ink = if pressed:
+        sdl::color(236, 240, 255)
+    else:
+        sdl::color(120, 140, 200)
+    filled and ink and border(b, thick) and b.arrow(left)
+
+# The pads P, the left one pressed while LEFT, the right while RIGHT.
+fn draw(p: touchpad::Pads, left: bool, right: bool) -> bool errors NonFiniteFloat:
+    a = pad(p.left, true, left, p.over)
+    b = pad(p.right, false, right, p.over)
+    a and b
+
+# The pads of a WIDTH x HEIGHT screen whose scaled view is GAME, drawn
+# pressed as the last read found them.
+nomethod fn pads_drawn(game: touchpad::Box, width: Float64, height: Float64, context t: Touch) -> bool:
+    p = game.pads(width, height):
+        on NonFiniteFloat:
+            return false
+    drawn = p.draw(flag(0), flag(1)):
+        on NonFiniteFloat:
+            false
+    drawn
+
+# Draws the pads around the scaled view, then presents the frame.
+fn present_frame(context t: Touch) -> bool:
+    game = sdl::presented()
+    unscaled = sdl::unscaled()
+    screen = sdl::presented()
+    drawn = pads_drawn(box(game), screen.w, screen.h)
+    shown = sdl::present()
+    scaled = sdl::scaled(view_width(), view_height())
+    unscaled and drawn and shown and scaled

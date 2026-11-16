@@ -2,17 +2,20 @@
 # (ICY-TOWER-VERTICAL-SLICE-1.md): the game is game.bot's (an application
 # module beside it) and SDL sdl.bot's; this file installs their contexts --
 # std::linux::io's std::io::IO, whose writes are the raw write(2) syscall,
-# and SDL, closed -- and runs the game on the command line.
+# SDL, closed, and the keyboard's controls (keyboard.bot's Keyboard, the
+# desktops' controls::Controls) -- and runs the game on the command line.
 # main-windows.bot is the same program on Windows.
 #
 #   examples/games/icy-tower/build.sh     the Linux executable
 import game
+import keyboard
 import sdl
 import std::io
 import std::linux::io
 
 with context std::linux::io::create()
 with context sdl::create()
+with context keyboard::create()
 
 game::main(game::arguments()):
     on std::io::WriteFailed:

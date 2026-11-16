@@ -1,10 +1,12 @@
 # game.bot -- the Icy Tower vertical slice as a program
-# (ICY-TOWER-VERTICAL-SLICE-1.md): a window, the keyboard, the frame loop,
+# (ICY-TOWER-VERTICAL-SLICE-1.md): a window, the controls, the frame loop,
 # and the run's summary. An application module, the file beside the game's
 # entry programs: main.bot installs Linux's std::io::IO context
 # (std::linux::io), main-windows.bot Windows' (std::windows::io,
-# ICY-TOWER-WINDOWS.md); each installs sdl.bot's Sdl and runs `main`.
-# Nothing here names a platform.
+# ICY-TOWER-WINDOWS.md), the Android entry Android's (ICY-TOWER-ANDROID.md);
+# each installs sdl.bot's Sdl and the platform's controls
+# (controls::Controls: keyboard.bot's Keyboard on a desktop, touch.bot's
+# Touch on Android) and runs `main`. Nothing here names a platform.
 #
 #   examples/games/icy-tower/build.sh     the Linux executable
 #   examples/games/icy-tower/build-windows.sh
@@ -16,8 +18,10 @@
 #   SDL_VIDEO_DRIVER=dummy icy-tower --autopilot --fixed-step --frames 600
 #                                         the real SDL loop, no display
 #
-# Controls: Left/A and Right/D run; landing on a platform bounces; R
-# starts a new game after a fall; Escape (or closing the window) quits.
+# Controls (keyboard.bot's): Left/A and Right/D run; landing on a platform
+# bounces; R starts a new game after a fall; Escape (or closing the window)
+# quits. On Android (touch.bot's): hold the left or right half of the
+# screen to run, tap to play again, Back to quit.
 #
 # A run ends by printing its summary line (hud::summary) on standard
 # output. A run that fails -- SDL cannot start, or a frame
@@ -27,9 +31,11 @@
 #
 # The frame loop is one self-tail-recursive function, `run`, which the
 # native backend compiles to a loop: the world is an immutable value
-# replaced each frame. SDL -- the window, the renderer, the keyboard, the
+# replaced each frame. SDL -- the window, the renderer, the input, the
 # clock -- is the installed sdl::Sdl context, which `play` opens before the
-# loop and closes after it: nothing here holds an SDL object.
+# loop and closes after it: nothing here holds an SDL object. The player is
+# read through the installed controls::Controls.
+import controls
 import std::ffi::c
 import std::float64
 import std::io
@@ -39,39 +45,10 @@ import options
 import std::str
 import render
 import sdl
-import sdl3::scancode
 import tower
 
 # C's exit(3): the process's exit status, which Botlish cannot set.
 extern c fn exit(status: std::ffi::c::Int) -> unit
-
-# SCANCODE, an SDL scancode, as the Int it is: an index of SDL's keyboard
-# state. (An SDL enumeration constant's C type is the target's: unsigned int
-# on Linux, int on Windows.)
-fn key(scancode: int) -> int:
-    scancode
-
-# The keys the game reads, in the order of `input`'s list.
-fn scancodes() -> List[int]:
-    [
-        key(sdl3::scancode::SDL_SCANCODE_LEFT),
-        key(sdl3::scancode::SDL_SCANCODE_A),
-        key(sdl3::scancode::SDL_SCANCODE_RIGHT),
-        key(sdl3::scancode::SDL_SCANCODE_D),
-        key(sdl3::scancode::SDL_SCANCODE_R),
-        key(sdl3::scancode::SDL_SCANCODE_ESCAPE),
-    ]
-
-# The player's input from HELD, which of scancodes() are held.
-fn input(held: List[bool]) -> tower::Input:
-    tower::Input {
-        left: held.get(0, false) or held.get(1, false),
-        right: held.get(2, false) or held.get(3, false),
-        restart: held.get(4, false),
-    }
-
-fn escape?(held: List[bool]) -> bool:
-    held.get(5, false)
 
 # How a run ended: the last world, the frames played, and what failed (""
 # when nothing did).
@@ -95,23 +72,23 @@ fn pace(now: Float64, o: options::Options) errors NonFiniteFloat:
         return unit
     sdl::sleep(tower::frame_time - (sdl::seconds() - now))
 
-# The frame loop: plays WORLD until a quit (the window closed, Escape), the
-# frame limit of OPTIONS or a failure. FRAMES have been played, the last
-# one started at LAST seconds.
+# The frame loop: plays WORLD until a quit (the window closed, Escape,
+# Android's back key), the frame limit of OPTIONS or a failure. FRAMES have
+# been played, the last one started at LAST seconds.
 fn run(world: tower::World, frames: int, last: Float64, o: options::Options) -> Ended:
     if o.frames > 0 and frames >= o.frames:
         return Ended {world: world, frames: frames, failure: ""}
-    {quit, held, failure: unread} = sdl::poll(scancodes())
+    {quit, input: asked, failure: unread} = controls::read()
     if unread != "":
         return Ended {world: world, frames: frames, failure: unread}
-    if quit or held.escape?():
+    if quit:
         return Ended {world: world, frames: frames, failure: ""}
     wanted = if o.autopilot:
         tower::autopilot(world):
             on NonFiniteFloat:
                 return Ended {world: world, frames: frames, failure: "the autopilot"}
     else:
-        held.input()
+        asked
     now = sdl::seconds():
         on NonFiniteFloat:
             return Ended {world: world, frames: frames, failure: "reading the clock"}

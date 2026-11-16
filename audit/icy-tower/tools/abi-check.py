@@ -32,9 +32,10 @@
 #   * every SDL constant it uses: the value, and the type the binding's
 #     converter gives it (an enumerator's underlying type);
 #   * the layouts it reads native memory with: sdl.bot's own EventType
-#     (SDL_Event's size, alignment and its Uint32 type at offset 0) and
-#     KeyState (SDL_SCANCODE_COUNT one-byte bools), and the binding's
-#     SDL_FRect (every field's offset and C float);
+#     (SDL_Event's size, alignment and its Uint32 type at offset 0),
+#     KeyState (SDL_SCANCODE_COUNT one-byte bools) and KeyEvent
+#     (SDL_KeyboardEvent's type and scancode), and the binding's SDL_FRect
+#     and SDL_TouchFingerEvent (every field's offset and C type);
 #   * the target's C scalar widths the binding relies on (bool, int, long,
 #     long long, size_t, pointers, float) and char's signedness.
 import os
@@ -214,7 +215,7 @@ def main(argv):
 
     for name in names:
         if name not in decls:
-            if name not in ("SDL_Event", "SDL_FRect", "SDL_Renderer", "SDL_Window"):
+            if name not in ("SDL_Event", "SDL_FRect", "SDL_TouchFingerEvent", "SDL_Renderer", "SDL_Window"):
                 missing.append(name)
             continue
         kind = decls[name][0]
@@ -265,12 +266,29 @@ def main(argv):
         (fname, (_, n, etype), off), = ks["fields"]
         check("SDL_SCANCODE_COUNT == %d && %d == %d" % (n, n, ks["size"]), "sdl.bot's KeyState: SDL_SCANCODE_COUNT (%d) one-byte keys" % n)
         check("sizeof(bool) == sizeof(%s)" % ctype(etype), "sdl.bot's KeyState: a key (C bool) is read as %s" % etype)
-    fr = binding_layout(binding, "SDL_FRect")
-    if fr:
-        check("sizeof(SDL_FRect) == %d && alignof(SDL_FRect) == %d" % (fr["size"], fr["align"]), "the binding's SDL_FRect: size %d, align %d" % (fr["size"], fr["align"]))
+    ke = layouts.get("KeyEvent")
+    if ke:
+        check("sizeof(SDL_Event) == %d" % ke["size"], "sdl.bot's KeyEvent: sizeof(SDL_Event) is %d" % ke["size"])
+        members = {"kind": "type", "scancode": "scancode"}
+        for fname, ftype, off in ke["fields"]:
+            member = members[fname]
+            check("offsetof(SDL_KeyboardEvent, %s) == %d && same_scalar<decltype(SDL_KeyboardEvent::%s), %s>()" % (member, off, member, ctype(ftype)),
+                  "sdl.bot's KeyEvent.%s: SDL_KeyboardEvent's %s, %s at %d" % (fname, member, ftype, off))
+    # The binding's layouts the game reads native memory with: SDL_FRect (a
+    # rectangle, written and read) and, when the game uses it, SDL's finger
+    # event (read: a touch screen's controls).
+    for record in ("SDL_FRect", "SDL_TouchFingerEvent"):
+        if record != "SDL_FRect" and record not in names:
+            continue
+        fr = binding_layout(binding, record)
+        if not fr:
+            continue
+        check("sizeof(%s) == %d && alignof(%s) == %d" % (record, fr["size"], record, fr["align"]),
+              "the binding's %s: size %d, align %d" % (record, fr["size"], fr["align"]))
         for fname, ftype, off in fr["fields"]:
-            check("offsetof(SDL_FRect, %s) == %d && same_scalar<decltype(SDL_FRect::%s), %s>()" % (fname, off, fname, ctype(ftype)),
-                  "the binding's SDL_FRect.%s: %s at %d" % (fname, ftype, off))
+            member = "type" if fname == "type_" else fname
+            check("offsetof(%s, %s) == %d && same_scalar<decltype(%s::%s), %s>()" % (record, member, off, record, member, ctype(ftype)),
+                  "the binding's %s.%s: %s at %d" % (record, fname, ftype, off))
     for c in ("bool", "int", "long", "long long", "size_t", "void *", "float", "double"):
         fact("sizeof(%s) = %%zu" % c, "sizeof(%s)" % c)
     fact("char is %s", '(char)-1 < 0 ? "signed" : "unsigned"')

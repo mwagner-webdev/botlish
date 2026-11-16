@@ -15,6 +15,7 @@
 #
 #   examples/games/icy-tower/build-macos.sh    the macOS executable
 import game
+import keyboard
 import macos_app
 import macos_link
 import sdl
@@ -22,6 +23,7 @@ import std::io
 
 with context macos_app::create()
 with context sdl::create()
+with context keyboard::create()
 
 game::main(game::arguments()):
     on std::io::WriteFailed:

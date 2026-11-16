@@ -12,6 +12,12 @@
 #
 # Every SDL operation returns whether it succeeded; a frame is drawn whole
 # and answers whether all of them did (main.bot stops on a failed frame).
+#
+# The platform's controls (the installed controls::Controls) name the
+# controls in the banner and finish the frame: a desktop's keyboard
+# presents it as drawn; Android's touch screen draws its touch pads around
+# the view first (touch.bot).
+import controls
 import std::float64
 import std::int
 import std::list
@@ -131,8 +137,8 @@ fn frame(world: tower::World) -> bool errors NonFiniteFloat:
     panel = sdl::fill(tower::wall, 0.0, 132.0, 56.0)
     ink = sdl::color(236, 240, 255)
     status = hud::status_lines(world).lines(tower::wall + 8.0, 8.0)
-    message = hud::banner_lines(world).banner(300.0)
-    shown = sdl::present()
+    message = controls::banner_lines(world).banner(300.0)
+    shown = controls::present()
     sky and cleared and walled and drawn.succeeded?() and figure and shade and panel and ink and status and message and shown
 
 # Draws WORLD and presents it: what failed, "" when nothing did.

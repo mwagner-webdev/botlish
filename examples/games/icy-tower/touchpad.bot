@@ -1,0 +1,88 @@
+# touchpad.bot -- what a touch screen's controls mean and where they are
+# drawn (ICY-TOWER-ANDROID.md): a pure module, like tower.bot and hud.bot.
+# touch.bot's Touch context reads the fingers and draws through SDL; this
+# module decides, from values, what they ask of the game and where its two
+# pads go.
+#
+# Steering: a finger on the left half of the screen runs left, one on the
+# right half runs right -- the whole screen is the pad, so a thumb need not
+# find a button. The pads are drawn where the scaled view leaves room for
+# them: in the band below it on a tall screen (a phone held upright), in the
+# bands beside it on a wide one (a tablet or a phone on its side), and as
+# outlines over the view's lower corners when it fills the screen.
+#
+# Every length is in the window's pixels, a fraction of its shorter side:
+# the same layout on any screen size and density.
+import hud
+import std::float64
+import std::list
+import tower
+
+# A rectangle of the screen, in pixels: its top left corner at X, Y, W x H.
+struct Box:
+    x: Float64
+    y: Float64
+    w: Float64
+    h: Float64
+
+# Where the two pads go, and whether they lie over the game's view (they
+# are drawn as outlines then, so the game shows through).
+struct Pads:
+    left: Box
+    right: Box
+    over: bool
+
+# What the fingers ask for: running left, running right.
+struct Steering:
+    left: bool
+    right: bool
+
+# The steering of fingers at XS, fractions of the screen's width (0 at its
+# left edge, 1 at its right).
+fn steering(xs: List[Float64]) -> Steering:
+    found = fold x in xs with intermediate s Steering {left: false, right: false}:
+        if x < 0.5:
+            Steering {left: true, right: s.right}
+        else:
+            Steering {left: s.left, right: true}
+    found
+
+# The pads of a WIDTH x HEIGHT screen whose scaled view is GAME.
+fn pads(game: Box, width: Float64, height: Float64) -> Pads errors NonFiniteFloat:
+    short = std::float64::min(width, height)
+    margin = short * 0.03
+    least = short * 0.16
+    below = height - (game.y + game.h)
+    beside = game.x
+    if below >= least:
+        h = std::float64::min(below - 2.0 * margin, width * 0.45)
+        top = height - margin - h
+        half = width / 2.0
+        return Pads {
+            left: Box {x: margin, y: top, w: half - 1.5 * margin, h: h},
+            right: Box {x: half + 0.5 * margin, y: top, w: half - 1.5 * margin, h: h},
+            over: false,
+        }
+    if beside >= least:
+        right_x = game.x + game.w
+        return Pads {
+            left: Box {x: margin, y: margin, w: beside - 2.0 * margin, h: height - 2.0 * margin},
+            right: Box {x: right_x + margin, y: margin, w: width - right_x - 2.0 * margin, h: height - 2.0 * margin},
+            over: false,
+        }
+    side = short * 0.2
+    y = game.y + game.h - side - margin
+    Pads {
+        left: Box {x: game.x + margin, y: y, w: side, h: side},
+        right: Box {x: game.x + game.w - side - margin, y: y, w: side, h: side},
+        over: true,
+    }
+
+# The lines the banner shows over WORLD on a touch screen: hud's, when it
+# shows any, with the touch screen's names for the controls.
+fn banner_lines(world: tower::World) -> List[str]:
+    if std::list::length(hud::banner_lines(world)) == 0:
+        return []
+    if world.over:
+        return ["GAME OVER", "TAP TO PLAY AGAIN", "BACK TO QUIT"]
+    ["HOLD LEFT/RIGHT TO RUN", "LAND TO BOUNCE - CLIMB!"]

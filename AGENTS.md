@@ -6522,22 +6522,39 @@ empty vector, List length facts, ...): they are its evidence
 
 `examples/games/icy-tower/` is the real-time workload (ICY-TOWER-VERTICAL-
 SLICE-1.md): a playable Icy Tower-style game on Linux x86-64, Windows
-x86-64 (ICY-TOWER-WINDOWS.md) and macOS AArch64
-(ICY-TOWER-MACOS-MILESTONE-1.md) over the generated SDL3 binding. Keep its
+x86-64 (ICY-TOWER-WINDOWS.md), macOS AArch64
+(ICY-TOWER-MACOS-MILESTONE-1.md) and Android arm64-v8a
+(ICY-TOWER-ANDROID.md) over the generated SDL3 binding. Keep its
 layering:
 
 * `tower.bot` (the rules: a frame is `step(world, input, dt)`), `hud.bot`
-  (text) and `options.bot` (the command line) are pure: no SDL, no clock,
-  no input device. They run, and `golden.bot` and `headless.bot` test them,
-  on every backend. Never import SDL or `sdl` into them.
+  (text), `options.bot` (the command line), `controls.bot` (the context
+  trait `Controls`) and `touchpad.bot` (what a touch means, where the pads
+  go) are pure: no SDL, no clock, no input device. They run, and
+  `golden.bot` and `headless.bot` test them, on every backend. Never
+  import SDL or `sdl` into them.
 * `game.bot` is the program (the frame loop, play, failure reports,
   `main`), one source for every platform; an entry program only installs
   the contexts -- `main.bot` std::linux::io's, `main-windows.bot`
   std::windows::io's, `main-macos.bot` the macOS application's
   (`macos_app.bot`'s App: next section but one; and imports `macos_link`,
-  the macOS executable's link plan), each `sdl::create()` --
-  and runs `game::main`. Keep everything else out of the entries, and every
-  platform name out of the other modules.
+  the macOS executable's link plan), `main-android.bot` android_io's; each
+  `sdl::create()` and the platform's `controls::Controls` (the desktops
+  `keyboard::create()`, Android `touch::create()`) -- and runs `game::main`.
+  Keep everything else out of the entries, and every platform name out of
+  the other modules.
+* The player is read, the controls named in the banner and a drawn frame
+  finished through `controls::Controls` (ICY-TOWER-ANDROID.md), never by a
+  platform test: `keyboard.bot` is exactly what game.bot and render.bot did
+  before (one `sdl::poll` of the keys, hud's banner, `sdl::present`), so the
+  desktops' SDL call trace is the reference's; `touch.bot` reads SDL's
+  finger and back-key events (`sdl::poll_touch`, never a polled touch
+  state: the back gesture goes down and up between two frames) and draws
+  its pads in the window's pixels around the letterboxed view
+  (`sdl::unscaled`, `sdl::scaled`). A new platform's controls are a new
+  implementing context, never a branch in game.bot, render.bot or sdl.bot's
+  desktop operations, and sdl.bot's touch operations stay generic SDL (no
+  platform name).
 * `sdl.bot` is the one module with SDL's raw authority: every function of
   it that makes a retaining C call or a native view or edit requires its own
   `Sdl` context, so `render.bot`, `game.bot` and the entries stay ordinary modules
@@ -6630,6 +6647,22 @@ release publish an unsigned build while `WINDOWS_SIGNING` is set. Every
 build's signing dry run must keep passing: the executable must run with a
 signature appended.
 
+The Android APK (`build-android.sh`, ICY-TOWER-ANDROID.md: arm64-v8a,
+signed with the debug key) is `main-android.bot` built as the application
+library `icytower` for android-aarch64 from the packages sdl3 (its
+android-aarch64 view), android_io and botlish_target_android_aarch64, and
+wrapped by integrations/android's tool, as the 2048 application is; the
+`android sdl3 2048` workflow builds it beside the 2048 APKs from the same
+packages. Keep it so: no Android name in a desktop module
+(`workload-icy-tower-android-shared-sources`), no SDL call outside sdl.bot
+(`workload-icy-tower-android-airlock`), and the touch controls checked on
+Linux under the 2048 milestone's touch host
+(`workload-icy-tower-touch-steering`, `-touch-restarts`). If you change
+touch.bot, touchpad.bot, sdl.bot's touch operations or the Android entry,
+run tests/workload-icy-tower.test and build-android.sh (PACKAGES: a
+directory of the packages, audit/android-sdl3-2048/tools/build.sh's
+OUT/repo).
+
 The macOS executable (`build-macos.sh`, ICY-TOWER-MACOS-MILESTONE-1.md: a
 Cocoa application on macOS AArch64, the pinned SDL3 linked into it as a
 static archive) is built and played only by the `icy-tower (macos arm64)`
@@ -6641,8 +6674,8 @@ generated on the runner (none is committed), the tests' macOS section, the
 oracle and the graphical acceptance. Keep it so:
 
 * `main-macos.bot` installs `macos_app::create()` (the application's
-  std::io::IO: next item) and `sdl::Sdl` and imports `macos_link` --
-  nothing else; the startup policy is the build's (`-native-startup
+  std::io::IO: next item), `sdl::Sdl` and `keyboard::Keyboard` and imports
+  `macos_link` -- nothing else; the startup policy is the build's (`-native-startup
   main-thread` in build-macos.sh), never the source's.
 * `macos_app.bot` (ICY-TOWER-MACOS-APP-MILESTONE-1.md) is the macOS
   application's process environment: std::io::IO over std::darwin::write

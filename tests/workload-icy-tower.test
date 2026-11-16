@@ -12,11 +12,16 @@
 # build-windows.sh against the MSVC binding it generates, its imports, and
 # its headless, dummy-driver, failure and usage runs.
 #
-# The pure modules (tower.bot, hud.bot, options.bot) and their programs
-# (headless.bot, golden.bot) need no SDL and run on every backend; game.bot,
-# sdl.bot, render.bot and the entry programs (main.bot on Linux,
-# main-windows.bot on Windows) import the generated binding, which build.sh,
-# build-windows.sh and the warning test here stage beside them.
+# The pure modules (tower.bot, hud.bot, options.bot, controls.bot,
+# touchpad.bot) and their programs (headless.bot, golden.bot) need no SDL
+# and run on every backend; game.bot, sdl.bot, render.bot, the controls'
+# contexts (keyboard.bot, touch.bot) and the entry programs (main.bot on
+# Linux, main-windows.bot on Windows, main-android.bot on Android) import
+# the generated binding, which build.sh, build-windows.sh,
+# build-android.sh and the warning tests here stage beside them. Android
+# (ICY-TOWER-ANDROID.md): main-android.bot compiled for android-aarch64,
+# and the touch controls run on Linux under a host shaped like SDL's Android
+# bootstrap (audit/android-sdl3-2048/linux/touch_host.c).
 #
 # Backends, as tests/workload-2048.test's: the outer pass's own (CORE_BACKEND
 # interp or compile) plus cranelift in the interp pass and
@@ -59,7 +64,7 @@ set gameDir [file join $::projectRoot examples games icy-tower]
 # summary 7 600).
 set seed7 {frames=600 round=1 floor=26 score=260 best=29.1 time=10.0 over=no x=263 y=2947 camera=2551 platforms=11 rng=3699965314}
 
-test workload-icy-tower-golden-suite "golden.bot: compiles once, all 67 tests pass on [join $suiteBackends {, }], the same report on each" -constraints suiteBackends -body {
+test workload-icy-tower-golden-suite "golden.bot: compiles once, all 72 tests pass on [join $suiteBackends {, }], the same report on each" -constraints suiteBackends -body {
     set result [golden::suite [file join $gameDir golden.bot] $suiteBackends]
     set status [dict get $result status]
     if {$status eq "compile-error"} {
@@ -76,10 +81,10 @@ test workload-icy-tower-golden-suite "golden.bot: compiles once, all 67 tests pa
             if {[string match "FAIL *" $line]} { lappend problems "$backend: $line" }
         }
         set names [lmap line [golden::verdicts $lines] {string range $line 5 end}]
-        if {[llength $names] != 67 || [llength [lsort -unique $names]] != 67} {
-            lappend problems "$backend: [llength $names] verdicts, [llength [lsort -unique $names]] distinct, expected 67"
+        if {[llength $names] != 72 || [llength [lsort -unique $names]] != 72} {
+            lappend problems "$backend: [llength $names] verdicts, [llength [lsort -unique $names]] distinct, expected 72"
         }
-        if {[lindex $lines end] ne "67 passed, 0 failed"} {
+        if {[lindex $lines end] ne "72 passed, 0 failed"} {
             lappend problems "$backend: [lindex $lines end]"
         }
     }
@@ -130,13 +135,13 @@ test workload-icy-tower-sdl-modules-warning-clean {main.bot, game.bot, sdl.bot a
     set hir [icyStagedHir]
     set statuses {}
     foreach line [split [hir::direct::summary $hir] \n] {
-        if {[regexp {^module (tower|hud|options|sdl|render|game): (\S+)} $line -> module status]
+        if {[regexp {^module (tower|hud|options|sdl|render|game|controls|keyboard): (\S+)} $line -> module status]
                 || [regexp {^(entry program): (\S+)} $line -> module status]} {
             lappend statuses $module $status
         }
     }
     list ok [lsort -stride 2 $statuses]
-} -result {ok {{entry program} ordinary game ordinary hud ordinary options ordinary render ordinary sdl contextualized tower ordinary}}
+} -result {ok {controls ordinary {entry program} ordinary game ordinary hud ordinary keyboard ordinary options ordinary render ordinary sdl contextualized tower ordinary}}
 
 # The game module of expression E (its file's name), "" outside the game: a
 # file of the stage's root, never of a subdirectory (the staged binding has
@@ -147,7 +152,7 @@ proc icyModuleOf {hir e} {
     set path [lindex [split [hir::originLocation $hir $origin] :] 0]
     if {[file normalize [file dirname $path]] ne [file normalize [file join [tcltest::temporaryDirectory] icy-tower-stage]]} { return "" }
     set file [file rootname [file tail $path]]
-    return [expr {$file in {main game sdl render tower hud options} ? $file : ""}]
+    return [expr {$file in {main game sdl render tower hud options controls keyboard touch touchpad} ? $file : ""}]
 }
 
 # 1 if call E is a context installation (`with context EXPR`: the call of
@@ -284,7 +289,7 @@ test workload-icy-tower-sdl-helpers-private {every function of sdl.bot whose par
         }
     }
     list [lsort $found] [icyPrivate $hir]
-} -result {{} {types {EventType KeyState Session TextBuffer} values {cstring down? error_text free_text nul printable quit_requested? read_text release session_clear session_color session_fill session_line session_present session_scale session_synced? session_text text_of write_chars write_text write_text_unchecked}}}
+} -result {{} {types {EventType KeyEvent KeyState Session TextBuffer} values {cstring down? error_text finger? finger_event free_text nul printable quit_requested? read_text release session_clear session_color session_fill session_fullscreen session_line session_present session_presentation session_presented session_scale session_synced? session_text text_of touch_events write_chars write_text write_text_unchecked}}}
 
 test workload-icy-tower-no-resource-escape {the refactored airlock hands nothing raw across its boundary: no CONTEXT-RESOURCE-ESCAPE (the warning-clean test above compiles it under -warnings error; this asks the pass itself)} -body {
     set hir [icyStagedHir]
@@ -334,7 +339,7 @@ test workload-icy-tower-app-module {the macOS entry with the application's IO co
     set hir [icyStagedMacosHir]
     set statuses {}
     foreach line [split [hir::direct::summary $hir] \n] {
-        if {[regexp {^module (tower|hud|options|sdl|render|game|macos_app|macos_link): (\S+)} $line -> module status]
+        if {[regexp {^module (tower|hud|options|sdl|render|game|controls|keyboard|macos_app|macos_link): (\S+)} $line -> module status]
                 || [regexp {^(entry program): (\S+)} $line -> module status]} {
             lappend statuses $module $status
         }
@@ -346,13 +351,75 @@ test workload-icy-tower-app-module {the macOS entry with the application's IO co
         if {[string match extern#macos_app::* $native]} { lappend calls [string range $native 7 end] }
     }
     list [lsort -stride 2 $statuses] [lsort -unique $calls]
-} -result {{{entry program} ordinary game ordinary hud ordinary macos_app contextualized macos_link ordinary options ordinary render ordinary sdl contextualized tower ordinary} {macos_app::c_getenv macos_app::cf_alert macos_app::cf_release macos_app::cf_string}}
+} -result {{controls ordinary {entry program} ordinary game ordinary hud ordinary keyboard ordinary macos_app contextualized macos_link ordinary options ordinary render ordinary sdl contextualized tower ordinary} {macos_app::c_getenv macos_app::cf_alert macos_app::cf_release macos_app::cf_string}}
 
-test workload-icy-tower-app-module-shared-sources-untouched {the application's alert lives in the macOS-only modules: no shared module (tower, hud, options, render, sdl, game) names macos_app, CoreFoundation or the alert's variable, so the Linux and Windows executables are built from exactly the sources they were} -body {
+test workload-icy-tower-app-module-shared-sources-untouched {the application's alert lives in the macOS-only modules: no shared module (tower, hud, options, render, sdl, game, controls, keyboard) names macos_app, CoreFoundation or the alert's variable, so the Linux and Windows executables are built from exactly the sources they were} -body {
     set found {}
-    foreach f {tower.bot hud.bot options.bot render.bot sdl.bot game.bot main.bot main-windows.bot} {
+    foreach f {tower.bot hud.bot options.bot render.bot sdl.bot game.bot controls.bot keyboard.bot main.bot main-windows.bot} {
         set text [core::ReadFile [file join $::gameDir $f]]
         foreach word {macos_app CoreFoundation CFUserNotification ICY_TOWER_ERROR_ALERTS} {
+            if {[string first $word $text] >= 0} { lappend found "$f: $word" }
+        }
+    }
+    set found
+} -result {}
+
+# ---------------------------------------------------------------------------
+# Android (ICY-TOWER-ANDROID.md)
+
+# The Android entry's HIR: main-android.bot, touch.bot and touchpad.bot
+# staged with the committed android-aarch64 binding and android_io
+# (packages/android_io) installed as packages, compiled under -warnings
+# error for android-aarch64 -- as build-android.sh compiles it, from the
+# packages' sources instead of their artifacts.
+proc icyStagedAndroidHir {} {
+    if {[info exists ::icyStagedAndroidHir]} {
+        return $::icyStagedAndroidHir
+    }
+    set stage [file join [tcltest::temporaryDirectory] icy-tower-android-stage]
+    file delete -force $stage
+    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target android-aarch64 -app $::gameDir -into $stage -package 1
+    file mkdir [file join $stage .bot_modules android_io]
+    file copy [file join $::projectRoot packages android_io android_io.bot] [file join $stage .bot_modules android_io]
+    try {
+        set ::icyStagedAndroidHir [surface::readProgramFile [file join $stage main-android.bot] -warnings error -warning-channel "" -target android-aarch64]
+    } finally {
+        file delete -force $stage
+    }
+    return $::icyStagedAndroidHir
+}
+
+test workload-icy-tower-android-modules {the Android entry (android_io's std::io::IO, sdl.bot's Sdl and touch.bot's Touch installed in place of a desktop's keyboard) compiles for android-aarch64 under -warnings error, and the touch controls are ordinary modules: every SDL call they need is one of sdl.bot's operations, mediated by Sdl (android_io's one C call borrows its strings for the call only: no retaining call, an ordinary module)} -body {
+    set hir [icyStagedAndroidHir]
+    set statuses {}
+    foreach line [split [hir::direct::summary $hir] \n] {
+        if {[regexp {^module (tower|hud|options|sdl|render|game|controls|keyboard|touch|touchpad|android_io): (\S+)} $line -> module status]
+                || [regexp {^(entry program): (\S+)} $line -> module status]} {
+            lappend statuses $module $status
+        }
+    }
+    lsort -stride 2 $statuses
+} -result {android_io ordinary controls ordinary {entry program} ordinary game ordinary hud ordinary keyboard ordinary options ordinary render ordinary sdl contextualized touch ordinary touchpad ordinary tower ordinary}
+
+test workload-icy-tower-android-airlock {on Android too SDL stays behind sdl::Sdl: outside sdl.bot no function's parameter or result holds a C pointer, and no SDL function is called -- touch.bot reads the fingers and draws its pads through sdl.bot's operations only} -body {
+    set hir [icyStagedAndroidHir]
+    set found {}
+    dict for {e node} [dict get $hir exprs] {
+        set module [icyModuleOf $hir $e]
+        if {$module in {"" sdl}} continue
+        if {[dict get $node kind] eq "call"} {
+            set native [hir::affine::NativeName $hir $e]
+            if {[string match extern#sdl3::* $native]} { lappend found "$module calls $native" }
+        }
+    }
+    lsort -unique $found
+} -result {}
+
+test workload-icy-tower-android-shared-sources {the Android port lives in its own modules: no module the desktop executables are built from (tower, hud, options, render, sdl, game, controls, keyboard and the desktop entries) names android_io, touchpad or the Android entry} -body {
+    set found {}
+    foreach f {tower.bot hud.bot options.bot render.bot sdl.bot game.bot controls.bot keyboard.bot main.bot main-windows.bot main-macos.bot} {
+        set text [core::ReadFile [file join $::gameDir $f]]
+        foreach word {android_io touchpad main-android} {
             if {[string first $word $text] >= 0} { lappend found "$f: $word" }
         }
     }
@@ -545,6 +612,72 @@ test workload-icy-tower-abi-check {every SDL function, constant and layout the g
 } -result {0 1 1}
 
 file delete -force [file dirname $executable]
+
+# The touch controls on Linux: the game with touch.bot's Touch (and Linux's
+# IO), built as an application library and run under the touch host of
+# RN-BOTLISH-ANDROID-SDL3-2048-PACKAGE-MILESTONE-1.md -- SDL_main on a
+# thread named SDLThread, the fingers and the back key pushed into SDL's
+# queue from another thread, as Android's UI thread does. Built once.
+proc icySdlHeaders {} {
+    if {[catch {exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] fetch sdl3} fetched]} { return "" }
+    set dir [lindex [split [string trim $fetched] \n] end]
+    return [expr {[file isfile [file join $dir include SDL3 SDL_main.h]] ? $dir : ""}]
+}
+testConstraint icyTouchHost [expr {[testConstraint icyTowerExecutable] && [native::hostSupports libraries]
+    && [auto_execok cc] ne "" && [icySdlHeaders] ne ""}]
+
+proc icyTouchHost {} {
+    if {[info exists ::icyTouchHost]} { return $::icyTouchHost }
+    set dir [file join [tcltest::temporaryDirectory] icy-tower-touch-[pid]]
+    file delete -force $dir
+    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target linux-x86_64 -app $::gameDir -into $dir -package 1
+    set f [open [file join $dir main-touch-linux.bot] w]
+    puts $f "import game\nimport sdl\nimport std::io\nimport std::linux::io\nimport touch\n"
+    puts $f "with context std::linux::io::create()\nwith context sdl::create()\nwith context touch::create()\n"
+    puts $f "game::main(game::arguments()):\n    on std::io::WriteFailed:\n        unit"
+    close $f
+    set sdl [cffi::sdl3Dir]
+    set lib [file join $dir lib]
+    exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings error -L $sdl -emit-native-library icy -application -out $lib [file join $dir main-touch-linux.bot] 2>@1
+    exec cc -O2 -Wall -Wextra -Werror -I $lib -I [file join [icySdlHeaders] include] {-DAPP_HEADER="icy.h"} -DAPP_PREFIX=icy \
+        -o [file join $lib host] [file join $::projectRoot audit android-sdl3-2048 linux touch_host.c] \
+        -L $lib -licy -L $sdl -lSDL3 -Wl,-rpath,$lib:$sdl -pthread 2>@1
+    set ::icyTouchHost $dir
+    return $dir
+}
+
+# Runs the touch build under the host with the event SCRIPT (lines): {exit-status stdout stderr}.
+proc icyTouchRun {script} {
+    set dir [icyTouchHost]
+    set f [open [file join $dir script.txt] w]
+    puts $f [join $script \n]
+    close $f
+    icyExec [file join $dir lib host] [dict create SCRIPT [file join $dir script.txt]] app
+}
+
+test workload-icy-tower-touch-steering {a finger held on the right half of the screen runs right, one on the left half runs left (the touch screen's steering), and the back key ends the run, which prints its summary and returns 0} -constraints icyTouchHost -body {
+    lassign [icyTouchRun {ready {wait 300} {down 1 0.85 0.5} {wait 500} {up 1 0.85 0.5} {wait 100} back}] status out err
+    regexp {x=(-?\d+)} $out -> right
+    lassign [icyTouchRun {ready {wait 300} {down 1 0.15 0.5} {wait 500} {up 1 0.15 0.5} {wait 100} back}] status2 out2 err2
+    regexp {x=(-?\d+)} $out2 -> left
+    list $status $status2 [regexp {round=1 } $out] [expr {$right > 300}] [expr {$left < 150}] [regexp {the application returned 0} $err]
+} -result {0 0 1 1 1 1}
+
+test workload-icy-tower-touch-restarts {a long run steered by fingers falls and is started again by a tap each time (a finger held through the fall starts nothing), then the back key ends it} -constraints icyTouchHost -body {
+    set script {ready}
+    for {set i 0} {$i < 40} {incr i} {
+        set x [expr {$i % 2 ? 0.15 : 0.85}]
+        lappend script "down 1 $x 0.9" {wait 700} "up 1 $x 0.9" {tap 2 0.5 0.3} {wait 50}
+    }
+    lappend script back
+    lassign [icyTouchRun $script] status out err
+    regexp {round=(\d+)} $out -> round
+    list $status [expr {$round >= 2}] [regexp {the application returned 0} $err]
+} -result {0 1 1}
+
+if {[info exists ::icyTouchHost]} {
+    file delete -force $::icyTouchHost
+}
 
 # ---------------------------------------------------------------------------
 # The Windows executable (ICY-TOWER-WINDOWS.md)

@@ -6,7 +6,8 @@
 # For every mutant of audit/icy-tower/mutants.txt (or the NAMEs given): a
 # private application directory -- a copy of examples/games/icy-tower/'s
 # golden.bot and the pure modules it imports (tower.bot, hud.bot,
-# options.bot: application modules, IMPORTS.md), one of them mutated --
+# options.bot, touchpad.bot: application modules, IMPORTS.md), one of them
+# mutated --
 # and one run of that golden.bot through tests/golden/run.tcl (default
 # backend compile: the mutants are rule bugs, not backend ones). A mutant
 # is killed when a test fails or the suite stops compiling. Every mutant
@@ -54,7 +55,7 @@ if {[dict get $options -macos]} {
     source [file join $here macos-mutate.tcl]
     exit [icymacos::main $root $here $options $names]
 }
-set modules {tower.bot hud.bot options.bot golden.bot}
+set modules {tower.bot hud.bot options.bot touchpad.bot golden.bot}
 set originals [dict create]
 foreach module $modules {
     dict set originals $game/$module [goldentools::readFile [file join $root $game $module]]

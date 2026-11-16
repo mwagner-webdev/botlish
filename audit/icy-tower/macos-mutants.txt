@@ -202,7 +202,7 @@ with context Silent {quiet: true}
 
 @@ input-swapped Left and Right swapped in the game's input
 ?? session:keyboard Right:
-## examples/games/icy-tower/game.bot
+## examples/games/icy-tower/keyboard.bot
 <<<<
         left: held.get(0, false) or held.get(1, false),
         right: held.get(2, false) or held.get(3, false),
@@ -222,16 +222,16 @@ with context Silent {quiet: true}
 
 @@ escape-ignored Escape does not quit
 ?? session:keyboard Escape quits
-## examples/games/icy-tower/game.bot
+## examples/games/icy-tower/keyboard.bot
 <<<<
-    if quit or held.escape?():
+    controls::Reading {quit: quit or held.escape?(), input
 ====
-    if quit:
+    controls::Reading {quit: quit, input
 >>>>
 
 @@ restart-ignored R does not restart a game that is over
 ?? session:restart R:|round 2
-## examples/games/icy-tower/game.bot
+## examples/games/icy-tower/keyboard.bot
 <<<<
         restart: held.get(4, false),
 ====
@@ -249,11 +249,11 @@ type_ == sdl3::events::SDL_EVENT_TERMINATING:
 
 @@ present-dropped every frame drawn but none presented
 ?? session:cocoa start frame|after the banner
-## examples/games/icy-tower/render.bot
+## examples/games/icy-tower/keyboard.bot
 <<<<
-    shown = sdl::present()
+    sdl::present()
 ====
-    shown = sdl::clear()
+    sdl::clear()
 >>>>
 
 @@ player-shifted the player drawn 40 units to the right of where it is

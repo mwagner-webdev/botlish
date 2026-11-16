@@ -10,7 +10,10 @@ name: android sdl3 2048
 #   build    the packages as their authors pack them, the applications
 #            (counter and the 2048 game) built as application libraries for
 #            android-aarch64, the tool run explicitly (generate, build), what
-#            each APK holds (audit/android-sdl3-2048/tools/build.sh); the
+#            each APK holds (audit/android-sdl3-2048/tools/build.sh), and
+#            Icy Tower's APK from the same packages
+#            (examples/games/icy-tower/build-android.sh,
+#            ICY-TOWER-ANDROID.md); the
 #            Linux host checks of the same applications under SDL_RunApp
 #            (tests/android-sdl3-2048.test); then the single-file compiler and
 #            the clean room (cleanroom/cleanroom.sh)
@@ -31,6 +34,7 @@ on:
       - "examples/android-sdl3/**"
       - "examples/react-native/2048/**"
       - "examples/games/2048/game2048.bot"
+      - "examples/games/icy-tower/**"
       - "packages/sdl3/**"
       - "packages/sdlscreen/**"
       - "packages/android_io/**"
@@ -109,6 +113,12 @@ jobs:
         run: |
           export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/29.0.14206865"
           audit/android-sdl3-2048/tools/build.sh "$RUNNER_TEMP/sdl3-2048"
+
+      - name: Icy Tower APK (examples/games/icy-tower/build-android.sh, from the same packages)
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/29.0.14206865"
+          PACKAGES="$RUNNER_TEMP/sdl3-2048/repo" examples/games/icy-tower/build-android.sh "$RUNNER_TEMP/icy-tower-android"
+          cp "$RUNNER_TEMP/icy-tower-android/icy-tower.apk" "$RUNNER_TEMP/sdl3-2048/icy-tower.apk"
 
       - name: The records of the generated projects
         run: |

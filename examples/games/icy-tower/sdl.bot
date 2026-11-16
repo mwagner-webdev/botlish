@@ -83,6 +83,7 @@ import sdl3::init
 import sdl3::keyboard
 import sdl3::layouts
 import sdl3::render
+import sdl3::scancode
 import sdl3::stdinc
 import sdl3::timer
 import sdl3::video
@@ -444,3 +445,153 @@ nomethod fn scale(factor: Float64, context sdl: Sdl) -> bool errors NonFiniteFlo
         on IndexNotFound:
             return false
     drawn
+
+# ---------------------------------------------------------------------------
+# Touch screens and the whole screen (ICY-TOWER-ANDROID.md). What a touch
+# screen's controls need (touch.bot's, on Android): the fingers' events and
+# the back key, where the logical view lands in the window, drawing outside
+# it, and the whole screen. A desktop's controls (keyboard.bot's) call none
+# of them. Each takes and returns values only, like every operation here.
+
+# What a finger did, as SDL's events say it: put down or moved at X, Y
+# (fractions of the window's width and height: 0 at the left and top
+# edges, 1 at the right and bottom), or lifted (or its touch cancelled).
+# FINGER is SDL's identity of the finger while it is down.
+enum Touched:
+    Down {finger: int, x: Float64, y: Float64},
+    Moved {finger: int, x: Float64, y: Float64},
+    Lifted {finger: int},
+
+# What a touch screen's poll found: whether a quit was asked for (the
+# window closed), whether the back key went down or up (Android's back
+# button or gesture: SDL_SCANCODE_AC_BACK, which SDL3 leaves to the
+# program), which of the keys asked about are held, what the fingers did,
+# in order, and what failed ("" when nothing did).
+struct TouchPolled:
+    quit: bool
+    back: bool
+    held: List[bool]
+    touches: List[Touched]
+    failure: str
+
+# The fields of an SDL_KeyboardEvent this module reads (its generated layout
+# is blocked by its C bool fields, which it never reads): the type and the
+# scancode, at offsets 0 and 24 on every target the binding has
+# (generated/c/sdl3/TARGET/layouts.tsv).
+private layout KeyEvent:
+    size 128
+    align 8
+    field kind: std::ffi::c::UInt at 0
+    field scancode: std::ffi::c::UInt at 24
+
+# What the finger event in the event buffer did (SDL's coordinates are
+# already fractions of the window).
+private fn finger_event(kind: int, context sdl: Sdl) -> Touched errors IndexNotFound, NativeViewNull, NonFiniteFloat:
+    f = std::binary::native::view(sdl3::layouts::SDL_TouchFingerEvent, sdl.open.element(0).event)
+    if kind == sdl3::events::SDL_EVENT_FINGER_DOWN:
+        return Touched::Down {finger: f.fingerID, x: f.x, y: f.y}
+    if kind == sdl3::events::SDL_EVENT_FINGER_MOTION:
+        return Touched::Moved {finger: f.fingerID, x: f.x, y: f.y}
+    Touched::Lifted {finger: f.fingerID}
+
+# Whether KIND is the type of a finger event.
+private fn finger?(kind: int) -> bool:
+    kind == sdl3::events::SDL_EVENT_FINGER_DOWN or kind == sdl3::events::SDL_EVENT_FINGER_MOTION or kind == sdl3::events::SDL_EVENT_FINGER_UP or kind == sdl3::events::SDL_EVENT_FINGER_CANCELED
+
+# Takes the waiting events, every one: the quit, the back key and the
+# fingers' events found among them, after FOUND's.
+private fn touch_events(found: TouchPolled, context sdl: Sdl) -> TouchPolled errors IndexNotFound, NativeViewNull, NonFiniteFloat:
+    if not sdl3::events::SDL_PollEvent(sdl.open.element(0).event):
+        return found
+    e = std::binary::native::view(KeyEvent, sdl.open.element(0).event)
+    kind = e.kind
+    quit = found.quit or kind == sdl3::events::SDL_EVENT_QUIT
+    key = kind == sdl3::events::SDL_EVENT_KEY_DOWN or kind == sdl3::events::SDL_EVENT_KEY_UP
+    back = found.back or (key and e.scancode == sdl3::scancode::SDL_SCANCODE_AC_BACK)
+    touches = if finger?(kind):
+        found.touches.append(finger_event(kind))
+    else:
+        found.touches
+    touch_events(TouchPolled {quit: quit, back: back, held: [], touches: touches, failure: ""})
+
+# Takes the waiting events and reads what a touch screen's controls need:
+# the quit, the back key and the fingers' events among them, and, for each
+# of SCANCODES (a keyboard the device may have), whether its key is held.
+fn poll_touch(scancodes: List[int], context sdl: Sdl) -> TouchPolled:
+    if sdl.open.empty?():
+        return TouchPolled {quit: true, back: false, held: [], touches: [], failure: "polling a closed SDL"}
+    events = touch_events(TouchPolled {quit: false, back: false, held: [], touches: [], failure: ""}):
+        on IndexNotFound:
+            return TouchPolled {quit: true, back: false, held: [], touches: [], failure: "polling a closed SDL"}
+        on NativeViewNull:
+            return TouchPolled {quit: true, back: false, held: [], touches: [], failure: "reading an event"}
+        on NonFiniteFloat:
+            return TouchPolled {quit: true, back: false, held: [], touches: [], failure: "reading a touch"}
+    held = loop code in scancodes:
+        down = down?(code):
+            on NativeViewNull:
+                false
+            on IndexNotFound:
+                false
+        down
+    TouchPolled {quit: events.quit, back: events.back, held: held, touches: events.touches, failure: ""}
+
+# A rectangle of the window, in pixels: its top left corner at X, Y, W x H.
+struct Area:
+    x: Float64
+    y: Float64
+    w: Float64
+    h: Float64
+
+fn no_area() -> Area:
+    Area {x: 0.0, y: 0.0, w: 0.0, h: 0.0}
+
+private fn session_presented(context sdl: Sdl) -> Area errors IndexNotFound, NativeViewNull, NonFiniteFloat:
+    if not sdl.open.element(0).renderer.SDL_GetRenderLogicalPresentationRect(sdl.open.element(0).rect):
+        return no_area()
+    v = std::binary::native::view(sdl3::layouts::SDL_FRect, sdl.open.element(0).rect)
+    Area {x: v.x, y: v.y, w: v.w, h: v.h}
+
+# Where the logical view lands in the window, in pixels (SDL's presentation
+# rectangle: the letterboxed view while it is scaled, the whole window
+# while it is not); no_area() when SDL is closed or cannot say.
+fn presented(context sdl: Sdl) -> Area:
+    area = session_presented():
+        on IndexNotFound:
+            return no_area()
+        on NativeViewNull:
+            return no_area()
+        on NonFiniteFloat:
+            return no_area()
+    area
+
+private nomethod fn session_presentation(width: std::ffi::c::Int, height: std::ffi::c::Int, mode: std::ffi::c::UInt, context sdl: Sdl) -> bool errors IndexNotFound:
+    sdl.open.element(0).renderer.SDL_SetRenderLogicalPresentation(width, height, mode)
+
+# Turns the logical view off: what is drawn after it is in the window's
+# pixels, the whole window, until `scaled`. (SDL draws logical and pixel
+# coordinates in one frame alike: its presentation is a transform.)
+fn unscaled(context sdl: Sdl) -> bool:
+    done = session_presentation(0, 0, sdl3::render::SDL_LOGICAL_PRESENTATION_DISABLED):
+        on IndexNotFound:
+            return false
+    done
+
+# Turns the logical view back on: a WIDTH x HEIGHT view letterboxed into the
+# window, as `open` sets it.
+nomethod fn scaled(width: std::ffi::c::Int, height: std::ffi::c::Int, context sdl: Sdl) -> bool:
+    done = session_presentation(width, height, sdl3::render::SDL_LOGICAL_PRESENTATION_LETTERBOX):
+        on IndexNotFound:
+            return false
+    done
+
+private fn session_fullscreen(context sdl: Sdl) -> bool errors IndexNotFound:
+    sdl.open.element(0).window.SDL_SetWindowFullscreen(true)
+
+# Makes the window cover the whole screen (on Android: immersive, the
+# system bars hidden until swiped in).
+fn fullscreen(context sdl: Sdl) -> bool:
+    done = session_fullscreen():
+        on IndexNotFound:
+            return false
+    done
