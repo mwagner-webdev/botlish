@@ -519,6 +519,9 @@ test ss-run-census {every census program: the same outcome with and without scra
     foreach path [lsort [glob [file join $::ssCases *.bot]]] {
         set name [file rootname [file tail $path]]
         if {$name eq "p16b-foreign-captures"} continue
+        # p16 calls C: a native run links it, which the stub linker refuses
+        # (cLinker, tests/helpers.tcl; CI's stub-linker job).
+        if {$name eq "p16-foreign-noescape" && ![testConstraint cLinker]} continue
         set hir [surface::readProgramFile $path -warnings off]
         if {$name eq "p16-foreign-noescape"} {
             # A C call: the Tcl backends refuse it, so only the native runs
