@@ -803,7 +803,33 @@ version of rustc"). `bash tools/rust-toolchain.sh install` makes the pin
 the default, as AGENTS.md asks of a setup ("The default matters as much
 as the file"); run after it, both files pass whole.
 
-CI-RESULTS
+**[CI]** On the branch, each workflow dispatched on it
+(`workflow_dispatch`, the branch as the ref):
+
+| Workflow | Commit | Run | Result |
+|---|---|---|---|
+| static-decisions (the batched and sequential schedulers over every golden suite) | 8d170d2f | 43753566220 | success: no disagreement, every suite compiles |
+| tests (Linux x86-64) | bdceaff9 | 43768559190 | success: canary, interp, compile, cranelift and cranelift-generic coverage, the four golden shards beside their Tcl originals, the native Rust tests, stub- and system-linked executables (the latter also under GC stress), the method-call decision's oracle and reference audit; its GC-stress job runs on pushes to main only (skipped) |
+| tests (linux arm64) | bdceaff9 | 43768562272 | success: canary, interp, compile, both coverage jobs, the four golden shards, the Rust tests (also under GC stress), system-linked executables, and the test suite under GC stress on interp and on compile |
+| tests (macos arm64) | bdceaff9 | 43768564957 | success: smoke and its Linux control, the six acceptance shards, the system linker, Botlish.app and its jobs (Tier C and the app mutants are opt-in: skipped) |
+| tests (windows x86-64) | bdceaff9 | 43768567894 | success: canary, smoke, root plans, the system linker, the four acceptance shards (the GC-stress tier is opt-in: skipped) |
+
+The runs at the earlier tip f3973c75 found one failure: macOS acceptance
+shard 2/6's `tests/numeric-looking-names.test` (`nl-no-string-ternary`),
+for an `expr {... ? 0 : ...}` over a possibly empty operand in
+`core::transfer::MinSizes`. bdceaff9 writes it as an `if`; the push
+cancelled the rest of those runs, and the runs above are the dispatched
+ones at bdceaff9 **[CI]**. After 8d170d2f only `MinSizes` (a decoder's
+admission bound, read by no analysis), tests, the benchmark and documents
+changed, so the static-decisions verdict holds for the tip
+**[inspection]**.
+
+`main` at this branch's base (c5b22364): every workflow's latest run
+succeeded except `tests (linux arm64)` (run 43747077455), whose
+`arm64 tests (compile)` job ended after 2 h 28 min with the annotation
+"The hosted runner lost communication with the server" and no log: an
+infrastructure loss, not a test failure. The same job passes on this
+branch (above) **[CI]**.
 
 ## 19. Unsupported transfers
 
