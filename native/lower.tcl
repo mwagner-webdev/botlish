@@ -10855,6 +10855,10 @@ proc native::lower::ThreadOwnerFns {fnVar qualified} {
 #                                           in the shape's layout
 #   enum ENUM N CASE...                     CASE the declaration position of
 #                                           the I-th sorted case name
+#   penum ENUM N {CASE CHILD}*N             a payload-bearing enum: CASE as
+#                                           enum's, CHILD the node of its
+#                                           payload (an anonymous struct), or
+#                                           -1 for a payload-free case
 #   bytes SHAPE | mutbytes SHAPE            the one-field opaque struct
 #   through R K
 
@@ -10951,6 +10955,44 @@ proc native::lower::TransferPlan {e schema} {
                         throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: enum \"$id\" has no case \"$c\""
                     }
                     append line " $k"
+                }
+            }
+            penum {
+                # A payload-bearing enum (PORTABILITY-PAYLOAD-ENUM-TRANSFER-
+                # MILESTONE-1.md): checked against this program's own
+                # declaration before anything is resolved -- the schema
+                # names exactly its cases, each payload-bearing exactly when
+                # the declaration says, its payload an anonymous struct of
+                # exactly the case's declared fields -- so no plan can make
+                # the codec build a case without its payload, a payload of
+                # another case's fields, or a payload-free word for a case
+                # that carries one.
+                lassign $node _ id payloads
+                if {![hir::enums::declared $id]} {
+                    throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: \"$id\" is no declared enum"
+                }
+                set declared [hir::enums::cases $id]
+                if {[lmap p $payloads {lindex $p 0}] ne [lsort $declared] || [llength $payloads] != [llength $declared]} {
+                    throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: the schema of enum \"$id\" does not name its cases"
+                }
+                set line "penum [EnumIndex $id] [llength $payloads]"
+                foreach p $payloads {
+                    lassign $p c child
+                    set k [lsearch -exact $declared $c]
+                    if {$child eq ""} {
+                        if {[hir::enums::hasPayload $id $c]} {
+                            throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: case \"$c\" of enum \"$id\" carries a payload its schema omits"
+                        }
+                        append line " $k -1"
+                        continue
+                    }
+                    set ref [TransferNodeRef $e $child $count]
+                    set payload [lindex $nodes $ref]
+                    if {![hir::enums::hasPayload $id $c] || [lindex $payload 0] ne "struct" || [lindex $payload 1] ne ""
+                            || [lmap w [lindex $payload 3] {lindex $w 0}] ne [lsort [hir::enums::fieldNames $id $c]]} {
+                        throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: the payload schema of case \"$c\" of enum \"$id\" is not its declared fields"
+                    }
+                    append line " $k $ref"
                 }
             }
             bytes - mutbytes {

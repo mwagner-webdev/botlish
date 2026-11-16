@@ -1750,8 +1750,11 @@ Every case's value has the enum's type (`Shape`): a function declared
     per case, which the compiler checks names every case exactly once.
   * No ordinal, Int or String conversion, no ordering, and no case list or
     count. Comparisons are `==` and `!=`.
-  * A payload-bearing enum is not Sendable, not a C type, and not a
-    context struct's member (each is refused with a reason).
+  * A payload-bearing enum is Sendable exactly when every payload field
+    of every case is (concept.sendability): a value of the enum may be any
+    of its cases, so one non-sendable field anywhere refuses it. It is not
+    a C type, and not a context struct's member (each is refused with a
+    reason).
 
 == WHY
 An enum is a closed set of names, not a disguised integer: code cannot

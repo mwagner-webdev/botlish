@@ -105,6 +105,12 @@ enum Node {
     /// A case of enum NUMBER: CASES the case number of each sorted index,
     /// INDEX_OF its inverse (u32::MAX for no index).
     Enum { number: u32, cases: Vec<u32>, index_of: Vec<u32> },
+    /// A case of enum NUMBER, some case payload-bearing
+    /// (PORTABILITY-PAYLOAD-ENUM-TRANSFER-MILESTONE-1.md): CASES and
+    /// INDEX_OF as Enum's, PAYLOADS the node of each sorted index's payload
+    /// (a Struct node: checked once the plan is read), None for a
+    /// payload-free case.
+    PEnum { number: u32, cases: Vec<u32>, index_of: Vec<u32>, payloads: Vec<Option<usize>> },
     /// A one-field opaque struct of SHAPE holding a byte storage.
     Bytes(u32),
     MutBytes(u32),
@@ -264,6 +270,38 @@ fn parse_plan(text: &str, info: &ProgramInfo) -> Result<Plan, String> {
                 }
                 Node::Enum { number, cases, index_of }
             }
+            "penum" => {
+                let number = t.number(u64::from(u32::MAX))? as u32;
+                let Some(declared) = info.enums.get(number as usize) else {
+                    return Err(format!("no enum {number}"));
+                };
+                let declared = declared.cases.len();
+                // (Every declared case, each once: native lowering checked
+                // the schema against the declaration.)
+                let n = t.number(declared as u64)? as usize;
+                if n != declared {
+                    return Err(format!("enum {number} of {declared} cases with {n} in its plan"));
+                }
+                let mut cases = Vec::with_capacity(n);
+                let mut index_of = vec![u32::MAX; declared];
+                let mut payloads = Vec::with_capacity(n);
+                for i in 0..n {
+                    let case = t.number(declared as u64 - 1)? as u32;
+                    if index_of[case as usize] != u32::MAX {
+                        return Err(format!("case {case} of enum {number} twice"));
+                    }
+                    index_of[case as usize] = i as u32;
+                    cases.push(case);
+                    payloads.push(match t.next()? {
+                        "-1" => None,
+                        token => match token.parse::<usize>() {
+                            Ok(child) if child < count => Some(child),
+                            _ => return Err(format!("a bad payload node \"{token}\"")),
+                        },
+                    });
+                }
+                Node::PEnum { number, cases, index_of, payloads }
+            }
             "bytes" => Node::Bytes(shape_number(t.next()?, info, Some(1))?),
             "mutbytes" => Node::MutBytes(shape_number(t.next()?, info, Some(1))?),
             "through" => {
@@ -277,6 +315,18 @@ fn parse_plan(text: &str, info: &ProgramInfo) -> Result<Plan, String> {
             return Err(format!("a node line with more than it says: \"{line}\""));
         }
         nodes.push(node);
+    }
+    // A payload's node is a struct (a node may refer to a later one, so this
+    // is checked once every node is read): the codec builds and reads it as
+    // the payload of an EnumCaseObj.
+    for node in &nodes {
+        if let Node::PEnum { number, payloads, .. } = node {
+            for &child in payloads.iter().flatten() {
+                if !matches!(nodes[child], Node::Struct { .. }) {
+                    return Err(format!("a payload of enum {number} whose node {child} is no struct"));
+                }
+            }
+        }
     }
     Ok(Plan { version, fingerprint, bytes_shape, nodes, min })
 }
@@ -510,6 +560,28 @@ fn encode(p: *mut Vm, plan: &Plan, value: Value, fns: Value) -> Result<Vec<u8>, 
                 }
                 put_varuint(&mut out, index as u64);
             }
+            Node::PEnum { number, index_of, payloads, .. } => {
+                // The case's index, then -- the case's own plan deciding,
+                // never the value's form -- its payload: a payload-free
+                // case is an immediate word, a payload-bearing one an
+                // EnumCaseObj whose payload is written as its struct node.
+                let ok = is_enum(v) || heap_kind(v) == KIND_ENUMCASE;
+                expect(ok, v, "enum case")?;
+                let (e, case) = enum_case_parts(v);
+                let index = index_of.get(case as usize).copied().unwrap_or(u32::MAX);
+                if e != *number || index == u32::MAX {
+                    return Err(Stop::Bug(format!("an enum value {v:#x} of no case of enum {number}")));
+                }
+                let child = payloads[index as usize];
+                if child.is_some() == is_enum(v) {
+                    return Err(Stop::Bug(format!("an enum value {v:#x} that does not hold what its case declares")));
+                }
+                put_varuint(&mut out, index as u64);
+                if let Some(child) = child {
+                    nodes.push(child);
+                    vm(p).temp_roots.push(enum_case_of(v).payload);
+                }
+            }
             Node::Bytes(shape) => {
                 let storage = struct_fields(v, *shape, 1)?[0];
                 expect(heap_kind(storage) == KIND_BYTES, storage, "byte storage")?;
@@ -625,6 +697,9 @@ enum Work {
     Build(usize, usize),
     /// Rebuild the opaque struct of `through` node N from the value last made.
     Rebuild(usize),
+    /// Make the value of case CASE of enum NUMBER whose payload is the value
+    /// last made.
+    Wrap(u32, u32),
 }
 
 /// The input bytes and where the decoder is in them.
@@ -800,6 +875,17 @@ fn decode(p: *mut Vm, plan: &Plan, data: Value, fns: Value) -> Result<Value, Sto
                 build(p, plan, n, k)?;
                 continue;
             }
+            Work::Wrap(number, case) => {
+                // The payload stays rooted, in its place, while its case's
+                // object is made; then the object takes that place.
+                let payload = *vm(p).temp_roots.last().expect("the payload made");
+                let v = vm(p).new_enum_case(number, case, payload);
+                if v == NO_VALUE {
+                    return Err(Stop::Failed);
+                }
+                *vm(p).temp_roots.last_mut().expect("the payload's place") = v;
+                continue;
+            }
             Work::Rebuild(n) => {
                 let Node::Through { k, .. } = plan.nodes[n] else { unreachable!("a rebuild of a through node") };
                 // The representation stays rooted, in its place, while its
@@ -902,6 +988,20 @@ fn decode(p: *mut Vm, plan: &Plan, data: Value, fns: Value) -> Result<Value, Sto
                     return Err(Refusal::InvalidValue.into());
                 };
                 made(p, make_enum(*number, case))?;
+            }
+            Node::PEnum { number, cases, payloads, .. } => {
+                let index = r.varuint()?;
+                if index >= cases.len() as u64 {
+                    return Err(Refusal::InvalidValue.into());
+                }
+                let case = cases[index as usize];
+                match payloads[index as usize] {
+                    None => made(p, make_enum(*number, case))?,
+                    Some(child) => {
+                        work.push(Work::Wrap(*number, case));
+                        work.push(Work::Decode(child));
+                    }
+                }
             }
             Node::Through { r: rep, .. } => {
                 work.push(Work::Rebuild(n));
@@ -1639,5 +1739,268 @@ mod tests {
         assert!(matches!(vm.error, Some(RtError::Bug(_))));
         vm.error = None;
         unsafe { crate::runtime::heap::free_object(constant as *mut Header) };
+    }
+
+    // -----------------------------------------------------------------------
+    // Payload-bearing enums (PORTABILITY-PAYLOAD-ENUM-TRANSFER-MILESTONE-1.md)
+
+    /// A List of `enum Message: Ping, Text {body: str}, Number {value: int},
+    /// Batch {items: List[int]}` by a program numbering the enum MESSAGE
+    /// (its cases declared in the order DECLARED) and the payloads' shapes
+    /// ITEMS, VALUE and BODY: the sorted cases Batch, Number, Ping, Text.
+    fn message_plan(bytes: u32, message: u32, declared: &[&str], items: u32, value: u32, body: u32) -> String {
+        let at = |c: &str| declared.iter().position(|d| *d == c).unwrap();
+        [
+            format!("plan 1 {FP} {bytes}"),
+            "1 list 1 -1".to_string(),
+            format!("1 penum {message} 4 {} 2 {} 4 {} -1 {} 6", at("Batch"), at("Number"), at("Ping"), at("Text")),
+            format!("1 struct {items} 1 1 0 3"),
+            "1 list 5 -1".to_string(),
+            format!("1 struct {value} 1 1 0 5"),
+            "1 int 0".to_string(),
+            format!("1 struct {body} 1 1 0 7"),
+            "1 str".to_string(),
+        ]
+        .join("\n")
+    }
+
+    /// [Ping, Text {body: "hé"}, Number {value: -129}, Batch {items: [1, 300]}]:
+    /// the bytes after the header (core::transfer's).
+    const MESSAGES: &[u8] = &[4, 2, 3, 3, b'h', 0xc3, 0xa9, 1, 2, 0x7f, 0xff, 0, 2, 1, 1, 2, 0x2c, 1];
+
+    /// The case (by name), and its payload's one field, of every value of the
+    /// List V of Messages decoded by a program of enum MESSAGE.
+    fn messages_of(vm: &Vm, v: Value, message: u32) -> Vec<(String, Option<Value>)> {
+        list_of(v)
+            .items()
+            .iter()
+            .map(|&m| {
+                let (e, case) = enum_case_parts(m);
+                assert_eq!(e, message);
+                let name = vm.info.enums[e as usize].cases[case as usize].clone();
+                (name, enum_payload(m).map(|p| struct_of(p).fields()[0]))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn transfer_payload_enums_between_independent_vms() {
+        // The sender: Bytes 0, {items} 1, {value} 2, {body} 3; Message is
+        // enum 1, its cases declared Ping, Text, Number, Batch.
+        let declared = ["Ping", "Text", "Number", "Batch"];
+        let sender = program(
+            &[(Some("std::abi::bytes::Bytes"), &["storage"]), (None, &["items"]), (None, &["value"]), (None, &["body"])],
+            &[("Other", &["X"]), ("Message", &declared)],
+            &[],
+        );
+        let plan = message_plan(0, 1, &declared, 1, 2, 3);
+        let encoded = {
+            let mut vm = stressed(sender);
+            let ping = make_enum(1, 0);
+            let hello = string(&mut vm, "hé");
+            let p = vm.new_struct(3, vec![hello]);
+            root(&mut vm, p);
+            let text = vm.new_enum_case(1, 1, p);
+            root(&mut vm, text);
+            let p = vm.new_struct(2, vec![make_small(-129)]);
+            root(&mut vm, p);
+            let number = vm.new_enum_case(1, 2, p);
+            root(&mut vm, number);
+            let xs = list(&mut vm, vec![make_small(1), make_small(300)]);
+            let p = vm.new_struct(1, vec![xs]);
+            root(&mut vm, p);
+            let batch = vm.new_enum_case(1, 3, p);
+            root(&mut vm, batch);
+            let v = list(&mut vm, vec![ping, text, number, batch]);
+            let fns = list(&mut vm, vec![]);
+            let encoded = encode_bytes(&mut vm, &plan, v, fns).expect("encodes");
+            assert_eq!(encode_bytes(&mut vm, &plan, v, fns), Ok(encoded.clone()));
+            encoded
+            // (The sender's Vm is dropped here: nothing of it is read again.)
+        };
+        assert_eq!(encoded, with_header(MESSAGES));
+        // The receiver numbers everything otherwise: {body} 0, {value} 1,
+        // Bytes 2, {items} 3; Message is enum 0, its cases declared Batch,
+        // Ping, Number, Text.
+        let declared = ["Batch", "Ping", "Number", "Text"];
+        let receiver = program(
+            &[(None, &["body"]), (None, &["value"]), (Some("std::abi::bytes::Bytes"), &["storage"]), (None, &["items"])],
+            &[("Message", &declared)],
+            &[],
+        );
+        let mut vm = stressed(receiver);
+        let plan = message_plan(2, 0, &declared, 3, 1, 0);
+        let fns = list(&mut vm, vec![]);
+        let one = decode_bytes(&mut vm, 2, &plan, &encoded, fns).expect("decodes");
+        let two = decode_bytes(&mut vm, 2, &plan, &encoded, fns).expect("decodes");
+        vm.collect_for_test(GcReason::Explicit);
+        for v in [one, two] {
+            let got = messages_of(&vm, v, 0);
+            let names: Vec<&str> = got.iter().map(|(n, _)| n.as_str()).collect();
+            assert_eq!(names, ["Ping", "Text", "Number", "Batch"]);
+            assert!(is_enum(list_of(v).items()[0]), "a payload-free case is its immediate word");
+            assert_eq!(got[0].1, None);
+            assert_eq!(str_of(got[1].1.unwrap()).as_str(), "hé");
+            assert_eq!(got[2].1, Some(make_small(-129)));
+            assert_eq!(list_of(got[3].1.unwrap()).items(), [make_small(1), make_small(300)]);
+            for &m in &list_of(v).items()[1..] {
+                assert_eq!(heap_kind(m), KIND_ENUMCASE);
+                let shape = struct_of(enum_case_of(m).payload).shape;
+                assert!(shape == 0 || shape == 1 || shape == 3, "a payload of the receiver's own shapes");
+            }
+        }
+        // Two decodes are two values; each re-encodes, in the receiver's
+        // numbering, to the sender's bytes.
+        assert_ne!(list_of(one).items()[3], list_of(two).items()[3]);
+        assert_eq!(encode_bytes(&mut vm, &plan, two, fns), Ok(encoded));
+    }
+
+    #[test]
+    fn transfer_payload_enums_refuse_malformed_bytes() {
+        let declared = ["Ping", "Text", "Number", "Batch"];
+        let info = program(
+            &[(Some("std::abi::bytes::Bytes"), &["storage"]), (None, &["items"]), (None, &["value"]), (None, &["body"])],
+            &[("Message", &declared)],
+            &[],
+        );
+        let mut vm = stressed(info);
+        let plan = message_plan(0, 0, &declared, 1, 2, 3);
+        let fns = list(&mut vm, vec![]);
+        let check = |vm: &mut Vm, body: &[u8], want: Option<u32>| {
+            let got = decode_bytes(vm, 0, &plan, &with_header(body), fns).err();
+            assert_eq!(got, want, "{body:?}");
+        };
+        check(&mut vm, MESSAGES, None);
+        // Every proper prefix ends inside a value.
+        for n in 0..MESSAGES.len() {
+            check(&mut vm, &MESSAGES[..n], Some(MALFORMED));
+        }
+        // A case index the enum does not have.
+        check(&mut vm, &[1, 4], Some(INVALID));
+        check(&mut vm, &[1, 0x80, 0x01], Some(INVALID));
+        // A payload-bearing case whose payload is missing, a payload-free
+        // case followed by bytes it does not hold.
+        check(&mut vm, &[1, 1], Some(MALFORMED));
+        check(&mut vm, &[1, 2, 0], Some(MALFORMED));
+        // A case index that is no minimal varuint.
+        check(&mut vm, &[1, 0x82, 0], Some(MALFORMED));
+        // Invalid values inside a payload: UTF-8, a non-minimal Int.
+        check(&mut vm, &[1, 3, 2, 0xc3, 0x28], Some(INVALID));
+        check(&mut vm, &[1, 1, 1, 0], Some(INVALID));
+        // A List count no remaining bytes can hold: every value of the enum
+        // takes at least one byte.
+        check(&mut vm, &[5, 2], Some(MALFORMED));
+        // A payload's forged count.
+        check(&mut vm, &[1, 0, 9, 1, 1], Some(MALFORMED));
+        // Nothing was left behind for the collector to find broken.
+        vm.collect_for_test(GcReason::Explicit);
+    }
+
+    /// `enum Tree: Leaf {value: int}, Branch {children: List[Tree]}`: Branch
+    /// sorts first; its payload refers back to the enum's own node.
+    fn tree_plan() -> String {
+        format!("plan 1 {FP} 0\n2 penum 0 2 1 1 0 3\n1 struct 1 1 1 0 2\n1 list 0 -1\n1 struct 2 1 1 0 4\n1 int 0")
+    }
+
+    fn tree_info() -> std::sync::Arc<ProgramInfo> {
+        program(&[(Some("std::abi::bytes::Bytes"), &["storage"]), (None, &["children"]), (None, &["value"])], &[("Tree", &["Leaf", "Branch"])], &[])
+    }
+
+    /// A chain of DEPTH Branches down to Leaf {value: 7}, built in VM.
+    fn tree_chain(vm: &mut Vm, depth: usize) -> Value {
+        let leaf = {
+            let p = vm.new_struct(2, vec![make_small(7)]);
+            root(vm, p);
+            let l = vm.new_enum_case(0, 0, p);
+            root(vm, l)
+        };
+        let mut node = leaf;
+        for _ in 0..depth {
+            let children = list(vm, vec![node]);
+            let p = vm.new_struct(1, vec![children]);
+            root(vm, p);
+            let b = vm.new_enum_case(0, 1, p);
+            node = root(vm, b);
+            // (Only the newest node needs rooting: it holds the rest.)
+            let len = vm.temp_roots.len();
+            vm.temp_roots.swap(len - 4, len - 1);
+            vm.temp_roots.truncate(len - 3);
+        }
+        node
+    }
+
+    #[test]
+    fn transfer_recursive_payload_enums() {
+        // Under stress (every allocation collects, freed objects poisoned):
+        // a short chain, decoded and checked; then a deep one, iteratively.
+        for (depth, stress) in [(40, true), (100_000, false)] {
+            let encoded = {
+                let mut vm = if stress { stressed(tree_info()) } else { Vm::new(tree_info(), AllocMode::Summary) };
+                let v = tree_chain(&mut vm, depth);
+                let fns = list(&mut vm, vec![]);
+                encode_bytes(&mut vm, &tree_plan(), v, fns).unwrap()
+            };
+            // Each Branch is its index and a count of one; the Leaf its index
+            // and an Int.
+            let mut want = Vec::new();
+            for _ in 0..depth {
+                want.extend_from_slice(&[0, 1]);
+            }
+            want.extend_from_slice(&[1, 1, 7]);
+            assert_eq!(encoded, with_header(&want), "depth {depth}");
+            let mut vm = if stress { stressed(tree_info()) } else { Vm::new(tree_info(), AllocMode::Summary) };
+            let fns = list(&mut vm, vec![]);
+            let mut node = decode_bytes(&mut vm, 0, &tree_plan(), &encoded, fns).unwrap();
+            vm.collect_for_test(GcReason::Explicit);
+            let mut seen = 0;
+            while enum_case_parts(node) == (0, 1) {
+                node = list_of(struct_of(enum_case_of(node).payload).fields()[0]).items()[0];
+                seen += 1;
+            }
+            assert_eq!(seen, depth);
+            assert_eq!(enum_case_parts(node), (0, 0));
+            assert_eq!(struct_of(enum_case_of(node).payload).fields()[0], make_small(7));
+        }
+    }
+
+    /// The plan is checked when read, and a value that does not hold what
+    /// its case declares is a compiler bug: never written without its
+    /// payload, never decoded into a word for a case that carries one.
+    #[test]
+    fn transfer_payload_enum_plans_are_checked() {
+        let mut vm = Vm::new(tree_info(), AllocMode::Summary);
+        let p: *mut Vm = &mut *vm;
+        let fns = list(&mut vm, vec![]);
+        for bad in [
+            // A payload node that is no struct.
+            format!("plan 1 {FP} 0\n2 penum 0 2 1 1 0 2\n1 struct 1 1 1 0 2\n1 list 0 -1"),
+            // Fewer cases than the enum declares.
+            format!("plan 1 {FP} 0\n2 penum 0 1 1 1\n1 struct 1 1 1 0 2\n1 list 0 -1"),
+            // A case twice; a payload node past the plan.
+            format!("plan 1 {FP} 0\n2 penum 0 2 1 1 1 1\n1 struct 1 1 1 0 2\n1 list 0 -1"),
+            format!("plan 1 {FP} 0\n2 penum 0 2 1 1 0 9\n1 struct 1 1 1 0 2\n1 list 0 -1"),
+            format!("plan 1 {FP} 0\n2 penum 0 2 1 1 0 x\n1 struct 1 1 1 0 2\n1 list 0 -1"),
+            // No such enum.
+            format!("plan 1 {FP} 0\n2 penum 5 2 1 1 0 3\n1 struct 1 1 1 0 2\n1 list 0 -1\n1 struct 2 1 1 0 4\n1 int 0"),
+        ] {
+            // Refused when read, whatever the bytes: Leaf with an empty
+            // List where the first plan's list node is would otherwise
+            // decode into an EnumCaseObj whose payload is no struct.
+            let plan = string(&mut vm, &bad);
+            let data = bytes_value(&mut vm, 0, &with_header(&[1, 0]));
+            assert_eq!(rt_transfer_decode(p, data, plan, fns), NO_VALUE, "{bad:?}");
+            assert!(matches!(vm.error, Some(RtError::Bug(_))), "{bad:?}");
+            assert_eq!(vm.declared_error, 0, "{bad:?}");
+            vm.error = None;
+        }
+        // Leaf's immediate word where its case carries a payload.
+        let plan = string(&mut vm, &tree_plan());
+        assert_eq!(rt_transfer_encode(p, make_enum(0, 0), plan, fns), NO_VALUE);
+        assert!(matches!(vm.error, Some(RtError::Bug(_))));
+        vm.error = None;
+        // A case of another enum.
+        assert_eq!(rt_transfer_encode(p, make_enum(1, 0), plan, fns), NO_VALUE);
+        assert!(matches!(vm.error, Some(RtError::Bug(_))));
+        vm.error = None;
     }
 }

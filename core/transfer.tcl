@@ -40,6 +40,10 @@
 #               stated length: checked)
 #   struct      the fields, in the node's wire order (sorted names)
 #   enum        a varuint: the case's index among the sorted case names
+#   penum       a varuint, the case's index among the sorted case names,
+#               then, when that case declares a payload, the payload: an
+#               anonymous struct of its fields (sorted by name)
+#               (PORTABILITY-PAYLOAD-ENUM-TRANSFER-MILESTONE-1.md)
 #   bytes/mutbytes
 #               a varuint byte count, then the bytes
 #   through     the representation's encoding
@@ -65,6 +69,8 @@ namespace eval core::transfer {
     variable zeroBudget [expr {1 << 24}]
     # The largest varuint (counts and lengths).
     variable maxVaruint [expr {(1 << 62) - 1}]
+    # The largest minimum size a node is given (MinSizes).
+    variable maxMinSize [expr {1 << 40}]
 }
 
 foreach name {TransferMalformed TransferVersion TransferTypeMismatch TransferInvalidValue TransferLimit} {
@@ -142,6 +148,24 @@ proc core::transfer::encode {value schema fns} {
                     error "core::transfer::encode: [core::value::show $v] is no case of [lindex $node 1]"
                 }
                 append out [Varuint $index]
+            }
+            penum {
+                # The case's index among the declared cases, then -- the
+                # case's own schema deciding, never the value's form -- its
+                # payload, an anonymous struct of the case's fields.
+                lassign $node kind id payloads
+                set index [lsearch -exact -index 0 $payloads [lindex $v 2]]
+                if {[lindex $v 0] ne "enum" || [lindex $v 1] ne $id || $index < 0} {
+                    error "core::transfer::encode: [core::value::show $v] is no case of $id"
+                }
+                set child [lindex $payloads $index 1]
+                if {($child eq "") != ([llength $v] == 3)} {
+                    error "core::transfer::encode: [core::value::show $v] does not hold what case [lindex $v 2] of $id declares"
+                }
+                append out [Varuint $index]
+                if {$child ne ""} {
+                    lappend stack [list $child [lindex $v 3]]
+                }
             }
             bytes - mutbytes {
                 set raw [binary decode hex [lindex $v 2 0 1]]
@@ -251,7 +275,7 @@ proc core::transfer::Decode {data schema fns} {
     set budget $zeroBudget
     set values {}
     # Instructions, last first: {decode N}, {repeat N COUNT}, {build N K},
-    # {rebuild N}.
+    # {wrap ID CASE}, {rebuild N}.
     set work [list [list decode 0]]
     while {[llength $work]} {
         set instruction [lpop work]
@@ -274,6 +298,12 @@ proc core::transfer::Decode {data schema fns} {
                     set values [lreplace $values end-[expr {$k - 1}] end]
                 }
                 lappend values [Build $node $parts]
+                continue
+            }
+            wrap {
+                # The payload just decoded, into its case's value.
+                lassign $instruction op id c
+                lappend values [core::value::enumCaseValue $id $c [lpop values]]
                 continue
             }
             rebuild {
@@ -380,6 +410,19 @@ proc core::transfer::Decode {data schema fns} {
                 }
                 lappend values [core::value::enumValue [lindex $node 1] [lindex $cases $index]]
             }
+            penum {
+                lassign $node kind id payloads
+                set index [ReadVaruint $raw pos $end]
+                if {$index >= [llength $payloads]} {
+                    Refuse TransferInvalidValue "case index $index of enum $id (it has [llength $payloads])"
+                }
+                lassign [lindex $payloads $index] c child
+                if {$child eq ""} {
+                    lappend values [core::value::enumValue $id $c]
+                } else {
+                    lappend work [list wrap $id $c] [list decode $child]
+                }
+            }
             through {
                 lappend work [list rebuild $n] [list decode [lindex $node 2]]
             }
@@ -440,42 +483,83 @@ proc core::transfer::Admit {count min left budgetVar} {
     }
 }
 
-# Node index -> the fewest bytes a value of the node takes.
+# Node index -> a lower bound of the bytes any value of the node takes,
+# which a count is admitted against before any element is read: it must be
+# sound whatever the bytes hold, never more than a value of the node takes.
+# The sizes below, iterated upward from 0 in node order, in place, until
+# none changes or for one round more than there are nodes, each capped at
+# maxMinSize: every round's sizes are lower bounds (they start at 0 and the
+# rules are monotone), so wherever the rounds stop the result is sound. A
+# graph without recursion through an enum's payload settles at its exact
+# sizes, the ones a plain recursion always computed; one with it may stop
+# below the exact minimum (a recursive case's partial values are cheaper
+# than its base case's for a few rounds), which only admits more counts for
+# the decoder to refuse byte by byte. The procedure is deterministic: both
+# codecs read its sizes from the schema (the native plan's MIN).
+#
+#   unit 0 | float64, decimal, raw64 8 | raw32 4 | every other scalar, and
+#   every collection (its count), 1
+#   struct       the sum of its fields'
+#   through      its representation's
+#   penum        1 (the case index) and the least of every declared case's
+#                payload (0 for a payload-free case)
+#
+# Recursion reaches a node again only through a collection, whose count is
+# its size, or through an enum's payload, whose case index is
+# (PORTABILITY-PAYLOAD-ENUM-TRANSFER-MILESTONE-1.md): for every other node
+# kind the sizes are the plain recursive ones they always were.
 proc core::transfer::MinSizes {nodes} {
-    set result [dict create]
-    for {set n [expr {[llength $nodes] - 1}]} {$n >= 0} {incr n -1} {
-        MinSize $nodes $n result {}
-    }
-    return $result
-}
-
-proc core::transfer::MinSize {nodes n resultVar visiting} {
-    upvar 1 $resultVar result
-    if {[dict exists $result $n]} {
-        return [dict get $result $n]
-    }
-    if {$n in $visiting} {
-        # A recursive type reaches itself only through a collection, whose
-        # count is its size: nothing more is needed.
-        return 0
-    }
-    lappend visiting $n
-    set node [lindex $nodes $n]
-    switch -- [lindex $node 0] {
-        unit { set size 0 }
-        float64 - decimal - raw64 { set size 8 }
-        raw32 { set size 4 }
-        struct {
-            set size 0
-            foreach w [lindex $node 3] {
-                incr size [MinSize $nodes [lindex $w 2] result $visiting]
+    variable maxMinSize
+    set count [llength $nodes]
+    set sizes [lrepeat $count 0]
+    for {set round 0} {$round <= $count} {incr round} {
+        set changed 0
+        for {set n 0} {$n < $count} {incr n} {
+            set node [lindex $nodes $n]
+            switch -- [lindex $node 0] {
+                unit { set size 0 }
+                float64 - decimal - raw64 { set size 8 }
+                raw32 { set size 4 }
+                struct {
+                    set size 0
+                    foreach w [lindex $node 3] {
+                        incr size [lindex $sizes [lindex $w 2]]
+                    }
+                }
+                through { set size [lindex $sizes [lindex $node 2]] }
+                penum {
+                    set least ""
+                    foreach p [lindex $node 2] {
+                        set child [lindex $p 1]
+                        set m 0
+                        if {$child ne ""} {
+                            set m [lindex $sizes $child]
+                        }
+                        if {$least eq "" || $m < $least} {
+                            set least $m
+                        }
+                    }
+                    set size [expr {1 + $least}]
+                }
+                default { set size 1 }
+            }
+            if {$size > $maxMinSize} {
+                set size $maxMinSize
+            }
+            if {$size != [lindex $sizes $n]} {
+                lset sizes $n $size
+                set changed 1
             }
         }
-        through { set size [MinSize $nodes [lindex $node 2] result $visiting] }
-        default { set size 1 }
+        if {!$changed} {
+            break
+        }
     }
-    dict set result $n $size
-    return $size
+    set result [dict create]
+    for {set n 0} {$n < $count} {incr n} {
+        dict set result $n [lindex $sizes $n]
+    }
+    return $result
 }
 
 # The next byte of RAW at POSVAR (END its length), advancing.

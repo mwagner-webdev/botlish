@@ -1,0 +1,144 @@
+# protocol.bot -- tests/payload-enum-transfer.test: an application's message
+# protocol as ordinary payload-bearing enums, and the worker thread entries
+# that speak it to another VM through std::actor::remote
+# (PORTABILITY-PAYLOAD-ENUM-TRANSFER-MILESTONE-1.md, "Cross-thread actors").
+# Nothing here writes a serializer: every enum is Sendable because every
+# payload field of every case is, and std::transfer's schema does the rest.
+import event_loop_linux
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::list
+import std::mutable_vector
+import std::str
+import std::thread
+
+# What a requester sends: payload-free and payload-bearing cases, a mutable
+# collection, a List of the enum itself.
+enum Request:
+    Stop,
+    Calculate {requestId: int, x: int, y: int},
+    Store {key: str, value: List[int]},
+    Update {numbers: MutableVector[int]},
+    Nested {inner: List[Request]},
+
+# A service's request and response protocols.
+enum Query:
+    Ping,
+    Add {a: int, b: int},
+    Echo {text: str},
+    Split {words: List[str]},
+
+enum Outcome:
+    Pong,
+    Sum {value: int},
+    Text {text: str},
+    Count {n: int, longest: str},
+
+struct Plan:
+    to: std::actor::remote::Remote[Request]
+    count: int
+
+struct Home:
+    home: std::actor::remote::Remote[std::actor::remote::Service[Query, Outcome]]
+
+# What the serving worker reports.
+struct Served:
+    sent: bool
+    answered: int
+
+# Sends M, retrying a Full endpoint at once: how many sends were refused.
+fn sent(to: std::actor::remote::Remote[Request], m: Request) -> int:
+    fold with intermediate t 0:
+        s = std::actor::remote::send(to, m)
+        if s == std::actor::remote::Sent::Delivered:
+            break
+        t + 1
+
+# The requests, in order: every case, a vector sent, mutated and sent again,
+# PLAN.count numbered calculations (FIFO), and Stop last. How many arrived
+# refused for room.
+thread fn send_requests(plan: Plan) -> int:
+    v = std::mutable_vector::from_list([7, 8, 9])
+    a = plan.to.sent(Request::Calculate {requestId: 1, x: 6, y: 7})
+    b = plan.to.sent(Request::Store {key: "kéy", value: [1, 2, 3]})
+    c = plan.to.sent(Request::Update {numbers: v})
+    # (The sender's own vector changes after the send: what was sent is a
+    # copy made when it was sent.)
+    v.push(10)
+    d = plan.to.sent(Request::Update {numbers: v})
+    e = plan.to.sent(Request::Nested {inner: [Request::Calculate {requestId: 2, x: 1, y: 2}, Request::Stop]})
+    f = fold i from 0 to plan.count with intermediate full 0:
+        full + plan.to.sent(Request::Calculate {requestId: 100 + i, x: i, y: 2})
+    g = plan.to.sent(Request::Stop)
+    a + b + c + d + e + f + g
+
+# A worker's answer to Q, chosen by an exhaustive match.
+fn answer(q: Query) -> Outcome:
+    match q:
+        case Query::Ping:
+            Outcome::Pong
+        case Query::Add {a, b}:
+            Outcome::Sum {value: a + b}
+        case Query::Echo {text}:
+            Outcome::Text {text: text.append_char('!')}
+        case Query::Split {words}:
+            longest = fold w in words with intermediate best "":
+                if w.length() > best.length():
+                    w
+                else:
+                    best
+            Outcome::Count {n: words.length(), longest: longest}
+
+# A thread entry whose initialization value and result are payload enums.
+thread fn compute(q: Query) -> Outcome:
+    answer(q)
+
+# The service actor: N calls answered, then the loop stops.
+fn answering(inbox: std::actor::Inbox[std::actor::remote::Call[Query, Outcome]], n: int, context ev: std::event_loop::Loop, resume std::actor::Answer) -> std::actor::Exit:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    answered = fold i from 0 to n with intermediate k 0:
+        call = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        std::actor::remote::reply(call.reply, answer(call.body))
+        k + 1
+    std::event_loop::stop():
+        on std::event_loop::SchedulerFault:
+            return std::actor::exit(-2)
+    std::actor::exit(answered)
+
+private fn served(init: Home, n: int, context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, p: std::thread::Port, db: std::thread::Doorbell) -> Served errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::thread::serve()
+    {to: calls, inbox} = std::actor::open[std::actor::remote::Call[Query, Outcome]](2)
+    svc = std::actor::remote::serve_calls(calls, 8)
+    a = inject context std::event_loop::Loop:
+        coroutine {step, first} = answering(inbox, n)
+        std::actor::spawned(step, first)
+    task = std::actor::start(a)
+    s = std::actor::remote::send(init.home, svc)
+    std::event_loop::run()
+    std::thread::close_port()
+    answered = fold o in std::event_loop::take_outcomes() with intermediate k -1:
+        if o.task == task:
+            o.value
+        else:
+            k
+    Served {sent: s == std::actor::remote::Sent::Delivered, answered: answered}
+
+# A worker VM serving four queries.
+thread fn serve_queries(init: Home) -> Served:
+    with context std::event_loop::create(64)
+    with context event_loop_linux::create()
+    with context event_loop_linux::native()
+    with context std::actor::create()
+    with context std::thread::port()
+    init.served(4):
+        on std::event_loop::SchedulerFault:
+            Served {sent: false, answered: -2}
+        on std::event_loop::DriverFault {code}:
+            Served {sent: false, answered: code}
+        on std::event_loop::LoopReentered:
+            Served {sent: false, answered: -3}

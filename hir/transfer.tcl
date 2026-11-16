@@ -42,8 +42,16 @@
 #                           one), SLOTS its field names in slot order, WIRE
 #                           {FIELD SLOT NODE} per field in the order the
 #                           bytes hold them: sorted by name
-#   enum ID CASES           a case of enum ID, CASES its case names sorted:
-#                           the bytes hold a case's index among them
+#   enum ID CASES           a case of enum ID, every case payload-free,
+#                           CASES its case names sorted: the bytes hold a
+#                           case's index among them
+#   penum ID PAYLOADS       a case of enum ID, some case payload-bearing
+#                           (PORTABILITY-PAYLOAD-ENUM-TRANSFER-MILESTONE-1.md):
+#                           PAYLOADS {CASE NODE} per declared case, sorted by
+#                           name, NODE its payload's anonymous struct or ""
+#                           for a payload-free case; the bytes hold the
+#                           case's index among them, then its payload (none
+#                           for a payload-free case)
 #   bytes ID FIELD          an opaque struct of the standard library whose
 #   mutbytes ID FIELD       one field FIELD holds (mutable) byte storage
 #   through ID R K          an opaque struct its owner projects to node R's
@@ -78,12 +86,59 @@ namespace eval hir::transfer {
 # total, hir::types::IsClosedType): {nodes NODES fns FNS text TEXT
 # fingerprint FP}, FNS the qualified names of the owner functions the
 # `through` nodes call, in index order.
+#
+# The nodes are TYPE's own, every refinement the receiver checks kept (a
+# List's stated length, an Int's integer domains). The text -- and so the
+# fingerprint -- is the schema of TYPE's *intent* (Intent): the same walk
+# over TYPE with its List lengths and positional shapes erased from every
+# part, so that two types differing only in them -- a List literal's
+# `List[Tree]{length: 3}` and the receiver's `List[Tree]` -- have one text
+# even where a length would have kept two nodes apart in one graph (a
+# recursive enum's or struct's `List[Self]` child meeting the root again;
+# PORTABILITY-PAYLOAD-ENUM-TRANSFER-MILESTONE-1.md, "A canonical
+# fingerprint"). A type with neither has the same graph both ways: its text
+# is the one it always had.
 proc hir::transfer::Schema {type} {
-    set state [dict create nodes {} keys [dict create] fns {}]
+    set state [dict create nodes {} keys [dict create] fns {} intent 0]
     Node state $type
-    set text [Text [dict get $state nodes] [dict get $state fns]]
+    set intent [dict create nodes {} keys [dict create] fns {} intent 1]
+    Node intent $type
+    set text [Text [dict get $intent nodes] [dict get $intent fns]]
     return [dict create nodes [dict get $state nodes] fns [dict get $state fns] \
         text $text fingerprint [Fingerprint $text]]
+}
+
+# TYPE as its schema's text names it: every List length refinement and
+# positional shape erased, in every part a schema walks (List, ImmutableSet,
+# MutableVector and MutableArray elements, anonymous struct fields, an
+# application's arguments) -- knowledge about one value, which the sender's
+# static type has and the receiver's rarely does (a literal's length), and
+# which the receiver checks against its own type instead of comparing it. A
+# named struct's or enum's declared field types are erased in their turn as
+# the walk meets them. (An integer domain is a declared type's, the same in
+# every program that shares the declaration: kept, as it always was -- its
+# line says "int", its values are checked by the receiver.)
+proc hir::transfer::Intent {type} {
+    if {[hir::refinements::IsRefined $type] && [hir::refinements::IsApplied [hir::refinements::Family $type]]} {
+        return [Intent [hir::refinements::Base $type]]
+    }
+    if {[hir::types::IsList $type]} {
+        return [list list [Intent [lindex $type 1]]]
+    }
+    if {[hir::types::IsSet $type] || [hir::types::IsMutVec $type] || [hir::types::IsMutArray $type]} {
+        return [list [lindex $type 0] [Intent [lindex $type 1]]]
+    }
+    if {[hir::types::IsStruct $type]} {
+        set fields {}
+        foreach {name t} [lindex $type 1] {
+            lappend fields $name [Intent $t]
+        }
+        return [list struct $fields]
+    }
+    if {[hir::types::IsAppliedStruct $type]} {
+        return [list nstruct [lindex $type 1] [lmap a [lindex $type 2] {Intent $a}]]
+    }
+    return $type
 }
 
 # The index of the node of TYPE in STATEVAR's schema, made first if new.
@@ -93,6 +148,9 @@ proc hir::transfer::Node {stateVar type} {
         set type [hir::cabi::Carrier $type]
     }
     set type [Erased $type]
+    if {[dict get $state intent]} {
+        set type [Intent $type]
+    }
     if {[dict exists $state keys $type]} {
         return [dict get $state keys $type]
     }
@@ -204,7 +262,30 @@ proc hir::transfer::Make {stateVar type} {
     }
     if {[hir::types::IsEnum $type]} {
         set id [lindex $type 1]
-        return [list enum $id [lsort [hir::enums::cases $id]]]
+        set cases [lsort [hir::enums::cases $id]]
+        if {![hir::enums::hasPayloads $id]} {
+            # (Every case payload-free: the node, its text and so its
+            # fingerprint are what they were before payload-bearing enums
+            # could be sent.)
+            return [list enum $id $cases]
+        }
+        # Every declared case, in sorted order, with the node of its
+        # payload's anonymous struct (hir::enums::payloadType: its fields
+        # sorted) or "" for a payload-free one -- the whole declaration,
+        # never the case one value holds. The payloads' nodes are made in
+        # that order, so their numbering is the declaration's whatever
+        # order it writes its cases and fields in; an enum reached again
+        # through its own payload (a recursive enum) refers back to this
+        # node.
+        set payloads {}
+        foreach c $cases {
+            if {[hir::enums::hasPayload $id $c]} {
+                lappend payloads [list $c [Node state [hir::enums::payloadType $id $c]]]
+            } else {
+                lappend payloads [list $c ""]
+            }
+        }
+        return [list penum $id $payloads]
     }
     set normal [core::type::normalize $type]
     switch -- [core::type::base $normal] {
@@ -258,6 +339,12 @@ proc hir::transfer::Text {nodes fns} {
             through {
                 lassign $node kind id r k
                 set line "through [Shown $id] $r [lindex $fns $k] [lindex $fns [expr {$k + 1}]]"
+            }
+            penum {
+                # Every case, sorted, and its payload's node ("-" for a
+                # payload-free case).
+                lassign $node kind id payloads
+                set line "penum $id {[join [lmap p $payloads {lassign $p c n; string cat $c " " [if {$n eq ""} {string cat -} else {set n}]}] { }]}"
             }
             bytes - mutbytes {
                 set line "[lindex $node 0] [lindex $node 1]"
