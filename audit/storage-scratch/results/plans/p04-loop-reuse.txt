@@ -1,0 +1,12 @@
+# p04-loop-reuse (audit/storage-static-reuse/cases/p04-loop-reuse.bot)
+
+unit <program>
+unit work<int> -- a region per iteration of the fold at p04-loop-reuse.bot:13:5
+  Pair {left, right} (struct) at p04-loop-reuse.bot:14:13: rejected -- not representable: a struct (only Strings are placed)
+    semantic: confined to iteration of the fold at p04-loop-reuse.bot:13:5
+    representable: no (a struct (only Strings are placed))
+  call of std::int::to_string (str) at p04-loop-reuse.bot:15:13: selected -- iteration of the fold at p04-loop-reuse.bot:13:5
+    semantic: confined to iteration of the fold at p04-loop-reuse.bot:13:5
+
+# What lowering emitted
+  work<int>: call of std::int::to_string at p04-loop-reuse.bot:15:13: emitted (1 instruction(s))

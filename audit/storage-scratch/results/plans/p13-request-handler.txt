@@ -1,0 +1,63 @@
+# p13-request-handler (audit/storage-static-reuse/cases/p13-request-handler.bot)
+
+unit <program>
+unit raw<int> -- takes a destination from its callers
+  call of std::int::to_string (str) at p13-request-handler.bot:16:26: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:15:7))
+  call of std::str::concat (str) at p13-request-handler.bot:16:5: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:15:7))
+  call of std::str::concat (str) at p13-request-handler.bot:16:5: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:15:7))
+unit parse<str, int> -- takes a destination from its callers
+  call of std::str::substring (str) at p13-request-handler.bot:22:12: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:18:9))
+  call of std::str::substring (str) at p13-request-handler.bot:27:12: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:18:9))
+  Request {verb, path, id} (struct) at p13-request-handler.bot:32:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:18:9))
+    representable: no (a struct (only Strings are placed))
+unit respond<Request> -- takes a destination from its callers
+  call of std::str::concat (str) at p13-request-handler.bot:35:12: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:34:11))
+  call of std::str::concat (str) at p13-request-handler.bot:35:12: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:34:11))
+  call of std::int::to_string (str) at p13-request-handler.bot:35:77: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:34:11))
+  call of std::str::concat (str) at p13-request-handler.bot:35:12: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:34:11))
+  call of std::str::concat (str) at p13-request-handler.bot:35:12: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:34:11))
+  call of std::int::to_string (str) at p13-request-handler.bot:36:50: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:34:11))
+  call of std::str::concat (str) at p13-request-handler.bot:36:5: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:34:11))
+  call of std::str::concat (str) at p13-request-handler.bot:36:5: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:34:11))
+  call of std::str::concat (str) at p13-request-handler.bot:36:5: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p13-request-handler.bot:34:11))
+unit handle<int> -- an activation region
+  call of raw (str) at p13-request-handler.bot:39:15: selected -- its callee's result in activation
+    semantic: confined to activation
+  call of parse (struct) at p13-request-handler.bot:39:9: selected -- its callee's result in activation
+    semantic: confined to activation
+  call of respond (str) at p13-request-handler.bot:42:22: selected -- its callee's result in activation
+    semantic: confined to activation
+
+# What lowering emitted
+  raw<int>: call of std::int::to_string at p13-request-handler.bot:16:26: emitted (1 instruction(s))
+  raw<int>: call of std::str::concat at p13-request-handler.bot:16:5: not emitted -- no instruction of its own (virtual, inlined or a companion call)
+  raw<int>: call of std::str::concat at p13-request-handler.bot:16:5: emitted (1 instruction(s))
+  parse<str, int>: call of std::str::substring at p13-request-handler.bot:22:12: emitted (1 instruction(s))
+  parse<str, int>: call of std::str::substring at p13-request-handler.bot:27:12: emitted (1 instruction(s))
+  respond<Request>: call of std::str::concat at p13-request-handler.bot:35:12: not emitted -- no instruction of its own (virtual, inlined or a companion call)
+  respond<Request>: call of std::str::concat at p13-request-handler.bot:35:12: not emitted -- no instruction of its own (virtual, inlined or a companion call)
+  respond<Request>: call of std::int::to_string at p13-request-handler.bot:35:77: emitted (1 instruction(s))
+  respond<Request>: call of std::str::concat at p13-request-handler.bot:35:12: not emitted -- no instruction of its own (virtual, inlined or a companion call)
+  respond<Request>: call of std::str::concat at p13-request-handler.bot:35:12: emitted (1 instruction(s))
+  respond<Request>: call of std::int::to_string at p13-request-handler.bot:36:50: emitted (1 instruction(s))
+  respond<Request>: call of std::str::concat at p13-request-handler.bot:36:5: not emitted -- no instruction of its own (virtual, inlined or a companion call)
+  respond<Request>: call of std::str::concat at p13-request-handler.bot:36:5: not emitted -- no instruction of its own (virtual, inlined or a companion call)
+  respond<Request>: call of std::str::concat at p13-request-handler.bot:36:5: emitted (1 instruction(s))
+  handle<int>: call of raw at p13-request-handler.bot:39:15: emitted (1 instruction(s))
+  handle<int>: call of parse at p13-request-handler.bot:39:9: emitted (1 instruction(s))
+  handle<int>: call of respond at p13-request-handler.bot:42:22: emitted (1 instruction(s))

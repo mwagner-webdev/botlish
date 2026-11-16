@@ -3,7 +3,7 @@
 # and mutation-testing evidence").
 #
 #   tclsh9.0 audit/storage-scratch/tools/fuzz.tcl ?-seeds 1-5? ?-count 20?
-#       ?-modes {plain stress growth}? ?-keep DIR?
+#       ?-modes {plain stress growth off}? ?-compile 0|1? ?-keep DIR?
 #
 # For each seed, a generator of its own (no compiler code: a grammar of
 # ordinary Botlish over Strings) writes COUNT programs that build Strings in
@@ -16,14 +16,16 @@
 # storage was released changes the value (or fails: released storage is
 # poisoned under GC stress).
 #
-# Each program runs on interp (the oracle) and natively with scratch
-# storage, in each mode:
+# Each program runs on interp (the oracle), on the Tcl compiler (compile;
+# -compile 0 skips it) and natively, in each mode:
 #
 #   plain   the defaults;
 #   stress  BOTLISH_NATIVE_GC_STRESS=1: a collection at every allocation
 #           (scratch placements included), released storage poisoned;
 #   growth  BOTLISH_NATIVE_SCRATCH_CHUNK=48: every few Strings a new chunk,
-#           growth and replacement on every path.
+#           growth and replacement on every path;
+#   off     BOTLISH_NATIVE_SCRATCH_OPT=0: the native backend without scratch
+#           storage (the baseline the optimization must not change).
 #
 # A program passes when every mode's outcome equals interp's and the
 # allocation report (stress mode) counts no stale root and no protocol
@@ -32,7 +34,7 @@
 # on any failure or any program that does not compile (a generator bug).
 set here [file dirname [file normalize [info script]]]
 set root [file dirname [file dirname [file dirname $here]]]
-set options [dict create -seeds 1-5 -count 20 -modes {plain stress growth} -keep ""]
+set options [dict create -seeds 1-5 -count 20 -modes {plain stress growth off} -compile 1 -keep ""]
 foreach {k v} $argv {
     if {![dict exists $options $k]} {
         error "unknown option $k"
@@ -339,6 +341,7 @@ proc Mode {mode script} {
         plain { set env {} }
         stress { set env {BOTLISH_NATIVE_GC_STRESS 1} }
         growth { set env {BOTLISH_NATIVE_SCRATCH_CHUNK 48} }
+        off { set env {BOTLISH_NATIVE_SCRATCH_OPT 0} }
     }
     return [uplevel 1 [list withEnvironment $env $script]]
 }
@@ -365,6 +368,14 @@ foreach seed [Seeds [dict get $options -seeds]] {
         }
         set oracle [outcomeUnderHir interp $hir]
         set bad {}
+        if {[dict get $options -compile]} {
+            if {[catch {outcomeUnderHir compile $hir} got]} {
+                set got "the compile run failed: [lindex [split $got \n] 0]"
+            }
+            if {$got ne $oracle} {
+                lappend bad "compile: $got"
+            }
+        }
         foreach mode [dict get $options -modes] {
             if {[catch {Mode $mode {outcomeUnderHir cranelift $hir}} got]} {
                 set got "the native run failed: [lindex [split $got \n] 0]"

@@ -1,0 +1,19 @@
+# p05-escape-result (audit/storage-static-reuse/cases/p05-escape-result.bot)
+
+unit <program>
+unit make<int> -- takes a destination from its callers
+  call of std::int::to_string (str) at p05-escape-result.bot:8:5: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p05-escape-result.bot:7:8))
+  call of std::str::concat (str) at p05-escape-result.bot:8:5: selected -- in the caller's region when the caller gives a destination
+    semantic: escapes to activation (result: the unit's value (at p05-escape-result.bot:7:8))
+unit use_it<int> -- an activation region
+  call of make (str) at p05-escape-result.bot:11:12: selected -- its callee's result in activation
+    semantic: confined to activation
+  call of make (str) at p05-escape-result.bot:12:13: selected -- its callee's result in activation
+    semantic: confined to activation
+
+# What lowering emitted
+  make<int>: call of std::int::to_string at p05-escape-result.bot:8:5: emitted (1 instruction(s))
+  make<int>: call of std::str::concat at p05-escape-result.bot:8:5: emitted (1 instruction(s))
+  use_it<int>: call of make at p05-escape-result.bot:11:12: emitted (1 instruction(s))
+  use_it<int>: call of make at p05-escape-result.bot:12:13: emitted (1 instruction(s))

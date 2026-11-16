@@ -493,3 +493,93 @@ mod tests {
         assert!(!super::super::value::is_pointer(m));
     }
 }
+
+#[cfg(test)]
+mod vm_tests {
+    use super::super::metrics::{AllocMode, GcReason};
+    use super::super::value::*;
+    use super::super::vm::{ProgramInfo, Vm};
+
+    fn vm() -> Box<Vm> {
+        let mut vm = Vm::new(std::sync::Arc::new(ProgramInfo::empty()), AllocMode::Summary);
+        vm.heap.set_stress_for_test(false);
+        vm
+    }
+
+    fn text(v: Value) -> String {
+        unsafe { super::super::strobj::StrObj::from_addr(v) }.as_str().to_string()
+    }
+
+    #[test]
+    fn a_request_places_exactly_the_next_string_and_the_collector_never_touches_it() {
+        let mut vm = vm();
+        vm.scratch_request = 1;
+        let s = vm.new_str("in scratch");
+        let h = vm.new_str("on the heap");
+        assert!(vm.heap.scratch.contains(s), "the request's String is in scratch storage");
+        assert!(!vm.heap.scratch.contains(h), "the request is consumed by one allocation");
+        assert_eq!(vm.scratch_request, 0);
+        vm.temp_roots.push(s);
+        vm.temp_roots.push(h);
+        vm.collect_for_test(GcReason::Explicit);
+        // Never marked (a mark would never be cleared: the sweep only visits
+        // the heap's own objects), never swept, never counted stale.
+        assert_eq!(unsafe { (*(s as *const Header)).marked }, 0);
+        assert_eq!(text(s), "in scratch");
+        assert_eq!(text(h), "on the heap");
+        assert_eq!(vm.metrics.scratch.stale_roots, 0);
+        assert_eq!(vm.metrics.scratch.allocations, 1);
+        assert_eq!(vm.metrics.total_allocations(), 1, "only the heap String is a heap allocation");
+    }
+
+    #[test]
+    fn a_root_into_released_storage_is_counted_and_never_read() {
+        let mut vm = vm();
+        vm.heap.scratch.set_poison_for_test(true);
+        let mark = vm.heap.scratch.mark();
+        vm.scratch_request = 1;
+        let s = vm.new_str("released");
+        vm.heap.scratch.reset(mark, &mut vm.metrics.scratch);
+        // Poisoned: its header reads as garbage now. A collection that read
+        // it would see kind 0xDB; it must recognize the address instead.
+        assert_eq!(unsafe { (*(s as *const Header)).kind }, super::POISON_BYTE);
+        vm.temp_roots.push(s);
+        vm.collect_for_test(GcReason::Explicit);
+        assert_eq!(vm.metrics.scratch.stale_roots, 1);
+    }
+
+    #[test]
+    fn the_empty_string_consumes_no_request() {
+        // The canonical empty String allocates nothing, so the request stays
+        // set: generated code clears it right after the helper returns
+        // (codegen::clif's call_allocating), whatever the helper did.
+        let mut vm = vm();
+        vm.scratch_request = 1;
+        let e = vm.new_str("");
+        assert!(!vm.heap.scratch.contains(e));
+        assert_eq!(vm.scratch_request, 1);
+    }
+
+    #[test]
+    fn a_string_over_the_limit_falls_back_to_the_heap() {
+        let mut vm = vm();
+        vm.heap.scratch.set_sizes_for_test(64, 32, 1 << 20);
+        vm.scratch_request = 1;
+        let s = vm.new_str("a String longer than the scratch object limit");
+        assert!(!vm.heap.scratch.contains(s));
+        assert_eq!(vm.metrics.scratch.fallback_large, 1);
+        assert_eq!(vm.metrics.total_allocations(), 1);
+    }
+
+    #[test]
+    fn a_run_ends_with_its_storage_released() {
+        let mut vm = vm();
+        vm.scratch_request = 1;
+        vm.new_str("kept until the run ends");
+        assert!(vm.heap.scratch.reserved() > 0);
+        vm.scratch_dest = 1;
+        vm.reset();
+        assert_eq!(vm.heap.scratch.reserved(), 0);
+        assert_eq!((vm.scratch_request, vm.scratch_dest), (0, 0));
+    }
+}

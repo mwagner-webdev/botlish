@@ -1,0 +1,19 @@
+# p10b-handle-returned (audit/storage-static-reuse/cases/p10b-handle-returned.bot)
+
+unit <program>
+  call of make (coroutine) at p10b-handle-returned.bot:16:5: rejected -- its callee takes no destination: nothing it returns can be placed in its caller's region
+    semantic: confined to activation
+  call of list (list) at p10b-handle-returned.bot:17:1: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at the end))
+    representable: no (the native list)
+unit gen<int> -- no region: it may suspend: a region is never live across a suspension
+unit make<int>
+  closure (closure) at p10b-handle-returned.bot:13:5: rejected -- not representable: a closure (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at p10b-handle-returned.bot:12:8))
+    representable: no (a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at p10b-handle-returned.bot:13:5: rejected -- not representable: the native coroutine#create
+    semantic: escapes to activation (result: the unit's value (at p10b-handle-returned.bot:12:8))
+    representable: no (the native coroutine#create)
+unit the coroutine of gen constructed at p10b-handle-returned.bot:13:5 -- no region: it may suspend: a region is never live across a suspension
+
+# What lowering emitted

@@ -797,6 +797,76 @@ first + r
     list [slVerdict $p <program>* 19 struct activation] [slReasons $p <program>* 19 struct activation]
 } -result {unknown message}
 
+test sl-error-let-through {an argument a callee may fail with escapes the caller when the caller lets that error through: mid's String reaches f's handler (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md's first soundness fix); where mid handles it, it stays mid's} -body {
+    set m {
+import std::int
+import std::str
+
+error PageNotFound:
+    uri: str
+
+fn fetch(uri: str) -> str errors PageNotFound:
+    if uri == "":
+        return "home"
+    fail PageNotFound {uri: uri}
+
+fn mid(uri: str) -> int errors PageNotFound:
+    std::str::length(fetch(std::str::concat(uri, "/x")))
+
+fn handled(uri: str) -> int:
+    r = fetch(std::str::concat(uri, "/y")):
+        on PageNotFound:
+            "none"
+    std::str::length(r)
+
+fn f(uri: str) -> str:
+    v = mid(uri):
+        on PageNotFound {uri: u}:
+            return u
+    std::int::to_string(v + handled(uri))
+
+f("/p")
+}
+    set p [slFacts $m]
+    list [slVerdict $p mid* 14 str activation] [slReasons $p mid* 14 str activation] \
+        [slVerdict $p handled* 17 str activation] \
+        [dict get [hir::lifetime::unit [lindex $p 1] [slUnit [lindex $p 1] mid*]] summary resultParams]
+} -result {escapes error confined 0}
+
+test sl-fresh-holds-parameter {a callee's fresh result holds what it is given without being it (a struct built around a String parameter): the caller's String escapes with the call's result (the second soundness fix)} -body {
+    set m {
+import std::int
+import std::str
+
+struct Box:
+    label: str
+    n: int
+
+fn wrap(s: str, n: int) -> Box:
+    Box {label: s, n: n}
+
+fn make(i: int) -> Box:
+    wrap(std::int::to_string(i).concat("!"), i)
+
+fn run(i: int) -> int:
+    b = make(i)
+    std::str::length(b.label)
+
+run(4)
+}
+    set p [slFacts $m]
+    list [slVerdict $p make* 13 str activation 1] [slVerdict $p make* 13 str activation 2] \
+        [slReasons $p make* 13 str activation 2] [slVerdict $p run* 16 struct activation]
+} -result {escapes escapes result confined}
+
+test sl-recursive-reasons-converge {a recursive component whose escape reason goes around its cycle -- the event-loop scenario's storm, which adopts a coroutine of itself into the loop's context -- converges: each escape keeps the first reason found, so the facts stop changing and so does their text (the third fix)} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot tests event-loop fairness.bot] -warnings off]
+    set facts [hir::lifetime::analyze $hir]
+    set storm [slUnit $facts storm<*]
+    set why [dict get $facts units $storm summary capEscape]
+    list [dict get $why category] [expr {[string length [dict get $why detail]] < 2000}]
+} -result {callee 1}
+
 test sl-recursion-swapped {a recursion whose result holds its second parameter only through its own recursive call (the arguments swapped): the fixpoint needs a second round, and the caller's String escapes} -body {
     set m {
 import std::int

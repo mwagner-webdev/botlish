@@ -1,0 +1,22 @@
+# p06-retained-aggregate (audit/storage-static-reuse/cases/p06-retained-aggregate.bot)
+
+unit <program>
+  call of collect (struct) at p06-retained-aggregate.bot:23:5: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at the end))
+  call of list (list) at p06-retained-aggregate.bot:24:1: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at the end))
+    representable: no (the native list)
+unit collect<int>
+  call of list (list) at p06-retained-aggregate.bot:14:40: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at p06-retained-aggregate.bot:13:11))
+    representable: no (the native list)
+  call of std::mutable_vector::from_list (mutvec) at p06-retained-aggregate.bot:14:9: rejected -- not representable: the native std::mutable_vector::from_list
+    semantic: escapes to activation (result: the unit's value (at p06-retained-aggregate.bot:13:11))
+    representable: no (the native std::mutable_vector::from_list)
+  call of std::int::to_string (str) at p06-retained-aggregate.bot:17:16: rejected -- not confined to its innermost region
+    semantic: escapes to iteration of the loop at p06-retained-aggregate.bot:16:5 (inherited: it is not confined to the activation)
+  Kept {first, count} (struct) at p06-retained-aggregate.bot:21:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at p06-retained-aggregate.bot:13:11))
+    representable: no (a struct (only Strings are placed))
+
+# What lowering emitted

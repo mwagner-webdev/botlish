@@ -23,7 +23,7 @@
 #
 # audit/storage-scratch/tools/mutate.tcl's mutants must be killed here.
 #
-# canary: covers hir/storageplan.tcl native/src/runtime/scratch.rs audit/storage-scratch/tools/measure.tcl audit/storage-scratch/tools/fuzz.tcl
+# canary: covers hir/storageplan.tcl hir/lifetime.tcl native/src/runtime/scratch.rs
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -298,6 +298,134 @@ carried(3) + pushed(3) + closure(3)() + pick(4) + pick(5)
     set result
 } -result {carried rejected pushed rejected closure rejected through rejected}
 
+test ss-plan-program-mutations {one confined String, used nine ways: returned through its fold, pushed into a vector that outlives its loop, captured by a closure the fold carries out, retained through a call that may return it, read after a yield, beside a second String, passed to a function value, stored into a context. The plan places it only where it stays confined to its iteration (the base and two coexisting Strings, in one region that never overlays them); every program agrees with and without scratch storage and on interp} -constraints ssNative -body {
+    set head {import std::int
+import std::str
+import std::mutable_vector
+import std::coroutine
+}
+    set variants [dict create \
+ base {fn f(n: int) -> int:
+    fold k from 0 to n with intermediate acc 0:
+        t = std::int::to_string(k).concat("x")
+        acc + std::str::length(t)
+
+f(5)
+} \
+ returned {fn f(n: int) -> str:
+    fold k from 0 to n with intermediate acc "":
+        t = std::int::to_string(k).concat("x")
+        t
+
+std::str::length(f(5))
+} \
+ collection {fn f(n: int) -> int:
+    v = std::mutable_vector::from_list([""])
+    loop k from 0 to n:
+        t = std::int::to_string(k).concat("x")
+        v.push(t)
+    std::mutable_vector::length(v)
+
+f(5)
+} \
+ closure {fn zero() -> int:
+    0
+
+fn f(n: int) -> int:
+    g = fold k from 0 to n with intermediate acc zero:
+        t = std::int::to_string(k).concat("x")
+        fn counted() -> int:
+            std::str::length(t)
+        counted
+    g()
+
+f(5)
+} \
+ retained {fn longer(a: str, b: str) -> str:
+    if std::str::length(b) > std::str::length(a):
+        b
+    else:
+        a
+
+fn f(n: int) -> int:
+    s = fold k from 0 to n with intermediate acc "":
+        t = std::int::to_string(k).concat("x")
+        longer(acc, t)
+    std::str::length(s)
+
+f(5)
+} \
+ yield {fn f(n: int) -> int:
+    fold k from 0 to n with intermediate acc 0:
+        t = std::int::to_string(k).concat("x")
+        yield k
+        acc + std::str::length(t)
+
+fn drive(n: int) -> int:
+    coroutine {step, first} = f(n)
+    first + step() + step()
+
+drive(5)
+} \
+ coexist {fn f(n: int) -> int:
+    fold k from 0 to n with intermediate acc 0:
+        t = std::int::to_string(k).concat("x")
+        u = std::int::to_string(k + 1).concat("y")
+        acc + std::str::length(t) + std::str::length(u)
+
+f(5)
+} \
+ unresolved {fn length_of(s: str) -> int:
+    std::str::length(s)
+
+fn twice_of(s: str) -> int:
+    2 * std::str::length(s)
+
+fn f(n: int, h: Fn{args: [str], return: int}) -> int:
+    fold k from 0 to n with intermediate acc 0:
+        t = std::int::to_string(k).concat("x")
+        acc + h(t)
+
+fn pick(n: int) -> int:
+    h = if n.mod(2) == 0:
+        length_of
+    else:
+        twice_of
+    f(n, h)
+
+pick(4) + pick(5)
+} \
+ context {context struct Journal:
+    entries: MutableVector[str]
+
+fn f(n: int, context j: Journal) -> int:
+    fold k from 0 to n with intermediate acc 0:
+        t = std::int::to_string(k).concat("x")
+        j.entries.push(t)
+        acc + std::str::length(t)
+
+with context Journal {entries: std::mutable_vector::from_list([""])}
+f(5)
+}]
+    set result {}
+    dict for {name body} $variants {
+        set hir [surface::compile $head$body -warnings off]
+        set plan [ssPlan $hir]
+        set sites {}
+        foreach id [hir::storageplan::units $plan] {
+            set u [hir::storageplan::unit $plan $id]
+            if {![string match f<* [dict get $u label]]} continue
+            dict for {site d} [dict get $u sites] {
+                if {[dict get $d native] eq "std::str::concat"} {
+                    lappend sites [list [dict get $d status] [dict get $d verdict] [lindex [dict get $d placement] 0]]
+                }
+            }
+        }
+        lappend result $name $sites [lindex [ssAgree $hir] 0]
+    }
+    set result
+} -result {base {{selected confined iteration}} same returned {{rejected escapes {}}} same collection {{rejected escapes {}}} same closure {{rejected unknown {}}} same retained {{rejected escapes {}}} same yield {{rejected confined {}}} same coexist {{selected confined iteration} {selected confined iteration}} same unresolved {{rejected unknown {}}} same context {{rejected escapes {}}} same}
+
 test ss-plan-recursive {a recursive function takes no destination (its leftovers would pile up in the outermost region); its activation-confined temporaries still get its own region, released at each activation's exit} -body {
     set hir [ssHir {import std::int
 import std::str
@@ -411,6 +539,19 @@ test ss-run-census {every census program: the same outcome with and without scra
     set result
 } -result {}
 
+test ss-run-stress-collects {under GC stress a String placed in scratch storage still collects first, as a heap allocation does: a stress run collects as often with scratch storage as without, so it still checks every root live across a String operation} -constraints ssNative -body {
+    set result {}
+    foreach case {p01 p13 p14} {
+        set hir [ssHir [list -case $case]]
+        lassign [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {
+            list [ssAlloc $hir -scratch-opt 0] [ssAlloc $hir]
+        }] off on
+        lappend result $case [expr {[dict get $off gc cycles] == [dict get $on gc cycles]}] \
+            [expr {[dict get [ssScratch $on] allocations] > 0}]
+    }
+    set result
+} -result {p01 1 1 p13 1 1 p14 1 1}
+
 test ss-run-heap-reduction {the heap allocations the plan removes, per census workload: p01 and p04 none left, p13 only its Request structs, p14 none} -constraints ssNative -body {
     set result {}
     foreach case {p01 p04 p13 p14} {
@@ -474,6 +615,65 @@ fold i from 0 to 100 with intermediate acc 0:
     list [expr {[dict get $s fallbackCapacity] > 0}] [expr {[dict get $report total allocations] > 0}] \
         [expr {$value eq [outcomeUnderHir interp $hir]}] [ssClean $report]
 } -result {1 1 1 {stale 0 protocol 0}}
+
+test ss-run-stress-variety {a long GC-stress run of mixed work: short Strings and Strings over the object limit alternating (every other one falls back to the heap), empty Strings, heap Strings kept across the loop between placed ones, nested calls, a failure handled every fifth call, chunks small enough to grow: the outcome is interp's at N = 60 and N = 240, and the storage reserved and in use is the same at both} -constraints ssNative -body {
+    set text {import std::int
+import std::str
+import std::mutable_vector
+
+error Odd:
+    n: int
+
+fn check(i: int) -> int errors Odd:
+    s = std::int::to_string(i).concat("?")
+    if i.mod(5) == 1:
+        fail Odd {n: std::str::length(s)}
+    std::str::length(s)
+
+fn step(i: int) -> int:
+    short = std::int::to_string(i)
+    big = std::str::substring("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz", 0, 2 + i.mod(2) * 40):
+        on LowerUnderrun:
+            "?"
+        on UpperOverrun:
+            "?"
+    empty = std::str::substring(short, 0, 0):
+        on LowerUnderrun:
+            "?"
+        on UpperOverrun:
+            "?"
+    c = check(i):
+        on Odd details:
+            details.n
+    std::str::length(short) + std::str::length(big) + std::str::length(empty) + c
+
+fn run(n: int) -> str:
+    kept = std::mutable_vector::from_list([""])
+    total = fold i from 0 to n with intermediate acc 0:
+        kept.push(std::int::to_string(i).concat(","))
+        acc + step(i)
+    joined = fold k from 0 to std::mutable_vector::length(kept) with intermediate out "":
+        item = std::mutable_vector::at(kept, k):
+            on IndexNotFound:
+                "?"
+        out.concat(item)
+    std::int::to_string(total).concat(":").concat(joined)
+
+std::str::length(run(@N@)) * 1000 + std::str::length(std::int::to_string(@N@))
+}
+    set limits {BOTLISH_NATIVE_SCRATCH_CHUNK 64 BOTLISH_NATIVE_SCRATCH_MAX_OBJECT 32 BOTLISH_NATIVE_GC_STRESS 1}
+    set result {}
+    set shape {}
+    foreach n {60 240} {
+        set hir [surface::compile [string map [list @N@ $n] $text] -warnings off]
+        set value [withEnvironment $limits {outcomeUnderHir cranelift $hir}]
+        set s [ssScratch [withEnvironment $limits {ssAlloc $hir}]]
+        lappend result [expr {$value eq [outcomeUnderHir interp $hir]}] [expr {[dict get $s fallbackLarge] >= $n / 2}] \
+            [dict get $s staleRoots] [dict get $s protocolErrors]
+        lappend shape [list [dict get $s reservations] [dict get $s peakReserved] [dict get $s peakOccupancy]]
+    }
+    lappend result [expr {[lindex $shape 0] eq [lindex $shape 1]}]
+} -result {1 1 0 0 1 1 0 0 1}
 
 test ss-run-exits {a loop region left by break, continue, an early return and a handled and a propagated failure: every outcome unchanged, poisoned and under GC stress, and the storage released (no occupancy left over the run's peak)} -constraints ssNative -body {
     set hir [surface::compile {import std::int
@@ -566,6 +766,187 @@ fold i from 0 to 300 with intermediate acc 0:
         [dict get [ssUnit $plan piece*] capable] [dict get [ssUnit $plan pieces*] capable] [dict get [ssUnit $plan depth*] recursive] \
         [dict get $report byKind String allocations] [ssClean $report]
 } -result {same 1 1 1 1 1 0 {stale 0 protocol 0}}
+
+test ss-run-request-cleared {a request whose helper allocates nothing (an empty substring, the canonical empty String) is cleared right after its helper: the next String, which outlives every region, stays on the heap} -constraints ssNative -body {
+    set hir [surface::compile {import std::int
+import std::str
+import std::mutable_vector
+
+fn run(n: int) -> str:
+    kept = std::mutable_vector::from_list(["k"])
+    loop i from 0 to n:
+        s = std::int::to_string(i * 11)
+        e = std::str::substring(s, 1, 1):
+            on LowerUnderrun:
+                "?"
+            on UpperOverrun:
+                "?"
+        kept.push(std::int::to_string(i + std::str::length(e)))
+    fold k from 0 to std::mutable_vector::length(kept) with intermediate out "":
+        item = std::mutable_vector::at(kept, k):
+            on IndexNotFound:
+                "?"
+        out.concat(item).concat(",")
+
+run(30)
+} -warnings off]
+    set agree [ssAgree $hir]
+    set stressed [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {outcomeUnderHir cranelift $hir}]
+    list [lindex $agree 0] [expr {$stressed eq [lindex $agree 1]}] [ssClean [ssAlloc $hir]]
+} -result {same 1 {stale 0 protocol 0}}
+
+test ss-run-inner-region {a String of an outer loop's region, read and kept in every iteration of an inner loop with a region of its own: each inner reset releases only the inner iteration's Strings, the outer String stays intact, poisoned and under GC stress} -constraints ssNative -body {
+    set hir [surface::compile {import std::int
+import std::str
+import std::mutable_vector
+
+fn run(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        a = std::int::to_string(i).concat("-a")
+        v = std::mutable_vector::from_list([""])
+        inner = fold j from 0 to 3 with intermediate b 0:
+            t = std::int::to_string(j * 5).concat("+")
+            v.push(a)
+            b + std::str::length(t) + std::str::length(a)
+        joined = fold k from 0 to std::mutable_vector::length(v) with intermediate out "":
+            item = std::mutable_vector::at(v, k):
+                on IndexNotFound:
+                    "?"
+            out.concat(item)
+        acc + std::str::length(joined) * 7 + inner
+
+run(30)
+} -warnings off]
+    set agree [ssAgree $hir]
+    set poisoned [withEnvironment {BOTLISH_NATIVE_SCRATCH_POISON 1} {outcomeUnderHir cranelift $hir}]
+    set stressed [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {outcomeUnderHir cranelift $hir}]
+    set u [ssUnit [ssPlan $hir] run*]
+    list [lindex $agree 0] [expr {$poisoned eq [lindex $agree 1]}] [expr {$stressed eq [lindex $agree 1]}] \
+        [llength [dict get $u loops]] [ssClean [ssAlloc $hir]]
+} -result {same 1 1 2 {stale 0 protocol 0}}
+
+test ss-run-error-steady {a framed function that fails on every other call, from a loop with no region of its own: its error exit releases what it placed, so the storage in use is the same at N = 40 and N = 400} -constraints ssNative -body {
+    set template {import std::int
+import std::str
+
+error Odd
+
+fn check(i: int) -> int errors Odd:
+    s = std::int::to_string(i).concat("?")
+    if i.mod(2) == 1:
+        fail Odd
+    std::str::length(s)
+
+fold i from 0 to @N@ with intermediate acc 0:
+    r = check(i):
+        on Odd:
+            0
+    acc + r
+}
+    set facts {}
+    foreach n {40 400} {
+        set s [ssScratch [ssAlloc [surface::compile [ssProgram $template $n] -warnings off]]]
+        lappend facts [list [dict get $s peakOccupancy] [dict get $s reservations] [expr {[dict get $s allocations] > 0}]]
+    }
+    list [expr {[lindex $facts 0] eq [lindex $facts 1]}] [lindex $facts 1]
+} -result {1 {64 1 1}}
+
+test ss-run-nested-loops-steady {each String goes to its innermost loop's region: an inner loop of N iterations inside an outer loop uses the same storage at N = 10 and N = 1000} -constraints ssNative -body {
+    set template {import std::int
+import std::str
+
+fn work(n: int) -> int:
+    fold i from 0 to 3 with intermediate acc 0:
+        fold j from 0 to n with intermediate b acc:
+            t = std::int::to_string(j + i)
+            b + std::str::length(t)
+
+work(@N@)
+}
+    set facts {}
+    foreach n {10 1000} {
+        set s [ssScratch [ssAlloc [surface::compile [ssProgram $template $n] -warnings off]]]
+        lappend facts [list [dict get $s peakOccupancy] [dict get $s reservations]]
+    }
+    list [expr {[lindex $facts 0] eq [lindex $facts 1]}] [lindex $facts 1]
+} -result {1 {32 1}}
+
+test ss-run-context-escape {a String a callee both returns and stores into a context: it escapes through the context, so the callee takes no destination for it and its caller's region never holds it, though the caller confines the result} -constraints ssNative -body {
+    set hir [surface::compile {import std::int
+import std::str
+import std::mutable_vector
+
+context struct Journal:
+    entries: MutableVector[str]
+
+fn note(i: int, context j: Journal) -> str:
+    s = std::int::to_string(i * 7).concat("#")
+    j.entries.push(s)
+    s
+
+fn count(i: int) -> int:
+    std::str::length(note(i))
+
+fn dump(context j: Journal) -> str:
+    fold k from 0 to std::mutable_vector::length(j.entries) with intermediate out "":
+        item = std::mutable_vector::at(j.entries, k):
+            on IndexNotFound:
+                "?"
+        out.concat(item)
+
+with context Journal {entries: std::mutable_vector::from_list(["start"])}
+total = fold i from 0 to 30 with intermediate acc 0:
+    t = std::int::to_string(i).concat(".")
+    acc + count(i) + std::str::length(t)
+dump().concat(std::int::to_string(total))
+} -warnings off]
+    set agree [ssAgree $hir]
+    set stressed [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {outcomeUnderHir cranelift $hir}]
+    set plan [ssPlan $hir]
+    list [lindex $agree 0] [expr {$stressed eq [lindex $agree 1]}] [dict get [ssUnit $plan note*] capable] [ssClean [ssAlloc $hir]]
+} -result {same 1 0 {stale 0 protocol 0}}
+
+test ss-run-dest-stale {a destination is the one call's: after a call that passed one, a direct call of the same instance whose result escapes passes none, and the callee builds that result on the heap; a call through a function value reaches an instance with no frame; the values kept past every region stay intact} -constraints ssNative -body {
+    set hir [surface::compile {import std::int
+import std::str
+import std::mutable_vector
+
+fn piece(i: int) -> str:
+    std::int::to_string(i).concat("/")
+
+fn other(i: int) -> str:
+    std::int::to_string(i * 2).concat("\\")
+
+fn used(i: int) -> int:
+    std::str::length(piece(i))
+
+fn through(f: Fn{args: [int], return: str}, i: int) -> str:
+    f(i)
+
+fn run(n: int) -> str:
+    kept = std::mutable_vector::from_list(["k"])
+    loop i from 0 to n:
+        t = std::int::to_string(i).concat("t")
+        u = used(i) + std::str::length(t)
+        chosen = if i.mod(2) == 0:
+            piece
+        else:
+            other
+        kept.push(through(chosen, u))
+        kept.push(piece(u + 1))
+    fold k from 0 to std::mutable_vector::length(kept) with intermediate out "":
+        item = std::mutable_vector::at(kept, k):
+            on IndexNotFound:
+                "?"
+        out.concat(item)
+
+run(30)
+} -warnings off]
+    set agree [ssAgree $hir]
+    set stressed [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {outcomeUnderHir cranelift $hir}]
+    set plan [ssPlan $hir]
+    list [lindex $agree 0] [expr {$stressed eq [lindex $agree 1]}] [dict get [ssUnit $plan piece*] capable] [ssClean [ssAlloc $hir]]
+} -result {same 1 1 {stale 0 protocol 0}}
 
 test ss-run-closures {Strings inside a closure called directly, a closure passed as a callback and a closure that escapes: each closure's own regions are its own; nothing it keeps is in scratch storage} -constraints ssNative -body {
     set hir [surface::compile {import std::int

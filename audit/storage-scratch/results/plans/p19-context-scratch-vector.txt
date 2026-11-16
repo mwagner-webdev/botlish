@@ -1,0 +1,18 @@
+# p19-context-scratch-vector (audit/storage-static-reuse/cases/p19-context-scratch-vector.bot)
+
+unit <program>
+  call of list (list) at p19-context-scratch-vector.bot:17:61: rejected -- not representable: the native list
+    semantic: escapes to activation (context: kept by context#install (at p19-context-scratch-vector.bot:17:1))
+    representable: no (the native list)
+  call of std::mutable_vector::from_list (mutvec) at p19-context-scratch-vector.bot:17:30: rejected -- not representable: the native std::mutable_vector::from_list
+    semantic: escapes to activation (context: kept by context#install (at p19-context-scratch-vector.bot:17:1))
+    representable: no (the native std::mutable_vector::from_list)
+  Scratch {cells} (struct) at p19-context-scratch-vector.bot:17:14: rejected -- not representable: a struct (only Strings are placed)
+    semantic: confined to activation
+    representable: no (a struct (only Strings are placed))
+  call of mutable_vector#share (struct) at p19-context-scratch-vector.bot:17:1: rejected -- not representable: the native mutable_vector#share
+    semantic: escapes to activation (context: kept by context#install (at p19-context-scratch-vector.bot:17:1))
+    representable: no (the native mutable_vector#share)
+unit handle<int>
+
+# What lowering emitted

@@ -1,0 +1,14 @@
+# p10-handle-moved (audit/storage-static-reuse/cases/p10-handle-moved.bot)
+
+unit <program>
+  call of coroutine#create (coroutine) at p10-handle-moved.bot:15:1: rejected -- not representable: the native coroutine#create
+    semantic: confined to activation
+    representable: no (the native coroutine#create)
+  call of list (list) at p10-handle-moved.bot:18:1: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at the end))
+    representable: no (the native list)
+unit gen<int> -- no region: it may suspend: a region is never live across a suspension
+unit advance<coroutine>
+unit the coroutine of gen constructed at p10-handle-moved.bot:15:1 -- no region: it may suspend: a region is never live across a suspension
+
+# What lowering emitted

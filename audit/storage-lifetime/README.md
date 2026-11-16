@@ -30,3 +30,13 @@ tclsh9.0 bench/storage-lifetime.tcl
 
 Every tool is deterministic (the oracle's programs are a function of the
 seed); only the benchmark's times vary run to run.
+
+The facts' first consumer, native scratch storage
+(STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md), has checks of its own in
+`../storage-scratch/`: the oracle here checks the facts, never a storage
+implementation, so the storage mechanism -- the plan, its lowering, the
+provider and the collector -- is checked there by a differential fuzzer
+under GC stress and poisoning, and by mutants of each part. The three
+facts that milestone fixed are tests of `tests/storage-lifetime.test`
+(`sl-error-let-through`, `sl-fresh-holds-parameter`,
+`sl-recursive-reasons-converge`).

@@ -1,0 +1,274 @@
+# Mutants of compiler-managed scratch storage (STORAGE-COMPILER-MANAGED-
+# SCRATCH-MILESTONE-1.md; audit/storage-scratch/tools/mutate.tcl): one
+# broken rule each -- of the storage-use plan (hir/storageplan.tcl), its
+# realization in native lowering (native/lower.tcl's "Scratch storage"), the
+# storage provider (native/src/runtime/scratch.rs), the collector's
+# treatment of scratch storage (heap.rs), the code generator's request and
+# destination (codegen/clif.rs), the NIR protocol (nir.rs), and the three
+# lifetime facts the integration fixed (hir/lifetime.tcl). Each must be
+# killed by a detector its `!!` line names: a test of
+# tests/scratch-storage.test (ss-...) or tests/storage-lifetime.test
+# (sl-...), the differential fuzzer (fuzz) or the Rust tests (rust).
+#
+# One mutant considered is not here because no program can kill it: an
+# instruction at a use of a String's binding taken as the site's even where
+# the use runs in a deeper loop (native/lower.tcl's ScratchLoopOf check).
+# Lowering materializes a binding that a deeper loop reads before that loop
+# (eagerly, at the binding), never inside it, so the check never rejects an
+# instruction today; it stays as a guard for a lowering that would defer
+# across a loop (the report, section 19).
+#
+#   @@ NAME DESCRIPTION
+#   !! DETECTOR ...
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# The plan
+
+@@ plan-any-verdict every site is taken as confined to its innermost region, whatever its verdict: Strings that escape are placed in storage their region releases
+!! ss-plan-escapes ss-run-dest-stale fuzz
+## hir/storageplan.tcl
+<<<<
+    if {[dict get $v verdict] eq "confined" && [dict get [dict get $verdicts segment] verdict] eq "confined"} {
+====
+    if {1} {
+>>>>
+
+@@ plan-result-any-reason a site that escapes for any reason (a context, a module, a yield) is taken as escaping only through its unit's result: its callers' regions hold what outlives them
+!! ss-run-context-escape
+## hir/storageplan.tcl
+<<<<
+            && [lsearch -not -exact [lmap r [dict get $act reasons] {dict get $r category}] result] < 0} {
+====
+            } {
+>>>>
+
+@@ plan-outermost-region a site in nested loops is placed in its outermost loop's region, not its innermost: an inner loop's Strings pile up until the outer iteration ends
+!! ss-run-nested-loops-steady
+## hir/storageplan.tcl
+<<<<
+    set region [if {[llength $loops]} {list iteration [lindex $loops end]} else {string cat activation}]
+====
+    set region [if {[llength $loops]} {list iteration [lindex $loops 0]} else {string cat activation}]
+>>>>
+
+@@ plan-suspending-unit a unit that may suspend gets regions: a region would be live across a suspension, its storage reset by whoever runs next
+!! ss-plan-p07b-suspension
+## hir/storageplan.tcl
+<<<<
+        } elseif {[llength [dict get $u suspensions]]} {
+            dict set blocked $id "it may suspend: a region is never live across a suspension"
+        }
+====
+        }
+>>>>
+
+@@ plan-recursive-destination a recursive unit takes a destination: every activation's leftovers would stay in the outermost region
+!! ss-plan-recursive
+## hir/storageplan.tcl
+<<<<
+        if {[dict exists $blocked $id] || [dict get [hir::lifetime::unit $facts $id] block] eq "program"
+                || [dict exists $recursive $id]} {
+====
+        if {[dict exists $blocked $id] || [dict get [hir::lifetime::unit $facts $id] block] eq "program"} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The lowering
+
+@@ lower-no-exit-reset a framed function's `ret` keeps its region: what each call placed stays in scratch storage after it returns
+!! ss-run-steady-state ss-nir-frame
+## native/lower.tcl
+<<<<
+        if {[regexp {^\s+ret\M} $line]} {
+            lappend out "    [NewReg fn] = $exit"
+        }
+====
+>>>>
+
+@@ lower-no-error-exit-reset a framed function's error exit keeps its region: every failing call leaves what it placed
+!! ss-run-error-steady
+## native/lower.tcl
+<<<<
+    lappend out "  label $label" "    poperrorexit" "    [NewReg fn] = $exit" "    reraise"
+====
+    lappend out "  label $label" "    poperrorexit" "    reraise"
+>>>>
+
+@@ lower-no-head-reset a counted loop's head does not reset its region: every iteration's Strings stay until the loop ends
+!! ss-run-steady-state ss-run-nested-loops-steady ss-nir-loop
+## native/lower.tcl
+<<<<
+    EmitLabel fn $head
+    ScratchLoopReset fn $e
+    set cmp [Assign fn "op $compareOp $idxReg $endReg" $e]
+====
+    EmitLabel fn $head
+    set cmp [Assign fn "op $compareOp $idxReg $endReg" $e]
+>>>>
+
+@@ lower-inner-reset-outer-mark an inner loop's reset restores the mark of the first region the function marked (its enclosing loop's): every inner iteration releases the outer iteration's Strings while they are still read
+!! ss-run-inner-region
+## native/lower.tcl
+<<<<
+    Assign fn "op scratchreset [dict get $fn scratch loopMarks $e]" $e
+====
+    Assign fn "op scratchreset [lindex [dict values [dict get $fn scratch loopMarks]] 0]" $e
+>>>>
+
+@@ lower-dest-as-one a site that escapes through its unit's result is always placed in scratch storage, whether or not the caller gave a destination
+!! ss-run-dest-stale fuzz
+## native/lower.tcl
+<<<<
+        set value [if {[dict get $d request] eq "dest"} {string cat dest} else {string cat one}]
+====
+        set value one
+>>>>
+
+# ---------------------------------------------------------------------------
+# The storage provider, the collector, the code generator, the protocol
+
+@@ rt-reset-ignored a reset moves the position nowhere: no region's storage is ever reused
+!! rust ss-run-steady-state
+## native/src/runtime/scratch.rs
+<<<<
+        self.cur = c;
+        self.pos = p;
+        self.base = self.chunks[..c].iter().map(|k| k.fill).sum();
+====
+        let _ = (c, p);
+>>>>
+
+@@ rt-bump-no-advance an allocation does not advance the position: every String of a region is placed over the previous one
+!! rust ss-run-heap-reduction ss-run-census
+## native/src/runtime/scratch.rs
+<<<<
+        self.pos = at + size;
+====
+        self.pos = at;
+>>>>
+
+@@ rt-exit-ignores-dest a framed function's exit resets its region whether or not its caller gave it a destination: the String it returns into its caller's region is released as it returns
+!! ss-run-nested ss-run-census fuzz
+## native/src/runtime/scratch.rs
+<<<<
+    if dest != make_small(1) {
+        rt_scratch_reset(p, mark);
+    }
+====
+    let _ = dest;
+    rt_scratch_reset(p, mark);
+>>>>
+
+@@ rt-grow-replaces-live a growth also replaces the current chunk, which holds the live objects of every open region: they are freed and the region's bytes moved
+!! rust ss-run-growth
+## native/src/runtime/scratch.rs
+<<<<
+                let cap = (self.chunks[self.cur].cap * 2).max(size).max(self.first_chunk);
+                if !self.reserve_at(next, cap, stats) {
+====
+                let cap = (self.chunks[self.cur].cap * 2).max(size).max(self.first_chunk);
+                let same = self.chunks[self.cur].cap;
+                self.reserve_at(self.cur, same, stats);
+                if !self.reserve_at(next, cap, stats) {
+>>>>
+
+@@ rt-stress-no-collect under GC stress a placement in scratch storage does not collect first: a stress run no longer collects at the String operations the plan placed, so no longer checks the roots live across them
+!! ss-run-stress-collects
+## native/src/runtime/vm.rs
+<<<<
+        if self.heap.stress() {
+            self.collect();
+        }
+        let site = self.alloc_site;
+        match self.heap.scratch.alloc(size, &mut self.metrics.scratch) {
+====
+        let site = self.alloc_site;
+        match self.heap.scratch.alloc(size, &mut self.metrics.scratch) {
+>>>>
+
+@@ rt-collector-reads-scratch the collector reads a scratch object as a heap object: it marks it (a mark nothing clears) and would misread a released one
+!! rust
+## native/src/runtime/heap.rs
+<<<<
+            if self.scratch.contains(v) {
+====
+            if false && self.scratch.contains(v) {
+>>>>
+
+@@ clif-request-not-cleared a request stays set after its helper returns: a helper that allocated nothing leaves it for the next String, which outlives the region
+!! ss-run-request-cleared
+## native/src/codegen/clif.rs
+<<<<
+        if request.is_some() {
+            let zero = self.b.ins().iconst(types::I32, 0);
+            self.b.ins().store(MemFlagsData::trusted(), zero, self.vm, VM_SCRATCH_REQUEST_OFFSET);
+        }
+====
+>>>>
+
+@@ clif-dest-not-cleared a destination outlives its call: the callee does not clear it and neither does the caller, so a later call through a function value reads one it was never given
+!! ss-run-dest-stale
+## native/src/codegen/clif.rs
+<<<<
+                let word = self.b.ins().load(types::I32, MemFlagsData::trusted(), self.vm, VM_SCRATCH_DEST_OFFSET);
+                let zero = self.b.ins().iconst(types::I32, 0);
+                self.b.ins().store(MemFlagsData::trusted(), zero, self.vm, VM_SCRATCH_DEST_OFFSET);
+====
+                let word = self.b.ins().load(types::I32, MemFlagsData::trusted(), self.vm, VM_SCRATCH_DEST_OFFSET);
+>>>>
+<<<<
+                if dest {
+                    self.clear_scratch_dest();
+                }
+====
+>>>>
+
+@@ nir-protocol-unchecked the NIR validator accepts any request and any destination
+!! rust ss-nir-validator
+## native/src/nir.rs
+<<<<
+fn validate_scratch(program: &Program, f: &Function) -> Result<(), String> {
+    for (i, inst) in f.body.iter().enumerate() {
+====
+fn validate_scratch(program: &Program, f: &Function) -> Result<(), String> {
+    let _ = program;
+    for (i, inst) in f.body.iter().enumerate().take(0) {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The lifetime facts the integration fixed (hir/lifetime.tcl)
+
+@@ lifetime-error-let-through an error a call lets through carries nothing out of the unit: an argument the callee fails with is taken as confined to the caller
+!! sl-error-let-through fuzz
+## hir/lifetime.tcl
+<<<<
+        set perr xp:$e
+====
+        set perr ""
+>>>>
+
+@@ lifetime-fresh-holds-nothing a callee's fresh result holds nothing it was given: a String inside a struct the callee builds around it is taken as confined to the caller
+!! sl-fresh-holds-parameter fuzz
+## hir/lifetime.tcl
+<<<<
+                            if {$fresh && [Add contents o:$e $r]} { set changed 1 }
+                        }
+                        incr i
+====
+                        }
+                        incr i
+>>>>
+
+@@ lifetime-reasons-grow a recursive component's escape reasons are the latest found: their text grows a step every round around the cycle and the summaries never converge
+!! sl-recursive-reasons-converge
+## hir/lifetime.tcl
+<<<<
+                    set s [KeepReasons [dict get $summaries $id] $s]
+====
+>>>>

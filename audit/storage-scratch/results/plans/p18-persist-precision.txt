@@ -1,0 +1,17 @@
+# p18-persist-precision (audit/storage-static-reuse/cases/p18-persist-precision.bot)
+
+unit <program>
+  call of coroutine#create (coroutine) at p18-persist-precision.bot:18:1: rejected -- not representable: the native coroutine#create
+    semantic: confined to activation
+    representable: no (the native coroutine#create)
+  call of coroutine#create (coroutine) at p18-persist-precision.bot:19:1: rejected -- not representable: the native coroutine#create
+    semantic: confined to activation
+    representable: no (the native coroutine#create)
+  call of list (list) at p18-persist-precision.bot:20:1: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at the end))
+    representable: no (the native list)
+unit worker<int, bool> -- no region: it may suspend: a region is never live across a suspension
+unit the coroutine of worker constructed at p18-persist-precision.bot:18:1 -- no region: it may suspend: a region is never live across a suspension
+unit the coroutine of worker constructed at p18-persist-precision.bot:19:1 -- no region: it may suspend: a region is never live across a suspension
+
+# What lowering emitted

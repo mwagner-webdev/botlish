@@ -1,0 +1,20 @@
+# p17-explicit-return (audit/storage-static-reuse/cases/p17-explicit-return.bot)
+
+unit <program>
+  call of bare (struct) at p17-explicit-return.bot:18:9: rejected -- its callee takes no destination: nothing it returns can be placed in its caller's region
+    semantic: confined to iteration of the fold at p17-explicit-return.bot:17:5
+  call of explicit (struct) at p17-explicit-return.bot:21:9: rejected -- its callee takes no destination: nothing it returns can be placed in its caller's region
+    semantic: confined to iteration of the fold at p17-explicit-return.bot:20:5
+  call of list (list) at p17-explicit-return.bot:23:1: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at the end))
+    representable: no (the native list)
+unit bare<int>
+  P {x, y} (struct) at p17-explicit-return.bot:12:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at p17-explicit-return.bot:11:8))
+    representable: no (a struct (only Strings are placed))
+unit explicit<int>
+  P {x, y} (struct) at p17-explicit-return.bot:15:12: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: returned (at p17-explicit-return.bot:15:5))
+    representable: no (a struct (only Strings are placed))
+
+# What lowering emitted

@@ -1,0 +1,748 @@
+# p12-actor-messages (audit/storage-static-reuse/cases/p12-actor-messages.bot)
+
+unit <program>
+  call of std::event_loop::create (struct) at p12-actor-messages.bot:64:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (context: kept by context#install (at p12-actor-messages.bot:64:1))
+  call of mutable_vector#share (struct) at p12-actor-messages.bot:64:1: rejected -- not representable: the native mutable_vector#share
+    semantic: escapes to activation (context: kept by context#install (at p12-actor-messages.bot:64:1))
+    representable: no (the native mutable_vector#share)
+  call of std::event_loop::deterministic::create (struct) at p12-actor-messages.bot:65:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (context: kept by context#install (at p12-actor-messages.bot:65:1))
+  call of mutable_vector#share (struct) at p12-actor-messages.bot:65:1: rejected -- not representable: the native mutable_vector#share
+    semantic: escapes to activation (context: kept by context#install (at p12-actor-messages.bot:65:1))
+    representable: no (the native mutable_vector#share)
+  call of std::actor::create (struct) at p12-actor-messages.bot:66:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (context: kept by context#install (at p12-actor-messages.bot:66:1))
+  call of mutable_vector#share (struct) at p12-actor-messages.bot:66:1: rejected -- not representable: the native mutable_vector#share
+    semantic: escapes to activation (context: kept by context#install (at p12-actor-messages.bot:66:1))
+    representable: no (the native mutable_vector#share)
+  call of main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (list) at p12-actor-messages.bot:67:1: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at the end))
+  call of list (list) at p12-actor-messages.bot:69:9: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at the end))
+    representable: no (the native list)
+  call of list (list) at p12-actor-messages.bot:71:9: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at the end))
+    representable: no (the native list)
+  call of list (list) at p12-actor-messages.bot:73:9: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at the end))
+    representable: no (the native list)
+unit std::event_loop::no_tasks<generic>
+  call of list (list) at event_loop.bot:422:36: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:421:20))
+    representable: no (the native list)
+  call of std::mutable_vector::from_list (mutvec) at event_loop.bot:422:5: rejected -- not representable: the native std::mutable_vector::from_list
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:421:20))
+    representable: no (the native std::mutable_vector::from_list)
+unit std::event_loop::no_ints<generic>
+  call of list (list) at event_loop.bot:425:36: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:424:19))
+    representable: no (the native list)
+  call of std::mutable_vector::from_list (mutvec) at event_loop.bot:425:5: rejected -- not representable: the native std::mutable_vector::from_list
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:424:19))
+    representable: no (the native std::mutable_vector::from_list)
+unit std::event_loop::no_strs<generic>
+  call of list (list) at event_loop.bot:428:36: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:427:19))
+    representable: no (the native list)
+  call of std::mutable_vector::from_list (mutvec) at event_loop.bot:428:5: rejected -- not representable: the native std::mutable_vector::from_list
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:427:19))
+    representable: no (the native std::mutable_vector::from_list)
+unit std::event_loop::registers<int, int>
+  loop (list) at event_loop.bot:431:15: rejected -- not representable: a list (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:430:30))
+    representable: no (a list (only Strings are placed))
+  call of std::mutable_array::from_list (mutarray) at event_loop.bot:440:5: rejected -- not representable: the native std::mutable_array::from_list
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:430:30))
+    representable: no (the native std::mutable_array::from_list)
+unit std::event_loop::create<int, bool>
+  call of std::event_loop::no_tasks (mutvec) at event_loop.bot:454:19: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:454:44: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_tasks (mutvec) at event_loop.bot:455:20: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:455:46: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_tasks (mutvec) at event_loop.bot:456:17: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:456:40: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:457:16: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:457:35: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:458:15: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:458:34: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:459:17: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:459:36: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:460:15: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:461:20: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:461:46: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:462:19: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_ints (mutvec) at event_loop.bot:462:40: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::registers (mutarray) at event_loop.bot:463:13: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  call of std::event_loop::no_strs (mutvec) at event_loop.bot:463:47: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+  std::event_loop::Loop {ready_in, ready_in_id, ready_out, ready_out_id, parked, parked_id, tasks, t_free, regs, r_free, events, e_free, heap, observers, observer_gens, releases, outcomes, st, trace} (struct) at event_loop.bot:453:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:444:10))
+    representable: no (a struct (only Strings are placed))
+unit std::event_loop::set_reg<int, int>
+unit std::event_loop::bump<int>
+unit std::event_loop::rget<int, int>
+unit std::event_loop::rset<int, int, int>
+unit std::event_loop::tget<int, int>
+unit std::event_loop::tset<int, int, int>
+unit std::event_loop::tracing_on?<generic>
+unit std::event_loop::cat<str, int>
+  call of std::int::to_string (str) at event_loop.bot:492:17: rejected -- it escapes through the result, and no caller gives this unit a destination
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:491:24))
+  call of std::str::concat (str) at event_loop.bot:492:5: rejected -- it escapes through the result, and no caller gives this unit a destination
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:491:24))
+unit std::event_loop::note<str>
+  call of std::event_loop::cat (str) at event_loop.bot:495:19: rejected -- not confined to its innermost region
+    semantic: escapes to activation (context: context-owned state (installed for the run))
+  call of std::str::concat (str) at event_loop.bot:495:19: rejected -- not confined to its innermost region
+    semantic: escapes to activation (context: context-owned state (installed for the run))
+  call of std::str::concat (str) at event_loop.bot:495:19: rejected -- not confined to its innermost region
+    semantic: escapes to activation (context: context-owned state (installed for the run))
+unit std::event_loop::reg_of<int>
+unit std::event_loop::owned_checked?<int>
+unit std::event_loop::owned?<int>
+unit std::event_loop::ready_count<generic>
+unit std::event_loop::record_outcome<int, int, int>
+unit std::event_loop::ending_of<int>
+unit std::event_loop::outcomes_checked<generic>
+  loop (list) at event_loop.bot:605:11: rejected -- not representable: a list (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:603:28))
+    representable: no (a list (only Strings are placed))
+  std::event_loop::Outcome {task, ending, value} (struct) at event_loop.bot:608:9: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to iteration of the loop at event_loop.bot:605:11 (inherited: it is not confined to the activation)
+    representable: no (a struct (only Strings are placed))
+unit std::event_loop::take_outcomes<generic>
+  call of std::event_loop::outcomes_checked (list) at event_loop.bot:616:5: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:615:17))
+unit std::event_loop::new_task<generic>
+unit std::event_loop::retire_task<int>
+unit std::event_loop::push_ready<coroutine, int, int, int, int, int, int, int>
+unit std::event_loop::refill<generic>
+unit std::event_loop::front_ready<generic>
+unit std::event_loop::pop_ready<generic>
+unit std::event_loop::complete<int, int>
+unit std::event_loop::unpark<int>
+unit std::event_loop::pop_waiter<int>
+unit std::event_loop::earlier?<int, int>
+unit std::event_loop::heap_put<int, int>
+unit std::event_loop::sift_up<int> -- no region: it makes a self tail call (its frame is reused)
+unit std::event_loop::sift_down<int> -- no region: it makes a self tail call (its frame is reused)
+unit std::event_loop::heap_insert<int>
+unit std::event_loop::heap_remove<int>
+unit std::event_loop::next_deadline<generic>
+unit std::event_loop::new_reg<int, int, int, int>
+  std::event_loop::Reg {slot, gen} (struct) at event_loop.bot:825:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:793:28))
+    representable: no (a struct (only Strings are placed))
+unit std::event_loop::in_table?<int>
+unit std::event_loop::live_checked?<std::event_loop::Reg>
+unit std::event_loop::live?<std::event_loop::Reg>
+unit std::event_loop::delivery_code<enum>
+unit std::event_loop::least_one<int>
+unit std::event_loop::trace_reg<str, std::event_loop::Reg>
+  call of std::event_loop::cat (str) at event_loop.bot:867:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:867:9))
+  call of std::event_loop::cat (str) at event_loop.bot:867:41: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:867:9))
+  call of std::str::concat (str) at event_loop.bot:867:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:867:9))
+unit std::event_loop::timer_checked<int, int>
+  call of std::event_loop::new_reg (struct) at event_loop.bot:870:11: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at event_loop.bot:870:11); result: the unit's value (at event_loop.bot:869:34))
+  call of std::event_loop::cat (str) at event_loop.bot:874:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:874:9))
+  call of std::event_loop::cat (str) at event_loop.bot:874:45: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:874:9))
+  call of std::str::concat (str) at event_loop.bot:874:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:874:9))
+  call of std::event_loop::cat (str) at event_loop.bot:874:75: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:874:9))
+  call of std::str::concat (str) at event_loop.bot:874:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:874:9))
+unit std::event_loop::timer<int, int>
+  call of std::event_loop::timer_checked (struct) at event_loop.bot:884:5: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:883:18))
+unit std::event_loop::channel_checked<int, int>
+  call of std::event_loop::new_reg (struct) at event_loop.bot:917:11: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at event_loop.bot:917:11); result: the unit's value (at event_loop.bot:916:36))
+unit std::event_loop::channel<enum, int>
+  call of std::event_loop::channel_checked (struct) at event_loop.bot:924:5: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:923:20))
+unit std::event_loop::free_reg<int>
+unit std::event_loop::schedule_release<int>
+unit std::event_loop::release_if_room<int>
+unit std::event_loop::revoke_slot<std::event_loop::Reg>
+  call of std::event_loop::cat (str) at event_loop.bot:979:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:979:13))
+  call of std::event_loop::cat (str) at event_loop.bot:996:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:996:9))
+  call of std::event_loop::cat (str) at event_loop.bot:996:42: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:996:9))
+  call of std::str::concat (str) at event_loop.bot:996:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:996:9))
+unit std::event_loop::revoke_checked<std::event_loop::Reg>
+  call of std::event_loop::cat (str) at event_loop.bot:1010:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1010:13))
+unit std::event_loop::revoke<std::event_loop::Reg>
+unit std::event_loop::enqueue<int, int, int, int>
+unit std::event_loop::deliver<int, int, int, int>
+  call of std::event_loop::cat (str) at event_loop.bot:1134:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1134:13))
+  call of std::event_loop::cat (str) at event_loop.bot:1134:56: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1134:13))
+  call of std::str::concat (str) at event_loop.bot:1134:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1134:13))
+  call of std::event_loop::cat (str) at event_loop.bot:1142:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1142:13))
+  call of std::event_loop::cat (str) at event_loop.bot:1165:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1165:13))
+unit std::event_loop::posted_of<int>
+unit std::event_loop::post_checked<std::event_loop::Reg, int, int>
+unit std::event_loop::post<std::event_loop::Reg, int, int>
+unit std::event_loop::doubling<int, int, int> -- no region: it makes a self tail call (its frame is reused)
+unit std::event_loop::largest_multiple<int, int, int, int, int> -- no region: it makes a self tail call (its frame is reused)
+unit std::event_loop::periods_due<int, int, int>
+unit std::event_loop::spend_timer<int>
+unit std::event_loop::fire_timer<int, int>
+  call of std::event_loop::cat (str) at event_loop.bot:1276:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1276:13))
+  call of std::event_loop::cat (str) at event_loop.bot:1276:45: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1276:13))
+  call of std::str::concat (str) at event_loop.bot:1276:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1276:13))
+  call of std::event_loop::cat (str) at event_loop.bot:1276:89: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1276:13))
+  call of std::str::concat (str) at event_loop.bot:1276:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1276:13))
+  call of std::event_loop::cat (str) at event_loop.bot:1286:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1286:9))
+  call of std::event_loop::cat (str) at event_loop.bot:1286:41: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1286:9))
+  call of std::str::concat (str) at event_loop.bot:1286:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1286:9))
+  call of std::str::concat (str) at event_loop.bot:1286:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1286:9))
+unit std::event_loop::expire_timers<int>
+unit std::event_loop::take_queued<coroutine, int, int, int>
+unit std::event_loop::park<coroutine, int, int>
+unit std::event_loop::after_segment<coroutine, int, int>
+unit std::event_loop::complete_at_start<coroutine, int, int>
+  call of std::event_loop::cat (str) at event_loop.bot:1389:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1389:9))
+  call of std::event_loop::cat (str) at event_loop.bot:1389:54: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1389:9))
+  call of std::str::concat (str) at event_loop.bot:1389:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1389:9))
+unit std::event_loop::adopt_checked<coroutine, int>
+  call of std::event_loop::cat (str) at event_loop.bot:1398:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1398:13))
+  call of std::event_loop::cat (str) at event_loop.bot:1398:64: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1398:13))
+  call of std::str::concat (str) at event_loop.bot:1398:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1398:13))
+unit std::event_loop::adopt<coroutine, int>
+unit std::event_loop::yield_now<generic> -- no region: it may suspend: a region is never live across a suspension
+unit std::event_loop::wake_of<int>
+unit std::event_loop::wait<std::event_loop::Reg> -- no region: it may suspend: a region is never live across a suspension
+  std::event_loop::Event {reason, a, b, count} (struct) at event_loop.bot:1443:16: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: returned (at event_loop.bot:1443:9))
+    representable: no (a struct (only Strings are placed))
+  std::event_loop::Event {reason, a, b, count} (struct) at event_loop.bot:1445:5: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:1441:8))
+    representable: no (a struct (only Strings are placed))
+unit std::event_loop::task_failed<int, int, int, str>
+  call of std::event_loop::cat (str) at event_loop.bot:1497:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1497:9))
+  call of std::str::concat (str) at event_loop.bot:1497:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1497:9))
+  call of std::str::concat (str) at event_loop.bot:1497:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1497:9))
+unit std::event_loop::run_task<coroutine, int>
+  call of std::event_loop::cat (str) at event_loop.bot:1513:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1513:13))
+  call of std::event_loop::cat (str) at event_loop.bot:1513:75: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1513:13))
+  call of std::str::concat (str) at event_loop.bot:1513:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1513:13))
+  call of std::event_loop::cat (str) at event_loop.bot:1547:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1547:9))
+  call of std::event_loop::cat (str) at event_loop.bot:1547:58: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1547:9))
+  call of std::str::concat (str) at event_loop.bot:1547:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1547:9))
+  call of std::event_loop::cat (str) at event_loop.bot:1550:38: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::task_failed<int, int, int, str>'s parameter text: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1550:13))
+  call of std::event_loop::cat (str) at event_loop.bot:1560:38: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::task_failed<int, int, int, str>'s parameter text: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1560:13))
+  call of std::event_loop::cat (str) at event_loop.bot:1565:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1565:13))
+  call of std::event_loop::cat (str) at event_loop.bot:1565:58: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1565:13))
+  call of std::str::concat (str) at event_loop.bot:1565:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1565:13))
+unit std::event_loop::accept_record<int, int, int, int>
+  call of std::event_loop::cat (str) at event_loop.bot:1578:18: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1578:13))
+unit std::event_loop::compact_observers<generic>
+unit std::event_loop::observe<generic>
+unit std::event_loop::live_work?<generic>
+unit std::event_loop::abandon_checked<generic>
+  call of std::event_loop::cat (str) at event_loop.bot:1807:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1807:9))
+unit std::event_loop::revoke_all<generic>
+  loop (list) at event_loop.bot:1823:5: rejected -- not representable: a list (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at event_loop.bot:1822:22))
+    representable: no (a list (only Strings are placed))
+  std::event_loop::Reg {slot, gen} (struct) at event_loop.bot:1825:25: rejected -- not representable: a struct (only Strings are placed)
+    semantic: confined to iteration of the loop at event_loop.bot:1823:5
+    representable: no (a struct (only Strings are placed))
+unit std::actor::ints<generic>
+  call of list (list) at actor.bot:261:36: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at actor.bot:260:16))
+    representable: no (the native list)
+  call of std::mutable_vector::from_list (mutvec) at actor.bot:261:5: rejected -- not representable: the native std::mutable_vector::from_list
+    semantic: escapes to activation (result: the unit's value (at actor.bot:260:16))
+    representable: no (the native std::mutable_vector::from_list)
+unit std::actor::regs<generic>
+  call of list (list) at actor.bot:264:36: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at actor.bot:263:16))
+    representable: no (the native list)
+  call of std::mutable_vector::from_list (mutvec) at actor.bot:264:5: rejected -- not representable: the native std::mutable_vector::from_list
+    semantic: escapes to activation (result: the unit's value (at actor.bot:263:16))
+    representable: no (the native std::mutable_vector::from_list)
+unit std::actor::values<generic>
+  call of list (list) at actor.bot:267:36: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at actor.bot:266:18))
+    representable: no (the native list)
+  call of std::mutable_vector::from_list (mutvec) at actor.bot:267:5: rejected -- not representable: the native std::mutable_vector::from_list
+    semantic: escapes to activation (result: the unit's value (at actor.bot:266:18))
+    representable: no (the native std::mutable_vector::from_list)
+unit std::actor::create<generic>
+  call of std::actor::ints (mutvec) at actor.bot:272:16: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at actor.bot:270:10))
+  call of std::actor::ints (mutvec) at actor.bot:272:34: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at actor.bot:270:10))
+  call of std::actor::regs (mutvec) at actor.bot:272:48: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at actor.bot:270:10))
+  call of std::actor::regs (mutvec) at actor.bot:272:62: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at actor.bot:270:10))
+  call of std::actor::values (mutvec) at actor.bot:273:19: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at actor.bot:270:10))
+  call of std::actor::ints (mutvec) at actor.bot:273:36: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at actor.bot:270:10))
+  call of std::actor::ints (mutvec) at actor.bot:273:55: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at actor.bot:270:10))
+  call of std::actor::ints (mutvec) at actor.bot:274:17: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at actor.bot:270:10))
+  call of std::actor::ints (mutvec) at actor.bot:274:37: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at actor.bot:270:10))
+  call of std::mutable_array::create (mutarray) at actor.bot:275:19: rejected -- not representable: the native std::mutable_array::create
+    semantic: escapes to activation (result: the unit's value (at actor.bot:270:10))
+    representable: no (the native std::mutable_array::create)
+  std::actor::Actors {boxes, box_free, wake, room, payloads, links, pool_free, actors, actor_free, counters} (struct) at actor.bot:271:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at actor.bot:270:10))
+    representable: no (a struct (only Strings are placed))
+unit std::actor::request<int, int, int, int, int>
+  std::actor::Exit {op, slot, gen, value, payload} (struct) at actor.bot:282:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at actor.bot:281:28))
+    representable: no (a struct (only Strings are placed))
+unit std::actor::request<int, int, int, int, Req>
+  std::actor::Exit {op, slot, gen, value, payload} (struct) at actor.bot:282:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at actor.bot:281:28))
+    representable: no (a struct (only Strings are placed))
+unit std::actor::request<int, int, int, int, Resp>
+  std::actor::Exit {op, slot, gen, value, payload} (struct) at actor.bot:282:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at actor.bot:281:28))
+    representable: no (a struct (only Strings are placed))
+unit std::actor::exit<int>
+  call of std::actor::request (struct) at actor.bot:286:5: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at actor.bot:285:17))
+unit std::actor::listen<std::actor::Inbox[Resp]> -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::request (struct) at actor.bot:294:15: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (yield: yielded to the resumer (at actor.bot:294:9))
+  std::actor::Receiver {slot, gen} (struct) at actor.bot:297:5: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: the unit's value (at actor.bot:292:10))
+    representable: no (a struct (only Strings are placed))
+unit std::actor::listen<std::actor::Inbox[Req]> -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::request (struct) at actor.bot:294:15: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (yield: yielded to the resumer (at actor.bot:294:9))
+  std::actor::Receiver {slot, gen} (struct) at actor.bot:297:5: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: the unit's value (at actor.bot:292:10))
+    representable: no (a struct (only Strings are placed))
+unit std::actor::recovered<std::actor::Receiver[Resp], std::actor::Answer>
+  call of std::actor::recover (value) at actor.bot:305:5: rejected -- not representable: the native std::actor::recover
+    semantic: escapes to activation (result: the unit's value (at actor.bot:302:30))
+    representable: no (the native std::actor::recover)
+unit std::actor::recovered<std::actor::Receiver[Req], std::actor::Answer>
+  call of std::actor::recover (value) at actor.bot:305:5: rejected -- not representable: the native std::actor::recover
+    semantic: escapes to activation (result: the unit's value (at actor.bot:302:30))
+    representable: no (the native std::actor::recover)
+unit std::actor::receive<std::actor::Receiver[Resp]> -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::request (struct) at actor.bot:311:15: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (yield: yielded to the resumer (at actor.bot:311:9))
+  call of std::actor::recovered (struct) at actor.bot:312:5: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:312:5); result: the unit's value (at actor.bot:310:11))
+unit std::actor::receive<std::actor::Receiver[Req]> -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::request (struct) at actor.bot:311:15: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (yield: yielded to the resumer (at actor.bot:311:9))
+  call of std::actor::recovered (struct) at actor.bot:312:5: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:312:5); result: the unit's value (at actor.bot:310:11))
+unit std::actor::sent_of<int>
+unit std::actor::send<std::actor::Address[Resp], Resp> -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::request (struct) at actor.bot:335:15: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (yield: yielded to the resumer (at actor.bot:335:9))
+unit std::actor::deliver<std::actor::Address[Req], Req> -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::request (struct) at actor.bot:342:15: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (yield: yielded to the resumer (at actor.bot:342:9))
+unit std::actor::mget<int, int>
+unit std::actor::mset<int, int, int>
+unit std::actor::xget<int, int>
+unit std::actor::xset<int, int, int>
+unit std::actor::count_up<int, int>
+unit std::actor::current?<int, int>
+unit std::actor::open?<int, int>
+unit std::actor::open_checked<int>
+  call of std::event_loop::channel (struct) at actor.bot:392:12: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:392:12); context: context-owned state (installed for the run))
+  call of std::event_loop::channel (struct) at actor.bot:393:12: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:393:12); context: context-owned state (installed for the run))
+unit std::actor::opened<int>
+  call of std::actor::open_checked (fresh) at actor.bot:425:12: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:425:12))
+  std::actor::Address {slot, gen} (struct) at actor.bot:428:13: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at actor.bot:424:27))
+    representable: no (a struct (only Strings are placed))
+  std::actor::Right {marker} (struct) at actor.bot:429:55: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at actor.bot:424:27))
+    representable: no (a struct (only Strings are placed))
+  std::actor::Inbox {slot, gen, right} (struct) at actor.bot:429:16: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at actor.bot:424:27))
+    representable: no (a struct (only Strings are placed))
+  std::actor::Opened {to, inbox} (struct) at actor.bot:427:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at actor.bot:424:27))
+    representable: no (a struct (only Strings are placed))
+unit std::actor::open<int>
+  call of std::actor::opened (struct) at actor.bot:436:5: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:436:5); result: the unit's value (at actor.bot:435:17))
+unit std::actor::unlink<int>
+unit std::actor::shut<int>
+unit std::actor::enqueue<int, any>
+unit std::actor::put<int, int, any>
+unit std::actor::grant_room<int>
+unit std::actor::take<int>
+  std::actor::Answer {status, slot, gen, payload} (struct) at actor.bot:553:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at actor.bot:541:25))
+    representable: no (a struct (only Strings are placed))
+unit std::actor::status_answer<int>
+  std::actor::Answer {status, slot, gen, payload} (struct) at actor.bot:556:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at actor.bot:555:34))
+    representable: no (a struct (only Strings are placed))
+unit std::actor::spawned<coroutine, std::actor::Exit>
+  std::actor::Spawned {step, first} (struct) at actor.bot:648:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at actor.bot:647:20))
+    representable: no (a struct (only Strings are placed))
+unit std::actor::new_actor<generic>
+unit std::actor::running?<int, int>
+unit std::actor::retire<int, int, int>
+unit std::actor::retired<int, int, int>
+unit std::actor::bind<int, int, int, int>
+  call of std::actor::status_answer (struct) at actor.bot:698:16: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: returned (at actor.bot:698:9))
+  call of std::actor::status_answer (struct) at actor.bot:707:5: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at actor.bot:696:25))
+unit std::actor::mine?<int, int, int, int>
+unit std::actor::next_turn<int> -- no region: it may suspend: a region is never live across a suspension
+unit std::actor::receive_for<int, int, int, int, bool> -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::status_answer (struct) at actor.bot:724:20: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at actor.bot:722:5 (inherited: it is not confined to the activation)
+  call of std::actor::take (struct) at actor.bot:730:20: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at actor.bot:722:5 (inherited: it is not confined to the activation)
+  call of std::actor::status_answer (struct) at actor.bot:732:20: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at actor.bot:722:5 (inherited: it is not confined to the activation)
+  call of std::event_loop::wait (struct) at actor.bot:734:13: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at actor.bot:722:5 (inherited: it is not confined to the activation)
+  call of std::actor::status_answer (struct) at actor.bot:741:20: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at actor.bot:722:5 (inherited: it is not confined to the activation)
+unit std::actor::deliver_for<int, int, any> -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::status_answer (struct) at actor.bot:748:16: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: returned (at actor.bot:748:9))
+  call of std::event_loop::wait (struct) at actor.bot:751:9: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:751:9))
+  call of std::actor::status_answer (struct) at actor.bot:757:16: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: returned (at actor.bot:757:9))
+  call of std::actor::status_answer (struct) at actor.bot:761:5: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: the unit's value (at actor.bot:745:32))
+unit std::actor::serve<std::actor::Exit, int, int> -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::receive_for (struct) at actor.bot:778:9: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:778:9); result: the unit's value (at actor.bot:775:26))
+  call of std::actor::status_answer (struct) at actor.bot:780:9: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: the unit's value (at actor.bot:775:26))
+  call of std::actor::receive_for (struct) at actor.bot:782:9: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:782:9); result: the unit's value (at actor.bot:775:26))
+  call of std::actor::deliver_for (struct) at actor.bot:784:9: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:784:9); result: the unit's value (at actor.bot:775:26))
+  call of std::actor::bind (struct) at actor.bot:786:9: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:786:9); result: the unit's value (at actor.bot:775:26))
+  call of std::actor::status_answer (struct) at actor.bot:789:9: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: the unit's value (at actor.bot:775:26))
+  call of std::event_loop::timer (struct) at actor.bot:791:17: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:791:17))
+  call of std::event_loop::wait (struct) at actor.bot:792:9: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:792:9))
+  call of std::actor::status_answer (struct) at actor.bot:794:9: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: the unit's value (at actor.bot:775:26))
+  call of std::actor::status_answer (struct) at actor.bot:796:9: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: the unit's value (at actor.bot:775:26))
+unit std::actor::served<std::actor::Exit, int, int> -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::serve (struct) at actor.bot:799:5: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:799:5); result: the unit's value (at actor.bot:798:27))
+unit std::actor::host<coroutine, std::actor::Exit, int, int> -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::status_answer (struct) at actor.bot:815:13: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at actor.bot:812:12 (inherited: it is not confined to the activation)
+  call of std::actor::served (struct) at actor.bot:817:13: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at actor.bot:812:12 (inherited: it is not confined to the activation)
+  call of coroutine#resume (struct) at actor.bot:818:16: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at actor.bot:812:12 (inherited: it is not confined to the activation)
+    representable: no (the native coroutine#resume)
+  struct {code} (struct) at actor.bot:821:50: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at actor.bot:812:12 (inherited: it is not confined to the activation)
+    representable: no (a struct (only Strings are placed))
+  struct {code} (struct) at actor.bot:830:51: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at actor.bot:812:12 (inherited: it is not confined to the activation)
+    representable: no (a struct (only Strings are placed))
+unit std::actor::actor_row<generic>
+unit std::actor::actor_gen<int>
+unit std::actor::record_task<int, int>
+unit std::actor::start<std::actor::Spawned>
+  closure (closure) at actor.bot:861:5: rejected -- not representable: a closure (only Strings are placed)
+    semantic: escapes to activation (callee: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at actor.bot:861:5); callee: through std::event_loop::adopt<coroutine, int>'s parameter step: through std::event_loop::adopt_checked<coroutine, int>'s parameter step: through std::event_loop::after_segment<coroutine, int, int>'s parameter step: through std::event_loop::push_ready<coroutine, int, int, int, int, int, int, int>'s parameter step: context-owned state (installed for the run) (at actor.bot:870:12))
+    representable: no (a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at actor.bot:861:5: rejected -- not representable: the native coroutine#create
+    semantic: escapes to activation (callee: through std::event_loop::adopt<coroutine, int>'s parameter step: through std::event_loop::adopt_checked<coroutine, int>'s parameter step: through std::event_loop::after_segment<coroutine, int, int>'s parameter step: through std::event_loop::push_ready<coroutine, int, int, int, int, int, int, int>'s parameter step: context-owned state (installed for the run) (at actor.bot:870:12))
+    representable: no (the native coroutine#create)
+unit the coroutine of std::actor::host constructed at actor.bot:861:5 -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::host (fresh) at actor.bot:861:38: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (error: the payload of an error the call lets through (at actor.bot:861:38); callee: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at actor.bot:861:38); caller: stored into a value the caller owns (coroutine#34750#arg1))
+unit std::actor::reap_checked<generic>
+unit std::actor::reap<generic>
+unit std::event_loop::deterministic::ints<generic>
+  call of list (list) at deterministic.bot:74:36: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at deterministic.bot:73:16))
+    representable: no (the native list)
+  call of std::mutable_vector::from_list (mutvec) at deterministic.bot:74:5: rejected -- not representable: the native std::mutable_vector::from_list
+    semantic: escapes to activation (result: the unit's value (at deterministic.bot:73:16))
+    representable: no (the native std::mutable_vector::from_list)
+unit std::event_loop::deterministic::create<generic>
+  call of std::mutable_array::create (mutarray) at deterministic.bot:79:16: rejected -- not representable: the native std::mutable_array::create
+    semantic: escapes to activation (result: the unit's value (at deterministic.bot:77:10))
+    representable: no (the native std::mutable_array::create)
+  call of std::event_loop::deterministic::ints (mutvec) at deterministic.bot:79:64: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at deterministic.bot:77:10))
+  call of std::event_loop::deterministic::ints (mutvec) at deterministic.bot:79:80: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at deterministic.bot:77:10))
+  call of std::event_loop::deterministic::ints (mutvec) at deterministic.bot:80:16: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at deterministic.bot:77:10))
+  call of std::event_loop::deterministic::ints (mutvec) at deterministic.bot:80:30: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at deterministic.bot:77:10))
+  call of std::event_loop::deterministic::ints (mutvec) at deterministic.bot:80:46: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at deterministic.bot:77:10))
+  call of std::event_loop::deterministic::ints (mutvec) at deterministic.bot:80:63: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at deterministic.bot:77:10))
+  call of std::event_loop::deterministic::ints (mutvec) at deterministic.bot:80:78: rejected -- it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region
+    semantic: escapes to activation (result: the unit's value (at deterministic.bot:77:10))
+  std::event_loop::deterministic::Deterministic {clock, script, queues, nodes, free, rot_in, rot_out, waits} (struct) at deterministic.bot:78:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at deterministic.bot:77:10))
+    representable: no (a struct (only Strings are placed))
+unit std::event_loop::deterministic::reg<int>
+unit std::event_loop::deterministic::set_reg<int, int>
+unit std::event_loop::deterministic::qget<int, int>
+unit std::event_loop::deterministic::qset<int, int, int>
+unit std::event_loop::deterministic::nget<int, int>
+unit std::event_loop::deterministic::nset<int, int, int>
+unit std::event_loop::deterministic::script_at<int, int>
+unit std::event_loop::deterministic::ensure_queue<int>
+unit std::event_loop::deterministic::rotate_in<int>
+unit std::event_loop::deterministic::rotate_out<generic>
+unit std::event_loop::deterministic::enqueue<int, int, int, int>
+unit std::event_loop::deterministic::clock<generic>
+  struct {code} (struct) at deterministic.bot:234:47: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (error: the payload of std::event_loop::DriverFault (at deterministic.bot:234:13))
+    representable: no (a struct (only Strings are placed))
+unit std::event_loop::deterministic::release_due<generic>
+unit std::event_loop::deterministic::next_due<generic>
+unit std::event_loop::deterministic::block_checked<int>
+unit std::event_loop::deterministic::block<int>
+  struct {code} (struct) at deterministic.bot:297:47: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (error: the payload of std::event_loop::DriverFault (at deterministic.bot:297:13))
+    representable: no (a struct (only Strings are placed))
+unit std::event_loop::deterministic::take_checked<generic>
+unit std::event_loop::deterministic::take_record<generic>
+  struct {code} (struct) at deterministic.bot:325:47: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (error: the payload of std::event_loop::DriverFault (at deterministic.bot:325:13))
+    representable: no (a struct (only Strings are placed))
+unit std::event_loop::deterministic::current<int>
+  struct {code} (struct) at deterministic.bot:330:47: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (error: the payload of std::event_loop::DriverFault (at deterministic.bot:330:13))
+    representable: no (a struct (only Strings are placed))
+unit std::event_loop::deterministic::record_gen<generic>
+  call of std::event_loop::deterministic::current (fresh) at deterministic.bot:333:5: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at deterministic.bot:333:5))
+unit std::event_loop::deterministic::record_a<generic>
+  call of std::event_loop::deterministic::current (fresh) at deterministic.bot:336:5: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at deterministic.bot:336:5))
+unit std::event_loop::deterministic::record_b<generic>
+  call of std::event_loop::deterministic::current (fresh) at deterministic.bot:339:5: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at deterministic.bot:339:5))
+unit std::event_loop::deterministic::hold_checked<generic>
+unit std::event_loop::deterministic::hold_record<generic>
+  struct {code} (struct) at deterministic.bot:369:47: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (error: the payload of std::event_loop::DriverFault (at deterministic.bot:369:13))
+    representable: no (a struct (only Strings are placed))
+unit std::event_loop::deterministic::release_checked<int>
+unit std::event_loop::deterministic::release_held<int>
+  struct {code} (struct) at deterministic.bot:386:47: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (error: the payload of std::event_loop::DriverFault (at deterministic.bot:386:13))
+    representable: no (a struct (only Strings are placed))
+unit server<std::actor::Inbox[Req]> -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::listen (struct) at p12-actor-messages.bot:22:10: rejected -- it may suspend: a region is never live across a suspension
+    semantic: confined to activation
+  call of std::actor::exit (struct) at p12-actor-messages.bot:24:20: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: returned (at p12-actor-messages.bot:24:13))
+  call of std::actor::receive (struct) at p12-actor-messages.bot:26:13: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at p12-actor-messages.bot:25:9 (inherited: it is not confined to the activation)
+  call of std::str::concat (str) at p12-actor-messages.bot:29:16: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at p12-actor-messages.bot:25:9 (inherited: it is not confined to the activation)
+  call of std::int::to_string (str) at p12-actor-messages.bot:29:45: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at p12-actor-messages.bot:25:9 (inherited: it is not confined to the activation)
+  call of std::str::concat (str) at p12-actor-messages.bot:29:16: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at p12-actor-messages.bot:25:9 (inherited: it is not confined to the activation)
+  Resp {id, body} (struct) at p12-actor-messages.bot:30:22: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at p12-actor-messages.bot:25:9 (inherited: it is not confined to the activation)
+    representable: no (a struct (only Strings are placed))
+  call of std::actor::exit (struct) at p12-actor-messages.bot:32:5: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: the unit's value (at p12-actor-messages.bot:21:10))
+unit client<int, std::actor::Address[Req], std::actor::Inbox[Resp], std::actor::Address[Resp]> -- no region: it may suspend: a region is never live across a suspension
+  call of std::actor::listen (struct) at p12-actor-messages.bot:35:10: rejected -- it may suspend: a region is never live across a suspension
+    semantic: confined to activation
+  call of std::actor::exit (struct) at p12-actor-messages.bot:37:20: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: returned (at p12-actor-messages.bot:37:13))
+  Req {id, text, reply} (struct) at p12-actor-messages.bot:39:20: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to iteration of the fold at p12-actor-messages.bot:38:13 (inherited: it is not confined to the activation)
+    representable: no (a struct (only Strings are placed))
+  call of std::actor::receive (struct) at p12-actor-messages.bot:40:13: rejected -- it may suspend: a region is never live across a suspension
+    semantic: confined to iteration of the fold at p12-actor-messages.bot:38:13
+  call of std::actor::exit (struct) at p12-actor-messages.bot:44:5: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: the unit's value (at p12-actor-messages.bot:34:10))
+unit std::event_loop::release_holds<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><generic>
+  call of std::event_loop::cat (str) at event_loop.bot:1613:18: rejected -- not confined to its innermost region
+    semantic: escapes to iteration of the loop at event_loop.bot:1607:5 (inherited: it is not confined to the activation)
+  call of std::event_loop::deterministic::release_held (fresh) at event_loop.bot:1614:9: rejected -- not confined to its innermost region
+    semantic: escapes to iteration of the loop at event_loop.bot:1607:5 (inherited: it is not confined to the activation)
+unit std::event_loop::collect_records<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><generic>
+  call of std::event_loop::deterministic::take_record (fresh) at event_loop.bot:1594:16: rejected -- not confined to its innermost region
+    semantic: escapes to iteration of the loop at event_loop.bot:1591:5 (inherited: it is not confined to the activation)
+  call of std::event_loop::deterministic::record_gen (fresh) at event_loop.bot:1598:33: rejected -- not confined to its innermost region
+    semantic: escapes to iteration of the loop at event_loop.bot:1591:5 (inherited: it is not confined to the activation)
+  call of std::event_loop::deterministic::record_a (fresh) at event_loop.bot:1598:49: rejected -- not confined to its innermost region
+    semantic: escapes to iteration of the loop at event_loop.bot:1591:5 (inherited: it is not confined to the activation)
+  call of std::event_loop::deterministic::record_b (fresh) at event_loop.bot:1598:63: rejected -- not confined to its innermost region
+    semantic: escapes to iteration of the loop at event_loop.bot:1591:5 (inherited: it is not confined to the activation)
+  call of std::event_loop::deterministic::hold_record (fresh) at event_loop.bot:1600:13: rejected -- not confined to its innermost region
+    semantic: escapes to iteration of the loop at event_loop.bot:1591:5 (inherited: it is not confined to the activation)
+unit std::event_loop::turn_checked<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><generic>
+  call of std::event_loop::deterministic::clock (fresh) at event_loop.bot:1672:20: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at event_loop.bot:1672:20))
+  call of std::event_loop::release_holds<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at event_loop.bot:1674:5: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at event_loop.bot:1674:5))
+  call of std::event_loop::collect_records<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at event_loop.bot:1676:15: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at event_loop.bot:1676:15))
+  call of std::event_loop::cat (str) at event_loop.bot:1681:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1681:9))
+  call of std::event_loop::cat (str) at event_loop.bot:1681:52: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1681:9))
+  call of std::str::concat (str) at event_loop.bot:1681:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1681:9))
+  call of std::event_loop::cat (str) at event_loop.bot:1681:86: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1681:9))
+  call of std::str::concat (str) at event_loop.bot:1681:14: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::event_loop::note<str>'s parameter text: context-owned state (installed for the run) (at event_loop.bot:1681:9))
+unit std::event_loop::run_checked<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><generic>
+  call of std::event_loop::deterministic::clock (fresh) at event_loop.bot:1740:20: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at event_loop.bot:1740:20))
+  call of std::event_loop::deterministic::block (fresh) at event_loop.bot:1759:21: rejected -- not confined to its innermost region
+    semantic: escapes to iteration of the loop at event_loop.bot:1742:5 (inherited: it is not confined to the activation)
+  call of std::event_loop::turn_checked<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at event_loop.bot:1764:9: rejected -- not confined to its innermost region
+    semantic: escapes to iteration of the loop at event_loop.bot:1742:5 (inherited: it is not confined to the activation)
+unit std::event_loop::run<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><generic>
+  call of std::event_loop::run_checked<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (payload) at event_loop.bot:1770:9: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at event_loop.bot:1770:9))
+unit std::event_loop::shutdown_checked<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><int>
+  call of std::event_loop::revoke_all (list) at event_loop.bot:1833:5: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at event_loop.bot:1833:5))
+  call of std::event_loop::turn_checked<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at event_loop.bot:1837:9: rejected -- not confined to its innermost region
+    semantic: escapes to iteration of the loop at event_loop.bot:1834:5 (inherited: it is not confined to the activation)
+unit std::event_loop::shutdown<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><int>
+  call of std::event_loop::shutdown_checked<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (payload) at event_loop.bot:1845:9: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at event_loop.bot:1845:9))
+unit main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><int>
+  call of std::actor::open (struct) at p12-actor-messages.bot:47:32: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at p12-actor-messages.bot:47:32); callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:52:5); callee: through the coroutine's code: through client<int, std::actor::Address[Req], std::actor::Inbox[Resp], std::actor::Address[Resp]>'s parameter me: through std::actor::deliver<std::actor::Address[Req], Req>'s parameter m: yielded to the resumer (at p12-actor-messages.bot:54:9); callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:56:5))
+  call of std::actor::open (struct) at p12-actor-messages.bot:48:32: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at p12-actor-messages.bot:48:32); callee: through the coroutine's code: through client<int, std::actor::Address[Req], std::actor::Inbox[Resp], std::actor::Address[Resp]>'s parameter me: through std::actor::deliver<std::actor::Address[Req], Req>'s parameter m: yielded to the resumer (at p12-actor-messages.bot:54:9); callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:56:5))
+  closure (closure) at p12-actor-messages.bot:50:9: rejected -- not representable: a closure (only Strings are placed)
+    semantic: escapes to activation (callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:52:5))
+    representable: no (a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at p12-actor-messages.bot:50:9: rejected -- not representable: the native coroutine#create
+    semantic: escapes to activation (callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:52:5))
+    representable: no (the native coroutine#create)
+  call of coroutine#start (struct) at p12-actor-messages.bot:50:9: rejected -- not representable: the native coroutine#start
+    semantic: escapes to activation (callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:52:5))
+    representable: no (the native coroutine#start)
+  call of std::actor::spawned (struct) at p12-actor-messages.bot:51:9: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:52:5))
+  closure (closure) at p12-actor-messages.bot:54:9: rejected -- not representable: a closure (only Strings are placed)
+    semantic: escapes to activation (callee: through the coroutine's code: through client<int, std::actor::Address[Req], std::actor::Inbox[Resp], std::actor::Address[Resp]>'s parameter me: through std::actor::deliver<std::actor::Address[Req], Req>'s parameter m: yielded to the resumer (at p12-actor-messages.bot:54:9); callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:56:5))
+    representable: no (a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at p12-actor-messages.bot:54:9: rejected -- not representable: the native coroutine#create
+    semantic: escapes to activation (callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:56:5))
+    representable: no (the native coroutine#create)
+  call of coroutine#start (struct) at p12-actor-messages.bot:54:9: rejected -- not representable: the native coroutine#start
+    semantic: escapes to activation (callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:56:5))
+    representable: no (the native coroutine#start)
+  call of std::actor::spawned (struct) at p12-actor-messages.bot:55:9: rejected -- not confined to its innermost region
+    semantic: escapes to activation (callee: through std::actor::start<std::actor::Spawned>'s parameter a: through the coroutine's code: through std::actor::host<coroutine, std::actor::Exit, int, int>'s parameter actor: through std::actor::served<std::actor::Exit, int, int>'s parameter r: through std::actor::serve<std::actor::Exit, int, int>'s parameter r: through std::actor::put<int, int, any>'s parameter payload: through std::actor::enqueue<int, any>'s parameter payload: context-owned state (installed for the run) (at p12-actor-messages.bot:56:5))
+  call of std::event_loop::run<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at p12-actor-messages.bot:57:5: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at p12-actor-messages.bot:57:5))
+  call of std::event_loop::shutdown<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at p12-actor-messages.bot:58:5: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at p12-actor-messages.bot:58:5))
+  call of std::event_loop::take_outcomes (list) at p12-actor-messages.bot:60:16: rejected -- not confined to its innermost region
+    semantic: escapes to activation (error: the payload of an error the call lets through (at p12-actor-messages.bot:60:16))
+  loop (list) at p12-actor-messages.bot:61:5: rejected -- not representable: a list (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at p12-actor-messages.bot:46:8))
+    representable: no (a list (only Strings are placed))
+unit the coroutine of server constructed at p12-actor-messages.bot:50:9 -- no region: it may suspend: a region is never live across a suspension
+  call of server (struct) at p12-actor-messages.bot:50:35: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (result: the unit's value (at p12-actor-messages.bot:50:9))
+unit the coroutine of client constructed at p12-actor-messages.bot:54:9 -- no region: it may suspend: a region is never live across a suspension
+  call of client (struct) at p12-actor-messages.bot:54:35: rejected -- it may suspend: a region is never live across a suspension
+    semantic: escapes to activation (error: the payload of an error the call lets through (at p12-actor-messages.bot:54:35); result: the unit's value (at p12-actor-messages.bot:54:9))
+
+# What lowering emitted
