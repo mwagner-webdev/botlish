@@ -1123,7 +1123,69 @@ difference the collection counts already do.
 
 ## 24. Existing regression and CI results
 
-«SEC24»
+**main before the branch.** **[test]** main's latest runs at `d6b0161c`,
+the commit the work branches from: tests.yml (run 43925972736),
+tests-arm64.yml (43925973016), macos-arm64.yml (43925972712) and
+windows-x86_64.yml (43925972651) all succeeded. Nothing failing on main was
+built on.
+
+**Local, on this container** (x86-64 Linux, rustc 1.100.0, Tcl 9.0.1):
+
+| check | result |
+|---|---|
+| `tclsh9.0 tests/local.tcl -jobs 3` (every Tcl test file on interp and compile, minus golden duplicates; every golden suite on all four backends through the front-end cache) | 720 of 720 passed, exit 0 |
+| `BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/local.tcl -all 1 -parts tcl` over the 18 files most sensitive to the collector and to String storage (scratch-storage, storage-lifetime, error-payloads, golden-framework, event-loop, string-allocation, virtual-construction, native-string-region, native-string-view, coroutines, affine, resources, fold-virtual-construction, actor, concurrent-vms, c-ffi-error-capture, native-library, c-callbacks) | 36 of 36 passed (both passes) |
+| `tests/scratch-storage.test` with `BOTLISH_NATIVE_LINKER=stub`, with `system`, and under `BOTLISH_NATIVE_GC_STRESS=1` | 40 of 40 each |
+| `cargo test --release --manifest-path native/Cargo.toml --lib --bins` | 374 and 137 passed |
+| `tests/canary.test` | 20 of 20 |
+| `tclsh9.0 tools/mutant-catalogs.tcl` | 117 catalogs, 3,953 mutants, 0 problems |
+| `tclsh9.0 tools/compilerpedia.tcl check` | 1,306 topics, 789 examples, 0 problems |
+| `tclsh9.0 audit/refactor/tools/gate.tcl` (the warning gate) | passed |
+| `tests/numeric-looking-names.test -match nl-no-string-ternary*` | passed |
+| the lifetime audit (oracle, fuzzer, persist, reachability, mutants) | as committed (section 19) |
+
+Earlier in the work, the first full local run failed `c-ffi.test` and
+`external-tools.test` because rustup's default toolchain was stable 1.97
+while the checkout pins 1.100 (AGENTS.md, "Building the native (Cranelift)
+backend"); `bash tools/rust-toolchain.sh install` made the pin the default,
+and both pass in the run above.
+
+Five test files pinned another optimization's heap evidence (allocation
+counts that scratch storage would now take off the heap):
+`tests/native-string-region.test`, `tests/native-string-view.test`,
+`tests/string-allocation.test`, `tests/virtual-construction.test` and
+`tests/portable-io.test` measure with `-scratch-opt 0`, as AGENTS.md's
+section now says a test of another optimization's heap evidence does. No
+other existing test changed; `tests/storage-lifetime.test` gained the three
+tests of section 5, and `tests/scratch-storage.test` is new (40 tests).
+
+**Commits** (on `claude/gracious-hopper-zg4doz`, from `d6b0161c`):
+
+| commit | |
+|---|---|
+| `fafbd2c5` | the plan, its lowering, the provider, the NIR protocol, the three lifetime fixes, the tests |
+| `20b3ec89` | audit tools, the tests of program mutations, inner regions and GC-stress collection, AGENTS.md |
+| `d145e1c4` | stronger detectors, the cost probe, memcheck, measurements |
+| `cbcd0c5c` | compile cost, quiet-machine measurements, the report's draft |
+| `813e0cba` | system allocations per unit, the final fuzz run |
+| `d8e3057e` | plan reports with boundary actions, fallback and what ran |
+| `dbf9817e` | AGENTS.md: the tools and the fuzzer's comparisons |
+| `7c0e237a` | the mutant catalog's record run |
+| `ee71d90a` | the report: the lifetime audit's rerun |
+| `00646ca2` | `ss-run-census`: p16 only where a C call links (the CI finding) |
+
+**CI on the branch.** **[test]**
+
+* `static-decisions.yml` at `dbf9817e` (run 43958814881, whose front end
+  is the tip's): succeeded -- the batched and sequential schedulers agree on
+  every golden suite.
+* `tests.yml` at `dbf9817e` (43958793520): the canary, the four golden
+  shards and the native Rust unit tests succeeded; **the stub-linked
+  executables job failed** -- `ss-run-census` ran p16, a C call, natively
+  under `BOTLISH_NATIVE_LINKER=stub`, which links no C. Fixed in `00646ca2`
+  (p16 runs only where `cLinker` holds, the rule of every executable test);
+  the run was superseded before its other jobs finished.
+* At `00646ca2`, the tip whose code this report describes: «CIRUNS»
 
 ## 25. Known limitations
 
