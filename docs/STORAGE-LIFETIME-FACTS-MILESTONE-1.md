@@ -902,19 +902,24 @@ Run on the branch (Linux x86-64, the pinned toolchain) [test]:
 Nothing in `core/`, `surface/`, `compiler/`, `native/`, `ccompile/`,
 `stdlib/` or any backend changed; `hir/hir.tcl` only loads the new file.
 
-CI at commit 07fc8057, last read 2026-11-16 00:25 UTC [test]:
+CI at commit 07fc8057 (the commits after it change only this section),
+read 2026-11-16 01:52 UTC [test]:
 
-* `tests.yml` dispatched on the branch (run 43766991744):
-  - passed: the canary (linux x86-64), which selected
-    `tests/storage-lifetime.test` as changed and ran it with seven
-    recently failing files on interp (588 tests, 0 failed); the native
-    Rust unit tests; the stub-linked executables; the system-linked
-    executables, also under GC stress; the golden suites, shards 1-4;
-    the method-call decision (oracle, reference audit);
-  - **pending**: tests (interp), tests (compile), and the cranelift and
-    cranelift-generic coverage (main's latest tests.yml run, at this
-    branch's base c5b22364, took 3 h 20 min and succeeded);
+* `tests.yml` dispatched on the branch (run 43766991744), finished, every
+  job that ran succeeded:
+  - the canary (linux x86-64), which selected `tests/storage-lifetime.test`
+    as changed and ran it with seven recently failing files on interp
+    (588 tests, 0 failed);
+  - tests (interp) and tests (compile), the whole Tcl suite;
+  - the cranelift and cranelift-generic coverage;
+  - the golden suites, shards 1-4, beside their Tcl originals;
+  - the native Rust unit tests; the stub-linked executables; the
+    system-linked executables, also under GC stress;
+  - the method-call decision (oracle, reference audit);
   - skipped: native GC stress, which runs only on pushes to main.
+
+  Main's latest tests.yml run, at this branch's base c5b22364
+  (43747077137), succeeded too.
 * The branch push's runs, which run each host's canary only: tests
   (linux arm64), tests (macos arm64) and tests (windows x86-64) passed,
   and so did icy-tower (windows x86-64) and icy-tower (macos arm64).
