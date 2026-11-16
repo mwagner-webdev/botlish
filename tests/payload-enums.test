@@ -531,13 +531,14 @@ test pe-service-tokens {the compiler service's highlight tokens (service::tokens
     }
 } -cleanup {unset -nocomplain dir path ws rev source} -result {{enum keyword} {Expr enum declaration} {Lit enumMember declaration} {value property declaration} {int type} {Neg enumMember declaration} {e variable declaration} {Expr enum} {Lit enumMember} {value property} {3 number} {f variable declaration} {Expr enum} {Neg enumMember}}
 
-test pe-c-and-boundaries {a payload-bearing enum is refused, with its reason, where a representation or an encoding is committed to: the C backend (C UNSUPPORTED), a C export's signature, the value transfer (not Sendable) and a context struct's native layout} -body {
+test pe-c-and-boundaries {a payload-bearing enum is refused, with its reason, where a representation is committed to: the C backend (C UNSUPPORTED), a C export's signature and a context struct's native layout; the value transfer refuses one whose payload is not sendable (a function field), and accepts one whose every payload is (PORTABILITY-PAYLOAD-ENUM-TRANSFER-MILESTONE-1.md)} -body {
     source [file join $::projectRoot ccompile ccompile.tcl]
     set c [catch {ccompile::program [surface::compile "enum S:\n    P,\n    C {r: int},\nfn f(s: S) -> int:\n    1\nf(S::C {r: 2})\n" pe.bot -warnings off] -prefix pe} message]
     list [expr {$c && [string match "*an enum whose cases carry payloads (S)*" $message]}] \
         [peCode "enum S:\n    P,\n    C {r: int},\nexported c fn f(x: int) -> S:\n    S::P\n"] \
+        [peCode "import std::transfer\nenum S:\n    P,\n    C {r: Fn{args: \[\], return: int}},\nstd::transfer::encode(S::P)\n"] \
         [peCode "import std::transfer\nenum S:\n    P,\n    C {r: int},\nstd::transfer::encode(S::C {r: 1})\n"]
-} -result {1 EXPORT-SIGNATURE NOT-SENDABLE}
+} -result {1 EXPORT-SIGNATURE NOT-SENDABLE ok}
 
 # ---------------------------------------------------------------------------
 # The compiler-shaped probe (the brief's section 11): the mid-end port's

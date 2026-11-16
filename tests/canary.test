@@ -1,9 +1,15 @@
 # canary.test -- tests/canary.tcl, the canary's selection (CI-RUNS.md, "The
 # canary"): the test files and golden suites a push adds or changes, the
-# smallest first, then tests/canary.tsv's history for the host, the most
-# failing commits first, within a budget of estimated seconds; the changed
-# paths from git (the commits since the merge base, the working tree); the
-# records file itself (every item exists); tests/local.tcl's order.
+# smallest first, then, when the toolchain changed, the toolchain-sensitive
+# items, then the items whose covers lines match a changed path, then
+# tests/canary.tsv's history for the host, the most failing commits first,
+# within a budget of estimated seconds; the items' declarations; when the
+# toolchain changed; the changed paths from git (the commits since the merge
+# base, the working tree); the records file itself (every item exists); the
+# repository's declarations (every pattern matches a file);
+# tests/local.tcl's order.
+#
+# canary: covers tests/canary.tcl tests/canary.tsv tests/platform/tier.tcl tests/local.tcl
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot tests canary.tcl]
@@ -28,8 +34,19 @@ proc canaryTree {name items {size 1000}} {
     return $root
 }
 
-proc canaryRecords {history durations} {
-    return [dict create history $history durations $durations]
+proc canaryRecords {history durations {toolchains {}}} {
+    return [dict create history $history toolchains $toolchains durations $durations]
+}
+
+# A scratch tree whose items (a dict path -> leading comment lines) hold
+# those lines and then a line of code.
+proc canaryDeclaredTree {name items} {
+    set root [file join [temporaryDirectory] canary-[pid]-$name]
+    file delete -force $root
+    dict for {item head} $items {
+        canaryWrite [file join $root $item] "[join $head \n]\nsource helpers.tcl\n# canary: toolchain -- after the code: not read\n"
+    }
+    return $root
 }
 
 proc names {selection} { lmap entry $selection {lindex $entry 0} }
@@ -78,9 +95,66 @@ test canary-select-estimate {an item without a measured duration is estimated fr
     list [names $chosen] [expr {[lindex $estimates 0] > 0 && [lindex $estimates 1] > [lindex $estimates 0]}]
 } -result {{tests/a.test tests/golden/s.bot} 1}
 
+test canary-headers {an item's leading comment lines declare it toolchain-sensitive or covering paths; lines after its first code are not read; a malformed declaration is an error naming its line} -body {
+    set root [canaryDeclaredTree headers {
+        tests/a.test {{# a.test -- one} {# canary: toolchain -- links the runtime} {#} {# canary: covers native/src/x.rs native/y/*} {# canary: covers core/z.tcl}}
+        tests/b.test {{# b.test -- nothing declared}}
+        tests/golden/s.bot {{# s.bot} {} {#canary: covers stdlib/s.bot}}
+    }]
+    set good [canary::headers $root]
+    canaryWrite [file join $root tests c.test] "# c.test\n# canary: toolchains -- a typo\nsource x\n"
+    set bad [catch {canary::headers $root} message]
+    list $good $bad $message
+} -result {{tests/a.test {toolchain {links the runtime} covers {native/src/x.rs native/y/* core/z.tcl}} tests/golden/s.bot {toolchain {} covers stdlib/s.bot}} 1 {tests/c.test:2: a canary line is `# canary: toolchain -- REASON` or `# canary: covers PATTERN...`}}
+
+test canary-select-toolchain {when the toolchain changed, the toolchain-sensitive items run after the changed ones and before the history, the smallest first; otherwise they are ordinary items} -body {
+    set root [canaryTree toolchain {tests/a.test tests/t1.test tests/t2.test tests/h.test}]
+    set headers {tests/t1.test {toolchain {links} covers {}} tests/t2.test {toolchain {unicode} covers {}}}
+    set records [canaryRecords {{tests/h.test * 2 2026-11-01 one} {tests/t1.test * 1 2026-11-01 two}} {tests/a.test 9 tests/t1.test 20 tests/t2.test 10 tests/h.test 1}]
+    set changed [lindex [canary::select {tests/a.test} $records linux-x86_64 0 $root [dict create toolchain "rustc-2 is not rustc-1" headers $headers]] 0]
+    set unchanged [lindex [canary::select {tests/a.test} $records linux-x86_64 0 $root [dict create headers $headers]] 0]
+    list [names $changed] [lindex $changed 1 1] [names $unchanged]
+} -result {{tests/a.test tests/t2.test tests/t1.test tests/h.test} {toolchain-sensitive: unicode} {tests/a.test tests/h.test tests/t1.test}}
+
+test canary-select-covers {an item whose covers lines match a changed path runs after the changed items and the toolchain's, before the history, the smallest first; a pattern's * crosses directories} -body {
+    set root [canaryTree covers {tests/a.test tests/c1.test tests/c2.test tests/c3.test tests/t.test tests/h.test}]
+    set headers {
+        tests/c1.test {toolchain {} covers {native/src/runtime/*}}
+        tests/c2.test {toolchain {} covers {core/strings.tcl}}
+        tests/c3.test {toolchain {} covers {stdlib/*}}
+        tests/t.test {toolchain {links} covers {core/strings.tcl}}
+    }
+    set records [canaryRecords {{tests/h.test * 2 2026-11-01 one}} {tests/a.test 9 tests/c1.test 30 tests/c2.test 10 tests/c3.test 1 tests/t.test 5 tests/h.test 1}]
+    set chosen [lindex [canary::select {core/strings.tcl native/src/runtime/coroutine/windows.rs tests/a.test} $records linux-x86_64 0 $root [dict create toolchain "why" headers $headers]] 0]
+    list [names $chosen] [lmap entry $chosen {lindex $entry 1}]
+} -result {{tests/a.test tests/t.test tests/c2.test tests/c1.test tests/h.test} {changed {toolchain-sensitive: links} {covers core/strings.tcl} {covers native/src/runtime/coroutine/windows.rs} {failed in 2 commits of main, last 2026-11-01: one}}}
+
+test canary-select-no-history {history 0 leaves the history out and nothing else} -body {
+    set root [canaryTree nohistory {tests/a.test tests/t.test tests/h.test}]
+    set records [canaryRecords {{tests/h.test * 2 2026-11-01 one}} {}]
+    names [lindex [canary::select {tests/a.test} $records linux-x86_64 0 $root [dict create toolchain why history 0 headers {tests/t.test {toolchain x covers {}}}]] 0]
+} -result {tests/a.test tests/t.test}
+
+test canary-toolchain-change {the toolchain changed when the push changes one of the repository's statements of it, or when this run's is not the host's record; without a record or a toolchain of its own, only the first tells} -body {
+    set records [canaryRecords {} {} {linux-x86_64 rustc-1.100.0-0ef1bc386059}]
+    list \
+        [canary::ToolchainChange {core/x.tcl} $records linux-x86_64 rustc-1.100.0-0ef1bc386059] \
+        [canary::ToolchainChange {core/x.tcl} $records linux-x86_64 rustc-1.101.0-0123456789ab] \
+        [canary::ToolchainChange {rust-toolchain.toml .github/actions/build-native/action.yml core/x.tcl} $records linux-x86_64 rustc-1.100.0-0ef1bc386059] \
+        [canary::ToolchainChange {native/Cargo.lock} $records macos-aarch64 rustc-1.101.0-0123456789ab] \
+        [canary::ToolchainChange {} $records macos-aarch64 rustc-1.101.0-0123456789ab] \
+        [canary::ToolchainChange {} $records linux-x86_64 ""]
+} -result {{} {rustc-1.101.0-0123456789ab is not rustc-1.100.0-0ef1bc386059, the newest green run's on main} {the push changes rust-toolchain.toml, .github/actions/build-native/action.yml} {the push changes native/Cargo.lock} {} {}}
+
+testConstraint rustc [expr {[auto_execok rustc] ne ""}]
+
+test canary-toolchain-name {this checkout's toolchain in the records' form: rustc-RELEASE-COMMIT, twelve hexadecimal digits of the commit} -constraints rustc -body {
+    regexp {^rustc-[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9.]+)?-[0-9a-f]{12}$} [canary::toolchain]
+} -result 1
+
 test canary-records-format {the records file: history, duration and cost lines, comments; anything else is an error naming the line} -body {
     set path [file join [temporaryDirectory] canary-[pid]-records.tsv]
-    canaryWrite $path "# a comment\n\nhistory\ttests/a.test\t*\t3\t2026-11-01\twhy\nduration\ttests/a.test\t12.5\n\ncost\tmacos-aarch64\ttests/a.test\t30.0\ncost\tmacos-aarch64\ttests/golden/s.bot\t4.5\n"
+    canaryWrite $path "# a comment\n\nhistory\ttests/a.test\t*\t3\t2026-11-01\twhy\ntoolchain\tlinux-x86_64\trustc-1.100.0-0ef1bc386059\nduration\ttests/a.test\t12.5\n\ncost\tmacos-aarch64\ttests/a.test\t30.0\ncost\tmacos-aarch64\ttests/golden/s.bot\t4.5\n"
     set good [canary::records $path]
     canaryWrite $path "history\ttests/a.test\t*\tthree\t2026-11-01\twhy\n"
     set bad1 [catch {canary::records $path} m1]
@@ -88,9 +162,12 @@ test canary-records-format {the records file: history, duration and cost lines, 
     set bad2 [catch {canary::records $path} m2]
     canaryWrite $path "duration\ttests/a.test\t1\ncost\ttests/a.test\t1\n"
     set bad3 [catch {canary::records $path} m3]
-    list $good $bad1 [string match *:1:* $m1] $bad2 [string match "*not a history, duration or cost line*" $m2] \
-        $bad3 [string match "*:2: a cost line is: cost HOST ITEM SECONDS" $m3]
-} -result {{history {{tests/a.test * 3 2026-11-01 why}} durations {tests/a.test 12.5} costs {macos-aarch64 {tests/a.test 30.0 tests/golden/s.bot 4.5}}} 1 1 1 1 1 1}
+    canaryWrite $path "toolchain\tlinux-x86_64\t1.100.0\n"
+    set bad4 [catch {canary::records $path} m4]
+    list $good $bad1 [string match *:1:* $m1] $bad2 [string match "*not a history, toolchain, duration or cost line*" $m2] \
+        $bad3 [string match "*:2: a cost line is: cost HOST ITEM SECONDS" $m3] \
+        $bad4 [string match "*:1: a toolchain line is: toolchain HOST rustc-RELEASE-COMMIT" $m4]
+} -result {{history {{tests/a.test * 3 2026-11-01 why}} toolchains {linux-x86_64 rustc-1.100.0-0ef1bc386059} durations {tests/a.test 12.5} costs {macos-aarch64 {tests/a.test 30.0 tests/golden/s.bot 4.5}}} 1 1 1 1 1 1 1 1}
 
 test canary-records-items-exist {every item tests/canary.tsv names is a test file or golden suite of this tree, and each history entry's hosts are targets} -body {
     set records [canary::records]
@@ -101,6 +178,9 @@ test canary-records-items-exist {every item tests/canary.tsv names is a test fil
         foreach host [split $hosts ,] {
             if {$host ne "*" && $host ni {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64}} { lappend problems "host: $host" }
         }
+    }
+    dict for {host name} [dict get $records toolchains] {
+        if {$host ni {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64}} { lappend problems "toolchain host: $host" }
     }
     dict for {item seconds} [dict get $records durations] {
         if {![canary::IsItem $item] || ![file isfile [file join $::projectRoot $item]]} { lappend problems "duration: $item" }
@@ -113,6 +193,20 @@ test canary-records-items-exist {every item tests/canary.tsv names is a test fil
     }
     list [expr {[llength [dict get $records history]] > 0}] [lsort [dict keys [dict get $records costs]]] $problems
 } -result {1 {macos-aarch64 windows-x86_64} {}}
+
+test canary-headers-repository {the repository's declarations parse, some items are toolchain-sensitive, and every covers pattern matches a file of this tree: a renamed source leaves no pattern behind} -constraints git -body {
+    set headers [canary::headers]
+    set files [split [exec git -C $::projectRoot ls-files] \n]
+    set problems {}
+    set sensitive {}
+    dict for {item decl} $headers {
+        if {[dict get $decl toolchain] ne ""} { lappend sensitive $item }
+        foreach pattern [dict get $decl covers] {
+            if {[lsearch -glob $files $pattern] < 0} { lappend problems "$item: $pattern matches nothing" }
+        }
+    }
+    list [expr {[llength $sensitive] >= 5}] [expr {"tests/native-tcl-unicode.test" in $sensitive}] $problems
+} -result {1 1 {}}
 
 # tests/platform/tier.tcl's shares of the acceptance tier for -shard I/N:
 # {FILES SUITES}, each in the order the tier runs them.
@@ -216,8 +310,25 @@ test canary-changed-unknown-base {a base the history does not hold falls back to
 
 test canary-cli-list {-list 1 prints the selection and runs nothing} -body {
     set out [exec [info nameofexecutable] [file join $::projectRoot tests canary.tcl] -list 1 -base HEAD -host linux-x86_64 -budget 0]
-    list [string match "canary on linux-x86_64: * items, about * s of a 0 s budget*" $out] [string match *######## $out]
+    list [string match "*\ncanary on linux-x86_64: * items, about * s of a 0 s budget*" $out] [string match *######## $out]
 } -result {1 0}
+
+test canary-cli-toolchain-changed {-toolchain-changed 1 says so first, in GitHub Actions as an annotation too, and selects the toolchain-sensitive items; -history 0 leaves the history out} -body {
+    set saved [array get ::env GITHUB_ACTIONS]
+    set ::env(GITHUB_ACTIONS) true
+    try {
+        set out [exec [info nameofexecutable] [file join $::projectRoot tests canary.tcl] -list 1 -base HEAD -host linux-x86_64 -budget 0 \
+            -toolchain rustc-9.9.9-0123456789ab -toolchain-changed 1 -history 0]
+    } finally {
+        unset ::env(GITHUB_ACTIONS)
+        array set ::env $saved
+    }
+    set lines [split $out \n]
+    list [string match "::warning title=Toolchain changed on linux-x86_64::*rustc-9.9.9-0123456789ab*" [lindex $lines 0]] \
+        [string match "TOOLCHAIN CHANGED on linux-x86_64: * The toolchain-sensitive items run first." [lindex $lines 1]] \
+        [expr {[lsearch -glob $lines "*tests/native-tcl-unicode.test*toolchain-sensitive: *"] >= 0}] \
+        [lsearch -glob $lines "*failed in *"]
+} -result {1 1 1 -1}
 
 foreach scratch [glob -nocomplain -directory [temporaryDirectory] canary-[pid]-*] {
     file delete -force $scratch

@@ -274,14 +274,12 @@ proc native::lower::ImmediateEnum {type} {
                 }
 >>>>
 
-@@ payload-enums-sendable a payload-bearing enum is Sendable (its payload would be lost in transfer)
+@@ payload-enums-sendable a payload-bearing enum is Sendable whatever its payloads hold (a function-valued payload field would cross a VM boundary; PORTABILITY-PAYLOAD-ENUM-TRANSFER-MILESTONE-1.md)
 ## hir/types.tcl
 <<<<
-    if {[IsEnum $type] && [hir::enums::hasPayloads [lindex $type 1]]} {
-        # PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md: the transfer codecs
+        return [SendComponents [hir::enums::payloadParts [lindex $type 1]] $assumed [concat $seen [list $type]]]
 ====
-    if {0 && [IsEnum $type] && [hir::enums::hasPayloads [lindex $type 1]]} {
-        # PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md: the transfer codecs
+        return {total ""}
 >>>>
 
 # ---------------------------------------------------------------------------

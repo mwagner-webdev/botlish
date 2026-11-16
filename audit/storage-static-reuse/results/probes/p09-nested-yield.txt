@@ -1,0 +1,45 @@
+# p09-nested-yield
+
+## Outcomes
+
+* interp: value [1, 2, 10, 11, 22, true]
+* compile: value [1, 2, 10, 11, 22, true]
+* cranelift: value [1, 2, 10, 11, 22, true]
+* cranelift-unfused: value [1, 2, 10, 11, 22, true]
+
+## HIR facts
+
+* may yield: inner, outer
+* coroutine thunks: 1
+* affine releases (after a statement): after e61: step
+* affine exit releases: none
+* native representation: structs {} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 1, bytes 72, peak live 1 objects/72B, gc cycles 0, peak reachable (GC stress) 1 objects/72B; List 1/72B
+* counters copies: listElements 6
+* <program> listnew List x1 72B at p09-nested-yield.bot:22:1 list
+
+## Native allocations, coroutine fusion off
+
+allocations 2, bytes 168, peak live 2 objects/168B, gc cycles 0, peak reachable (GC stress) 2 objects/168B; List 1/72B, Coroutine 1/96B
+* counters coroutines: stacksMapped 1, released 1
+* counters copies: listElements 6
+* <program> cocreate Coroutine x1 96B at p09-nested-yield.bot:17:1 coroutine
+* <program> listnew List x1 72B at p09-nested-yield.bot:22:1 list
+
+## C backend
+
+* run: value: [1, 2, 10, 11, 22, true] (agrees)
+* runtime services: int.to_decimal
+* frame: {"type": "p09_nested_yield_coh1", "role": "handle", "holds": []}
+* frame: {"type": "p09_nested_yield_3_inner_frame", "role": "frame", "of": "inner (i3)", "holds": [], "suspension_values": []}
+* frame: {"type": "p09_nested_yield_2_outer_frame", "role": "frame", "of": "outer (i2)", "holds": ["p09_nested_yield_3_inner_frame"], "suspension_values": ["v_first_8"]}
+* frame: {"type": "p09_nested_yield_1_coroutine_frame", "role": "frame", "of": "the coroutine of outer, constructed at p09-nested-yield.bot:17:1", "holds": ["p09_nested_yield_2_outer_frame"], "suspension_values": []}
+* frame: {"type": "p09_nested_yield_co1", "role": "storage", "of": "the storage of a coroutine of outer, constructed at p09-nested-yield.bot:17:1", "holds": ["p09_nested_yield_1_coroutine_frame", "p09_nested_yield_coh1"]}
+* host sizeof/_Alignof: p09_nested_yield_coh1 24 8
+* host sizeof/_Alignof: p09_nested_yield_3_inner_frame 16 8
+* host sizeof/_Alignof: p09_nested_yield_2_outer_frame 40 8
+* host sizeof/_Alignof: p09_nested_yield_1_coroutine_frame 48 8
+* host sizeof/_Alignof: p09_nested_yield_co1 72 8

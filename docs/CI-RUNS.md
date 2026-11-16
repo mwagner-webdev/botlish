@@ -242,7 +242,19 @@ its budget (`-budget`, 600 seconds):
    included), and the merge base with main otherwise, so a branch's every
    commit counts, not only its last push's. A base the history does not
    hold (a force push) falls back to HEAD's parent.
-2. **What failed recently on this host:** `tests/canary.tsv`'s history
+2. **When the toolchain changed, what depends on it:** the items that
+   declare themselves toolchain-sensitive (next section), the smallest
+   first. The toolchain changed when the push changes one of the
+   repository's statements of it (`rust-toolchain.toml`,
+   `tools/rust-toolchain.sh`, `native/Cargo.lock`, the setup scripts and
+   the setup and build actions: `canary::toolchainSources`), or when the
+   run's Rust toolchain (`rustc -vV` in the checkout, named as the
+   build-native action names it: `rustc-RELEASE-COMMIT`) is not the one
+   `tests/canary.tsv` records for the host. The canary says so first, and
+   as an annotation of the run.
+3. **What covers a changed source:** the items whose `covers` lines match
+   a path the push adds or changes, the smallest first.
+4. **What failed recently on this host:** `tests/canary.tsv`'s history
    entries for the host target, the most failing commits first.
 
 An item's estimate is its duration in `tests/canary.tsv` (seconds on
@@ -264,6 +276,35 @@ The two cheap gates are steps of tests.yml's canary job, not jobs: on
 runner after the canary had passed, and the expensive jobs waited with it.
 Each step runs whatever an earlier one found, so one red push reports all
 three.
+
+### Declarations
+
+An item declares itself in its leading comment lines, above its first line
+of code, one declaration a line:
+
+```
+# canary: toolchain -- REASON
+# canary: covers PATTERN...
+```
+
+- **`toolchain`:** the file depends on the Rust toolchain itself, as REASON
+  says: Rust's Unicode data (native-tcl-unicode.test, argv.test), cargo's
+  layout and the link (c-ffi.test, native-executable.test,
+  aot-stub-linker.test), the runtime archive's system libraries
+  (system-linker.test), the runtime's own number formatting
+  (numeric-text.test). Together they take about two and a half minutes on
+  linux-x86_64. Both of rustc 1.100's defects failed among them.
+- **`covers`:** a push that changes a path a PATTERN matches selects the
+  file. A PATTERN is a path relative to the root in `string match` syntax
+  (`*` crosses directories). They state AGENTS.md's "If you change X, run
+  Y" for Y, so far for the native runtime (`native/src/runtime/`, the AOT
+  and library code generation) and the canary's own tooling.
+
+Both are properties of the files, not a list of the canary's: a file
+carries them as it carries its constraints, and the canary still only
+orders. tests/canary.test checks that every declaration parses and every
+pattern matches a file of the tree, so a renamed source leaves no dead
+pattern behind.
 
 ### A branch push runs only the canary, on every host
 
@@ -311,7 +352,10 @@ tests.yml on main (the interp job's per-file times, the golden shards'
 per-suite times); costs, for each host that runs the acceptance tier in
 shards (macOS, Windows), from the acceptance jobs of the newest successful
 push run of its workflow on main (each item's seconds between the lines
-tier.tcl's test runners print: next section).
+tier.tcl's test runners print: next section); toolchains, for each host,
+from the newest successful push run of its workflow on main (the
+build-native action's `Rust toolchain:` line, in the canary job's log;
+macOS: the smoke job's).
 
 The first file, from 2026-10-15 to 11-05: 107 failed runs, the logs of
 370 of their 373 failed jobs. A job reported zero to two items, or 15 to 30
@@ -368,6 +412,33 @@ per host (two on macOS: the smoke job and its Linux control).
 The canary orders; it skips nothing. A test it runs runs again in its
 ordinary job, and a failure it misses is found there as before. It is no
 substitute for the checks AGENTS.md names for an area.
+
+### The toolchain canary
+
+The repository builds with the toolchain `rust-toolchain.toml` pins
+(AGENTS.md, "Building the native (Cranelift) backend"), so a new stable
+Rust reaches it only as a commit, a bump. `toolchain-canary.yml` tells that
+bump what it will meet before anyone writes it:
+
+- Once a day (03:41 UTC) a small job reads the newest release of the
+  stable channel from its manifest
+  (`static.rust-lang.org/dist/channel-rust-stable.toml`).
+- When that release is not the pinned one, and no scheduled run has tested
+  it yet, a job per host builds main with it (installed beside the pinned
+  toolchain, made the default and set as `RUSTUP_TOOLCHAIN`) and runs
+  `tests/canary.tcl -base HEAD -budget 0 -history 0 -toolchain-changed 1`:
+  every toolchain-sensitive file, nothing of the history.
+- A run that tested a release, red or green, leaves a marker in the cache
+  (`toolchain-canary-RELEASE`), so each release is tested once, about a
+  day after it ships; a cache that evicts the marker costs one more run.
+- A manual run tests any channel or release (`toolchain`: stable, beta,
+  nightly, 1.101.0), tested before or not.
+
+A red run is the report: the next bump fails those files there, and its
+log names the cause above the failures. Nothing waits for it: no release
+requirement, no test workflow and no merge rule reads it. It is the one
+workflow that builds with a channel instead of the pin
+(`tools/ci/test_runs.py` checks every other).
 
 ## 5. A commit already tested
 

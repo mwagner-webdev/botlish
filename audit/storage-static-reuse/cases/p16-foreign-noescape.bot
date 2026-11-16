@@ -1,0 +1,13 @@
+# p16 -- byte storage lent to C for exactly one call: write(2)'s buffer is
+# `read noescape`, so the Bytes is exposed in place (no copy) and kept
+# alive until the call returns; C may not keep the pointer. Nothing in the
+# language lets C retain Botlish storage past the call (p16b).
+import std::abi::bytes
+import std::ffi::c
+import std::str
+import std::byte
+
+extern c fn c_write named "write"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, n: std::ffi::c::ULong) -> std::ffi::c::Long
+
+data = std::abi::bytes::from_list(std::str::encode_utf8("probe p16\n"))
+c_write(1, data, 10)

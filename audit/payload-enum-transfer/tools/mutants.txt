@@ -1,0 +1,373 @@
+# Mutants of payload-bearing enum transfer
+# (audit/payload-enum-transfer/tools/mutate.tcl;
+# PORTABILITY-PAYLOAD-ENUM-TRANSFER-MILESTONE-1.md, "Mutation testing"):
+# each a deliberate bug in one invariant of the milestone -- the structural
+# Sendable judgement, the canonical schema and its fingerprint, the Tcl
+# codec, the native plan's validation and the native codec.
+#
+#   @@ NAME DESCRIPTION
+#   !! DETECTOR ...    tests of tests/payload-enum-transfer.test,
+#                      tests/value-transfer.test or tests/sendability.test
+#                      (tcltest -match patterns), rust:FILTER (the native
+#                      crate's `cargo test --release --lib FILTER`), or
+#                      fuzz:SEEDS (fuzz.tcl against the independent oracle)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit
+# are comments.
+
+# --- The static judgement ----------------------------------------------------
+
+@@ any-payload-sendable any payload-bearing enum is Sendable, whatever its cases carry: a function-valued field crosses a VM boundary
+!! pet-class-function pet-class-coroutine pet-admit-encode pet-admit-view fuzz:1-4
+## hir/types.tcl
+<<<<
+        return [SendComponents [hir::enums::payloadParts [lindex $type 1]] $assumed [concat $seen [list $type]]]
+====
+        return {total ""}
+>>>>
+
+@@ first-field-only an enum is judged by its first payload field alone (its first case's): a non-sendable field of a later case passes
+!! pet-class-function pet-class-any-case pet-class-recursive-leaf fuzz:1-4
+## hir/types.tcl
+<<<<
+        return [SendComponents [hir::enums::payloadParts [lindex $type 1]] $assumed [concat $seen [list $type]]]
+====
+        return [SendComponents [lrange [hir::enums::payloadParts [lindex $type 1]] 0 0] $assumed [concat $seen [list $type]]]
+>>>>
+
+@@ none-case-ignored a case whose field is known not sendable is ignored (taken as unknown at worst): the enum is not refused as none
+!! pet-class-function pet-class-nested-enum pet-class-opaque fuzz:1-4
+## hir/types.tcl
+<<<<
+        return [SendComponents [hir::enums::payloadParts [lindex $type 1]] $assumed [concat $seen [list $type]]]
+====
+        set judged [SendComponents [hir::enums::payloadParts [lindex $type 1]] $assumed [concat $seen [list $type]]]
+        if {[lindex $judged 0] eq "none"} {
+            return {total ""}
+        }
+        return $judged
+>>>>
+
+@@ recursion-total a recursive enum is taken as sendable outright: a non-sendable leaf reached through its own recursion is lost
+!! pet-class-recursive-leaf pet-class-recursive-deep-leaf pet-class-order
+## hir/types.tcl
+<<<<
+        if {$type in $seen} {
+            return {total ""}
+        }
+        return [SendComponents [hir::enums::payloadParts [lindex $type 1]] $assumed [concat $seen [list $type]]]
+====
+        if {$type in $seen || [lsearch -glob [hir::enums::payloadTypes [lindex $type 1]] "*[lindex $type 1]*"] >= 0} {
+            return {total ""}
+        }
+        return [SendComponents [hir::enums::payloadParts [lindex $type 1]] $assumed [concat $seen [list $type]]]
+>>>>
+
+# --- The schema --------------------------------------------------------------
+
+@@ payload-field-dropped a payload's last field is missing from the schema: it is never written, and a decoded value lacks it
+!! pet-schema-Message pet-schema-Shape pet-vector-several-fields pet-roundtrip-several fuzz:1-4
+## hir/transfer.tcl
+<<<<
+                lappend payloads [list $c [Node state [hir::enums::payloadType $id $c]]]
+====
+                set t [hir::enums::payloadType $id $c]
+                if {[llength [lindex $t 1]] > 2} {
+                    set t [list struct [lrange [lindex $t 1] 0 end-2]]
+                }
+                lappend payloads [list $c [Node state $t]]
+>>>>
+
+@@ payload-declared-order a payload's fields are in the schema in their declared order, not sorted: the declaration's spelling becomes its identity, and the bytes' field order with it
+!! pet-schema-Shape pet-fingerprint-stable pet-vector-several-fields fuzz:1-4
+## hir/transfer.tcl
+<<<<
+                lappend payloads [list $c [Node state [hir::enums::payloadType $id $c]]]
+====
+                lappend payloads [list $c [Node state [list struct [hir::enums::fields $id $c]]]]
+>>>>
+
+@@ cases-declared-order a payload-bearing enum's cases are in its schema in declaration order: the fingerprint and every case index depend on how the declaration is written
+!! pet-fingerprint-stable pet-program-compatible pet-schema-Message fuzz:1-4
+## hir/transfer.tcl
+<<<<
+        set payloads {}
+        foreach c $cases {
+            if {[hir::enums::hasPayload $id $c]} {
+====
+        set payloads {}
+        foreach c [hir::enums::cases $id] {
+            if {[hir::enums::hasPayload $id $c]} {
+>>>>
+
+@@ payload-free-cases-dropped only the payload-bearing cases are in the schema (as though one value's case decided it): a payload-free case has no index, and the others' indices move
+!! pet-vector-payload-free-case pet-vector-one-int pet-schema-Message pet-fingerprint-changes-case-added fuzz:1-4
+## hir/transfer.tcl
+<<<<
+            } else {
+                lappend payloads [list $c ""]
+            }
+====
+            }
+>>>>
+
+@@ payload-free-penum a payload-free enum takes the payload-bearing schema form: its text, fingerprint and so its old encoding change
+!! pet-schema-Color pet-schema-payload-free-unchanged pet-vector-fingerprints
+## hir/transfer.tcl
+<<<<
+        if {![hir::enums::hasPayloads $id]} {
+            # (Every case payload-free: the node, its text and so its
+====
+        if {0} {
+            # (Every case payload-free: the node, its text and so its
+>>>>
+
+@@ fingerprint-keeps-length the fingerprint is the schema of the static type as it is, List lengths and positional shapes included: a List literal of a recursive enum is refused by a receiver of List[T]
+!! pet-fingerprint-literal pet-gc-stress
+## hir/transfer.tcl
+<<<<
+    if {[dict get $state intent]} {
+        set type [Intent $type]
+    }
+====
+>>>>
+
+# --- The Tcl codec (core/transfer.tcl) ---------------------------------------
+
+@@ payload-not-written the encoder writes a payload-bearing case's index but not its payload
+!! pet-vector-one-int pet-vector-list-payload pet-roundtrip-text fuzz:1-4
+## core/transfer.tcl
+<<<<
+                append out [Varuint $index]
+                if {$child ne ""} {
+                    lappend stack [list $child [lindex $v 3]]
+                }
+====
+                append out [Varuint $index]
+>>>>
+
+@@ other-case-payload-schema the encoder writes every payload by the first payload-bearing case's schema, not its own case's
+!! pet-vector-one-int pet-vector-several-fields pet-roundtrip-list fuzz:1-4
+## core/transfer.tcl
+<<<<
+                set child [lindex $payloads $index 1]
+                if {($child eq "") != ([llength $v] == 3)} {
+====
+                set child [lindex $payloads $index 1]
+                if {$child ne ""} {
+                    set child [lindex [lsearch -all -inline -not -exact -index 1 $payloads ""] 0 1]
+                }
+                if {($child eq "") != ([llength $v] == 3)} {
+>>>>
+
+@@ payload-not-read the decoder makes every case payload-free and never reads a payload's bytes
+!! pet-roundtrip-text pet-match-decoded pet-vector-one-int fuzz:1-4
+## core/transfer.tcl
+<<<<
+                lassign [lindex $payloads $index] c child
+                if {$child eq ""} {
+                    lappend values [core::value::enumValue $id $c]
+====
+                lassign [lindex $payloads $index] c child
+                if {1} {
+                    lappend values [core::value::enumValue $id $c]
+>>>>
+
+@@ wrong-case-built the decoder builds the next case in sorted order around the payload it read
+!! pet-roundtrip-text pet-match-decoded pet-vector-one-int fuzz:1-4
+## core/transfer.tcl
+<<<<
+                    lappend work [list wrap $id $c] [list decode $child]
+====
+                    lappend work [list wrap $id [lindex $payloads [expr {($index + 1) % [llength $payloads]}] 0]] [list decode $child]
+>>>>
+
+@@ forged-index-accepted the decoder does not check a case index against the declared cases
+!! pet-refuse-case-index pet-refuse-case-index-large pet-refuse-recursive-index fuzz:1-4
+## core/transfer.tcl
+<<<<
+                if {$index >= [llength $payloads]} {
+                    Refuse TransferInvalidValue "case index $index of enum $id (it has [llength $payloads])"
+                }
+====
+>>>>
+
+@@ trailing-accepted the decoder ignores bytes after the value: a payload-free case followed by stray bytes decodes
+!! pet-refuse-payload-free-extra pet-refuse-payload-extra fuzz:1-4
+## core/transfer.tcl
+<<<<
+    if {$pos != $end} {
+        Refuse TransferMalformed "[expr {$end - $pos}] bytes after the value"
+    }
+====
+>>>>
+
+@@ min-size-largest-case a payload enum's minimum size is its largest case's, not its least: a List of small cases is refused as malformed although every byte is there
+!! pet-roundtrip-payload-free-list fuzz:1-4
+## core/transfer.tcl
+<<<<
+                        if {$least eq "" || $m < $least} {
+                            set least $m
+                        }
+                    }
+                    set size [expr {1 + $least}]
+====
+                        if {$least eq "" || $m > $least} {
+                            set least $m
+                        }
+                    }
+                    set size [expr {1 + $least}]
+>>>>
+
+@@ zero-budget-bypassed elements of no size draw on no budget: a few bytes claim millions of them
+!! vt-refuse-zero-budget
+## core/transfer.tcl
+<<<<
+    set budget [expr {$budget - $count}]
+    if {$budget < 0} {
+====
+    if {0} {
+>>>>
+
+@@ decoded-payload-shared the decoder hands out the payload of the value last encoded in the process instead of one built from the bytes: copy and source share their mutable payload (unobservable under value semantics: every read of a payload is a logical copy), and bytes decoded after a later encoding take that later value's payload
+!! pet-mutable-independent
+## core/transfer.tcl
+<<<<
+                append out [Varuint $index]
+                if {$child ne ""} {
+                    lappend stack [list $child [lindex $v 3]]
+                }
+====
+                append out [Varuint $index]
+                if {$child ne ""} {
+                    set ::core::transfer::lastPayload [lindex $v 3]
+                    lappend stack [list $child [lindex $v 3]]
+                }
+>>>>
+## core/transfer.tcl
+<<<<
+                lassign $instruction op id c
+                lappend values [core::value::enumCaseValue $id $c [lpop values]]
+====
+                lassign $instruction op id c
+                set p [lpop values]
+                if {[info exists ::core::transfer::lastPayload]} {
+                    set p $::core::transfer::lastPayload
+                }
+                lappend values [core::value::enumCaseValue $id $c $p]
+>>>>
+
+# --- The native plan (native/lower.tcl) --------------------------------------
+
+@@ plan-unchecked native lowering resolves a payload enum's schema without checking it against the declaration: a forged schema omitting or swapping a payload becomes a plan
+!! pet-plan-validated
+## native/lower.tcl
+<<<<
+                    if {![hir::enums::hasPayload $id $c] || [lindex $payload 0] ne "struct" || [lindex $payload 1] ne ""
+                            || [lmap w [lindex $payload 3] {lindex $w 0}] ne [lsort [hir::enums::fieldNames $id $c]]} {
+====
+                    if {0} {
+>>>>
+## native/lower.tcl
+<<<<
+                        if {[hir::enums::hasPayload $id $c]} {
+                            throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: case \"$c\" of enum \"$id\" carries a payload its schema omits"
+                        }
+====
+>>>>
+## native/lower.tcl
+<<<<
+                if {[lmap p $payloads {lindex $p 0}] ne [lsort $declared] || [llength $payloads] != [llength $declared]} {
+====
+                if {0} {
+>>>>
+
+# --- The native codec (native/src/runtime/transfer.rs) -----------------------
+
+@@ native-declaration-number the native encoder writes a case's declaration number, this program's own, instead of its index among the sorted names: the bytes leak a program-relative number
+!! pet-cross-backend pet-vector-one-int rust:transfer_payload
+## native/src/runtime/transfer.rs
+<<<<
+                put_varuint(&mut out, index as u64);
+                if let Some(child) = child {
+====
+                put_varuint(&mut out, case as u64);
+                if let Some(child) = child {
+>>>>
+
+@@ native-payload-not-written the native encoder writes a payload-bearing case's index but not its payload
+!! pet-cross-backend pet-vector-one-int rust:transfer_payload
+## native/src/runtime/transfer.rs
+<<<<
+                if let Some(child) = child {
+                    nodes.push(child);
+                    vm(p).temp_roots.push(enum_case_of(v).payload);
+                }
+====
+                let _ = child;
+>>>>
+
+@@ native-payload-unrooted the native decoder takes a payload off the roots before its case's object is allocated: a collection there frees the payload the object will hold
+!! pet-gc-stress rust:transfer_recursive_payload_enums rust:transfer_payload_enums_between
+## native/src/runtime/transfer.rs
+<<<<
+                let payload = *vm(p).temp_roots.last().expect("the payload made");
+                let v = vm(p).new_enum_case(number, case, payload);
+                if v == NO_VALUE {
+                    return Err(Stop::Failed);
+                }
+                *vm(p).temp_roots.last_mut().expect("the payload's place") = v;
+====
+                let payload = vm(p).temp_roots.pop().expect("the payload made");
+                let v = vm(p).new_enum_case(number, case, payload);
+                if v == NO_VALUE {
+                    return Err(Stop::Failed);
+                }
+                vm(p).temp_roots.push(v);
+>>>>
+
+@@ native-payload-free-default the native decoder builds a payload-bearing case as the enum's first payload-free case: a remote actor receives a default instead of what was sent
+!! pet-remote-messages pet-cross-backend rust:transfer_payload
+## native/src/runtime/transfer.rs
+<<<<
+                    Some(child) => {
+                        work.push(Work::Wrap(*number, case));
+                        work.push(Work::Decode(child));
+                    }
+====
+                    Some(child) => {
+                        let free = payloads.iter().position(|p| p.is_none()).map(|i| cases[i]).unwrap_or(case);
+                        work.push(Work::Wrap(*number, free));
+                        work.push(Work::Decode(child));
+                    }
+>>>>
+
+@@ native-index-unchecked the native decoder does not check a case index against the cases: a forged index reads past the plan
+!! pet-refuse-case-index pet-refuse-recursive-index rust:transfer_payload_enums_refuse
+## native/src/runtime/transfer.rs
+<<<<
+                let index = r.varuint()?;
+                if index >= cases.len() as u64 {
+                    return Err(Refusal::InvalidValue.into());
+                }
+                let case = cases[index as usize];
+====
+                let index = r.varuint()?;
+                let case = cases.get(index as usize).copied().unwrap_or(0);
+                let index = index.min(cases.len() as u64 - 1);
+>>>>
+
+@@ native-plan-payload-unchecked the native plan reader does not check that a payload's node is a struct: a malformed plan reaches the codec
+!! rust:transfer_payload_enum_plans_are_checked
+## native/src/runtime/transfer.rs
+<<<<
+                if !matches!(nodes[child], Node::Struct { .. }) {
+====
+                if false && !matches!(nodes[child], Node::Struct { .. }) {
+>>>>

@@ -10,6 +10,9 @@
 # function symbols out of an executable (objdump, strace stacks) are
 # constrained to symbolizedExecutables, which the stub linker's executables
 # are not: their machine code is mapped at startup, not an ELF section.
+#
+# canary: toolchain -- the stub executable's image is checked against the runtime the toolchain built
+# canary: covers native/src/runtime/aotimage.rs native/src/runtime/program.rs native/src/codegen/aot.rs
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 

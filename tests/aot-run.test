@@ -15,6 +15,8 @@
 # The positive controls (aotr-control-*) show that the checks can fail: the
 # same comparisons fed a wrong value, or the driver asked to keep what it
 # would remove, report the difference.
+#
+# canary: covers native/src/aotrun.rs native/src/launch.rs
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]

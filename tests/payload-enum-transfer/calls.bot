@@ -1,0 +1,90 @@
+# calls.bot -- tests/payload-enum-transfer.test: typed calls into another VM
+# whose request and response types are payload enums
+# (std::actor::remote::Service[protocol::Query, protocol::Outcome]): this
+# VM's caller actor calls the worker's service once per Query case and
+# matches each reconstructed Outcome exhaustively.
+import event_loop_linux
+import protocol
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::int
+import std::list
+import std::str
+import std::thread
+
+fn shown(o: protocol::Outcome) -> str:
+    match o:
+        case protocol::Outcome::Pong:
+            "pong"
+        case protocol::Outcome::Sum {value}:
+            "sum ".concat(value.to_string())
+        case protocol::Outcome::Text {text}:
+            "text ".concat(text)
+        case protocol::Outcome::Count {n, longest}:
+            "count ".concat(n.to_string()).append_char(' ').concat(longest)
+
+fn caller(home: std::actor::Inbox[std::actor::remote::Service[protocol::Query, protocol::Outcome]], r: std::actor::remote::Replies[protocol::Outcome], out: std::actor::Address[List[str]], context ev: std::event_loop::Loop, resume std::actor::Answer) -> std::actor::Exit:
+    c = std::actor::remote::caller(r):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    rx = std::actor::listen(home):
+        on std::actor::Closed:
+            return std::actor::exit(-2)
+    svc = std::actor::receive(rx):
+        on std::actor::Closed:
+            return std::actor::exit(-3)
+    queries = [protocol::Query::Ping, protocol::Query::Add {a: 2, b: 40}, protocol::Query::Echo {text: "héllo"}, protocol::Query::Split {words: ["ab", "bbbb", "ccc"]}]
+    lines = loop q in queries:
+        o = std::actor::remote::call(svc, q, c):
+            on std::actor::remote::CallFailed {reason}:
+                return std::actor::exit(-4)
+            on std::actor::Closed:
+                return std::actor::exit(-5)
+        shown(o)
+    out.send(lines)
+    std::event_loop::stop():
+        on std::event_loop::SchedulerFault:
+            return std::actor::exit(-6)
+    std::actor::exit(0)
+
+fn go(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, t: std::thread::Threads, p: std::thread::Port, db: std::thread::Doorbell) -> List[any] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    std::thread::serve()
+    {to: home, inbox: home_in} = std::actor::open[std::actor::remote::Service[protocol::Query, protocol::Outcome]](1)
+    {to: out, inbox: result} = std::actor::open[List[str]](1)
+    remote_home = std::actor::remote::export(home, 1)
+    r = std::actor::remote::replies[protocol::Outcome](4)
+    a = inject context std::event_loop::Loop:
+        coroutine {step, first} = caller(home_in, r, out)
+        std::actor::spawned(step, first)
+    std::actor::start(a)
+    {thread} = std::thread::start(std::thread::entry(protocol::serve_queries), protocol::Home {home: remote_home})
+    # (The caller stops this loop after its fourth reply; the worker stops
+    # its own after its fourth answer.)
+    std::event_loop::run()
+    worker = std::thread::join(thread)
+    std::thread::close_port()
+    lines = std::actor::drain(result).at(0):
+        on IndexNotFound:
+            ["no result"]
+    [lines, worker.sent, worker.answered]
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context std::actor::create()
+with context std::thread::create(2)
+with context std::thread::port()
+go():
+    on std::event_loop::SchedulerFault:
+        ["scheduler fault"]
+    on std::event_loop::DriverFault {code}:
+        ["driver fault", code]
+    on std::event_loop::LoopReentered:
+        ["reentered"]
+    on std::thread::ThreadLimit:
+        ["thread limit"]
+    on std::thread::ThreadStartFailed {reason}:
+        ["start failed", reason]
+    on std::thread::ThreadFailed {identity, message}:
+        ["failed", identity, message]

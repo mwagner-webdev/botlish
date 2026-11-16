@@ -1,0 +1,33 @@
+# p01-sequential-temps
+
+## Outcomes
+
+* interp: value 10335
+* compile: value 10335
+* cranelift: value 10335
+* cranelift-unfused: value 10335
+
+## HIR facts
+
+* may yield: none
+* coroutine thunks: 0
+* affine releases (after a statement): none
+* affine exit releases: none
+* native representation: structs {} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 4000, bytes 116670, peak live 4000 objects/116670B, gc cycles 0, peak reachable (GC stress) 2 objects/60B; String 4000/116670B
+* counters copies: stringBytes 10335
+* label inttostr String x1000 27890B at p01-sequential-temps.bot:9:9 label()/a=/value/receiver
+* label strcat String x1000 29890B at p01-sequential-temps.bot:10:26 label()/n=/value/arg1
+* label inttostr String x1000 28445B at p01-sequential-temps.bot:11:9 label()/b=/value/receiver
+* label strcat String x1000 30445B at p01-sequential-temps.bot:12:26 label()/binary/right/arg1
+
+## Native allocations, coroutine fusion off
+
+(no coroutine: as fused)
+
+## C backend
+
+* p01-sequential-temps.bot:9:9: the C backend cannot compile the native operation std::str::concat yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service

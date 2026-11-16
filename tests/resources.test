@@ -19,6 +19,8 @@
 # runtime's counters (native::allocationReport's resources) show that each
 # release ran once. Rejected programs are written into the temporary
 # directory, a module and an entry program each.
+#
+# canary: covers native/src/runtime/affine.rs native/src/runtime/coroutine*
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]

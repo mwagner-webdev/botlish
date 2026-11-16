@@ -1,0 +1,28 @@
+# p16-foreign-noescape
+
+## Outcomes
+
+* interp: error CORE SEMANTIC NATIVE-ONLY
+* compile: error CORE SEMANTIC NATIVE-ONLY
+* cranelift: value 10
+* cranelift-unfused: value 10
+
+## HIR facts
+
+* may yield: none
+* coroutine thunks: 0
+* affine releases (after a statement): none
+* affine exit releases: none
+* native representation: structs {return 1} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 0, bytes 0, peak live 0 objects/0B, gc cycles 0, peak reachable (GC stress) 0 objects/0B; 
+
+## Native allocations, coroutine fusion off
+
+(no coroutine: as fused)
+
+## C backend
+
+* stdlib/abi/bytes.bot:112:13: the C backend cannot compile a value of type List[int] yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service

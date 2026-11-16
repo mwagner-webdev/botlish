@@ -1,0 +1,20 @@
+# p18 -- how precise the C backend's frame pass is. `x` is read only in the
+# else branch, which no path from the yield in the then branch reaches: x is
+# never live across a suspension. Persist (ccompile/ccompile.tcl) decides
+# on the generated C's line order -- a reference after the resume label in
+# the variable's C block -- so it keeps x in the frame. `y` is read only
+# before the yield. A path-sensitive liveness would keep neither.
+import std::coroutine
+
+fn worker(seed: int, flag: bool) -> int:
+    x = seed * 3
+    y = seed + 1
+    if flag:
+        yield y
+        0
+    else:
+        x
+
+coroutine {step: a, first: a0} = worker(5, true)
+coroutine {step: b, first: b0} = worker(5, false)
+[a0, a(), b0, std::coroutine::done?(b)]

@@ -12,6 +12,9 @@
 # raises NATIVE BUG for a driver killed by a signal, and exec raises an error
 # for one that exits otherwise than with its result line. The exact error
 # code is compared, never a message that merely mentions a stack.
+#
+# canary: covers native/src/runtime/native_stack.rs native/src/runtime/platform/*
+# canary: covers native/src/runtime/coroutine*
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 

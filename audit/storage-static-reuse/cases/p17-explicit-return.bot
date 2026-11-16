@@ -1,0 +1,23 @@
+# p17 -- one function in two spellings: `bare` ends in its trailing struct
+# value, `explicit` in a `return` of the same struct. Their storage needs are
+# identical; whether the native backend carries the result as registers or
+# allocates a Struct per call depends on the spelling (hir/escape.tcl's
+# result recognition). A representation decision, not a semantic one -- but
+# a storage planner reading the same facts would inherit the difference.
+struct P:
+    x: int
+    y: int
+
+fn bare(i: int) -> P:
+    P {x: i, y: i + 1}
+
+fn explicit(i: int) -> P:
+    return P {x: i, y: i + 1}
+
+a = fold i from 0 to 1000 with intermediate acc 0:
+    p = bare(i)
+    acc + p.x + p.y
+b = fold i from 0 to 1000 with intermediate acc 0:
+    p = explicit(i)
+    acc + p.x + p.y
+[a, b]

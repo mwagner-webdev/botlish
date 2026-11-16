@@ -1,0 +1,43 @@
+# p15-bounded-collections
+
+## Outcomes
+
+* interp: value [6500, 1001]
+* compile: value [6500, 1001]
+* cranelift: value [6500, 1001]
+* cranelift-unfused: value [6500, 1001]
+
+## HIR facts
+
+* may yield: none
+* coroutine thunks: 0
+* affine releases (after a statement): none
+* affine exit releases: none
+* native representation: structs {} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 1195, bytes 99712, peak live 1195 objects/99712B, gc cycles 0, peak reachable (GC stress) 2 objects/968B; List 798/71176B, ListPlan 396/28512B, MutableVector 1/24B
+* counters mutableVector: growths 9, growthBytes 8184
+* counters construction: materializations 396, passthrough 4, plansCreated 396, extensions 6104, merges 396, growths 744, growthListElements 7120, pieces 13400, listElementsIntoPlans 6500, materializedListElements 6500
+* counters copies: listElements 13623
+* <program> listnew List x1 40B at p15-bounded-collections.bot:25:1 list
+* fixed listnew List x200 4800B at p15-bounded-collections.bot:10:5 fixed()/loop
+* fixed construct ListPlan x200 14400B at p15-bounded-collections.bot:10:5 fixed()/loop
+* fixed construct List x200 17600B at p15-bounded-collections.bot:10:5 fixed()/loop
+* dynamic listnew List x200 4800B at p15-bounded-collections.bot:14:5 dynamic()/loop
+* dynamic construct ListPlan x196 14112B at p15-bounded-collections.bot:14:5 dynamic()/loop
+* dynamic construct List x196 43904B at p15-bounded-collections.bot:14:5 dynamic()/loop
+* grow listnew List x1 32B at p15-bounded-collections.bot:18:40 grow()/v=/value/arg1
+* grow mvfromlist MutableVector x1 24B at p15-bounded-collections.bot:18:9 grow()/v=/value
+
+## Native allocations, coroutine fusion off
+
+(no coroutine: as fused)
+
+## C backend
+
+* p15-bounded-collections.bot:24:11: the C backend cannot compile the native operation std::list::length yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p15-bounded-collections.bot:10:5: the C backend cannot compile a collecting loop whose List is used (a List of a length not known statically needs storage) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p15-bounded-collections.bot:14:5: the C backend cannot compile a collecting loop whose List is used (a List of a length not known statically needs storage) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p15-bounded-collections.bot:18:9: the C backend cannot compile the native operation std::mutable_vector::from_list yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service

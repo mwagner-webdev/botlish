@@ -2906,11 +2906,20 @@ proc hir::types::SendClass {type {assumed {}} {seen {}}} {
         return [list none [NoSending cptr]]
     }
     if {[IsEnum $type] && [hir::enums::hasPayloads [lindex $type 1]]} {
-        # PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md: the transfer codecs
-        # (core/transfer.tcl, runtime/transfer.rs) write a payload-free
-        # case's name only; a payload-bearing case has no transfer schema
-        # yet. Not sendable, rather than sent without its payload.
-        return [list none "[show $type] has payload-bearing cases, and a payload-bearing enum case has no transfer encoding yet (only an enum whose every case is payload-free is sendable)"]
+        # A payload-bearing enum (PORTABILITY-PAYLOAD-ENUM-TRANSFER-
+        # MILESTONE-1.md): a value is one of its cases, any case, so the
+        # enum is what every payload field of every declared case is --
+        # never the case one value holds (a value typed by the enum may be
+        # any case). A payload-free case adds nothing. An enum met again
+        # inside itself (a recursive enum's own payload) adds nothing, as a
+        # struct met again does: a finite recursive enum is sendable
+        # exactly when its other components are; one met through a struct
+        # is that struct's summary's fixpoint, which walks this afresh (as
+        # Totality's enum case).
+        if {$type in $seen} {
+            return {total ""}
+        }
+        return [SendComponents [hir::enums::payloadParts [lindex $type 1]] $assumed [concat $seen [list $type]]]
     }
     if {[hir::cabi::IsFiniteFloating $type]} {
         return [SendClass [hir::cabi::Carrier $type] $assumed $seen]
@@ -2949,8 +2958,9 @@ proc hir::types::SendClass {type {assumed {}} {seen {}}} {
         return [SendStruct $type $assumed $seen]
     }
     if {[IsEnum $type]} {
-        # A case is its enum's identity and its case name: the receiver
-        # finds both by name (ENUMS.md: no case has a position).
+        # A payload-free enum: a case is its enum's identity and its case
+        # name, the receiver finds both by name (ENUMS.md: no case has a
+        # position). (A payload-bearing one is judged above.)
         return {total ""}
     }
     if {$type in {any struct list immutableSet mutarray mutvec result} || [catch {core::type::normalize $type} normal]} {

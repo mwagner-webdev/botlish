@@ -1,0 +1,36 @@
+# p14-errors-early-exit
+
+## Outcomes
+
+* interp: value 13482
+* compile: value 13482
+* cranelift: value 13482
+* cranelift-unfused: value 13482
+
+## HIR facts
+
+* may yield: none
+* coroutine thunks: 0
+* affine releases (after a statement): none
+* affine exit releases: none
+* native representation: structs {materialized 1} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 3666, bytes 110912, peak live 3666 objects/110912B, gc cycles 0, peak reachable (GC stress) 2 objects/64B; String 3666/110912B
+* counters copies: stringBytes 13482
+* check inttostr String x1000 27890B at p14-errors-early-exit.bot:12:9 check()/s=/value/receiver
+* check strcat String x99 3564B at p14-errors-early-exit.bot:14:46 check()/if/then/fail/payload/field1/arg1
+* check strcat String x901 32326B at p14-errors-early-exit.bot:15:22 check()/call/arg1
+* early inttostr String x1000 27890B at p14-errors-early-exit.bot:18:9 early()/t=/value
+* early strcat String x666 19242B at p14-errors-early-exit.bot:21:22 early()/call/arg1
+
+## Native allocations, coroutine fusion off
+
+(no coroutine: as fused)
+
+## C backend
+
+* p14-errors-early-exit.bot:24:9: the C backend cannot compile a handler that binds an error's payload yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p14-errors-early-exit.bot:12:9: the C backend cannot compile the native operation std::str::concat yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p14-errors-early-exit.bot:18:9: the C backend cannot compile the native operation std::int::to_string yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service

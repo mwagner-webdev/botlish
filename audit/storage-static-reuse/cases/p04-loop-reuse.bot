@@ -1,0 +1,18 @@
+# p04 -- a temporary made in every iteration of a loop and dead at the end
+# of the iteration: one slot reused N times would do. A struct temporary
+# beside it (scalar-replaced natively today) shows what already avoids the
+# heap.
+import std::int
+import std::str
+
+struct Pair:
+    left: int
+    right: int
+
+fn work(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        p = Pair {left: i, right: i + 1}
+        t = std::int::to_string(p.left + p.right)
+        acc + std::str::length(t)
+
+work(1000)

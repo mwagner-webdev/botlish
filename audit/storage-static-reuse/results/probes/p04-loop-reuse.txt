@@ -1,0 +1,29 @@
+# p04-loop-reuse
+
+## Outcomes
+
+* interp: value 3445
+* compile: value 3445
+* cranelift: value 3445
+* cranelift-unfused: value 3445
+
+## HIR facts
+
+* may yield: none
+* coroutine thunks: 0
+* affine releases (after a statement): none
+* affine exit releases: none
+* native representation: structs {local 1} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 1000, bytes 28445, peak live 1000 objects/28445B, gc cycles 0, peak reachable (GC stress) 1 objects/29B; String 1000/28445B
+* work inttostr String x1000 28445B at p04-loop-reuse.bot:15:13 work()/loop/t=/value
+
+## Native allocations, coroutine fusion off
+
+(no coroutine: as fused)
+
+## C backend
+
+* p04-loop-reuse.bot:15:13: the C backend cannot compile the native operation std::int::to_string yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service

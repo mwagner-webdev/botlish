@@ -30,6 +30,8 @@
 # coroutines and failures, run here as regression tests. The graphical
 # acceptance (SDL3's Cocoa driver, a window, Metal) is the census harness's
 # on a macOS runner (tools/census.py, MAIN-THREAD-STARTUP-MILESTONE-1.md).
+#
+# canary: covers native/src/runtime/aot.rs
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 

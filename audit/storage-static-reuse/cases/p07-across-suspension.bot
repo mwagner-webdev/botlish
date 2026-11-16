@@ -1,0 +1,19 @@
+# p07 -- values around a suspension: `kept` is read after the yield, so it
+# must survive the suspension (a frame field in C, the coroutine's stack
+# natively); `dead` is last read by the yield itself, and `after` is made
+# after it. Int and struct values only, so the C backend compiles it.
+import std::coroutine
+
+struct Msg:
+    n: int
+
+fn worker(seed: int, resume Msg) -> int:
+    kept = seed * 3
+    dead = seed + 1
+    m = yield dead
+    after = m.n * 2
+    kept + after
+
+coroutine {step, first} = worker(5)
+last = step(Msg {n: 7})
+[first, last, std::coroutine::done?(step)]

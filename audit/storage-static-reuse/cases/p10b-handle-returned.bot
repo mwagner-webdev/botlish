@@ -1,0 +1,17 @@
+# p10b -- a function that constructs a coroutine and returns its handle:
+# the frame must outlive the constructing function. Natively the coroutine
+# is a heap object and its own stack; the C backend refuses it (its frame
+# is storage of the constructing function's frame).
+import std::coroutine
+
+fn gen(n: int) -> int:
+    loop i from 0 to n:
+        yield i
+    n
+
+fn make(n: int) -> Coroutine{args: [], return: int, errors: []}:
+    coroutine {step, first} = gen(n)
+    step
+
+h = make(4)
+[h(), h(), std::coroutine::done?(h)]

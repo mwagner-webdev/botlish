@@ -1,0 +1,25 @@
+# p15 -- statically bounded versus input-dependent collections: `fixed`
+# builds a List whose length the compiler states (List[int]{length: 8},
+# from a counted collecting loop), `dynamic` one whose length depends on
+# the input, and `grow` a MutableVector that grows by push (its capacity
+# doubles: reallocations).
+import std::list
+import std::mutable_vector
+
+fn fixed(i: int) -> List[int]{length: 8}:
+    loop k from 0 to 8:
+        i + k
+
+fn dynamic(i: int) -> List[int]:
+    loop k from 0 to i.mod(50):
+        k
+
+fn grow(n: int) -> int:
+    v = std::mutable_vector::from_list([0])
+    loop k from 0 to n:
+        v.push(k)
+    std::mutable_vector::length(v)
+
+total = fold i from 0 to 200 with intermediate acc 0:
+    acc + std::list::length(fixed(i)) + std::list::length(dynamic(i))
+[total, grow(1000)]

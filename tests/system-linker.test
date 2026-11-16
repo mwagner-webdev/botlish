@@ -26,6 +26,10 @@
 #
 # The whole executable test suite also runs with BOTLISH_NATIVE_LINKER=system
 # (.github/workflows/tests.yml's system-linker job).
+#
+# canary: toolchain -- the runtime archive's system libraries are what rustc --print native-static-libs names; rustc 1.100 added synchronization.lib on Windows
+# canary: covers native/src/codegen/aot.rs native/runtime-archive/* native/src/runtime/aot.rs
+# canary: covers native/src/runtime/aotimage.rs native/src/runtime/program.rs
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 

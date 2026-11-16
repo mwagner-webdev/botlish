@@ -1,0 +1,22 @@
+# p09 -- nested yielding calls: `inner` yields on `outer`'s behalf (a deep
+# yield). outer's frame holds inner's frame while inner is suspended; two
+# sequential calls of inner never coexist, so their frames can share one
+# union member.
+import std::coroutine
+
+fn inner(base: int) -> int:
+    yield base
+    yield base + 1
+    base * 2
+
+fn outer(seed: int) -> int:
+    first = inner(seed)
+    second = inner(seed * 10)
+    first + second
+
+coroutine {step, first} = outer(1)
+r1 = step()
+r2 = step()
+r3 = step()
+r4 = step()
+[first, r1, r2, r3, r4, std::coroutine::done?(step)]

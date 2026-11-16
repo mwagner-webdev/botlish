@@ -1,0 +1,12 @@
+# p02 -- two temporaries live at once: both are read by the concatenation,
+# so they need two distinct backing slots (and the result a third).
+import std::int
+import std::str
+
+fn label(i: int) -> int:
+    a = std::int::to_string(i).concat("-a")
+    b = std::int::to_string(i * 2).concat("-b")
+    std::str::length(a.concat(b))
+
+fold i from 0 to 1000 with intermediate acc 0:
+    acc + label(i)

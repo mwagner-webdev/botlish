@@ -1,0 +1,312 @@
+# p12-actor-messages
+
+## Outcomes
+
+* interp: value [2745, 200]
+* compile: value [2745, 200]
+* cranelift: value [2745, 200]
+* cranelift-unfused: value [2745, 200]
+
+## HIR facts
+
+* may yield: std::event_loop::yield_now, std::event_loop::wait, std::event_loop::sleep, std::actor::listen, std::actor::receive, std::actor::try_receive, std::actor::send, std::actor::deliver, std::actor::pause, std::actor::sleep, std::actor::next_turn, std::actor::receive_for, std::actor::deliver_for, std::actor::post_waiting, std::actor::serve, std::actor::served, std::actor::host, server, client
+* coroutine thunks: 3
+* affine releases (after a statement): after e3961: step; after e7654: actor; after e5083: e5083; after e5100: e5100; after e5117: e5117
+* affine exit releases: at e4599: step; at e4607: step; at e4619: step; at e4633: step; at e4665: step; at e7685: actor; at e7693: actor; at e7699: actor; at e7708: actor; at e7827: h
+* native representation: structs {materialized 27 return 3} fold slots {}
+
+## Native allocations, fused (default)
+
+allocations 2561, bytes 149650, peak live 2561 objects/149650B, gc cycles 0, peak reachable (GC stress) 66 objects/9183B; String 400/13290B, List 42/1464B, Struct 2036/132040B, MutableArray 6/880B, Block 4/264B, ListPlan 4/288B, Coroutine 4/384B, MutableVector 65/1040B
+* counters mutableVector: shares 31, detaches 18, growths 42, growthBytes 6304
+* counters coroutines: stacksMapped 4, released 4
+* counters construction: materializations 204, plansCreated 4, extensions 53, merges 4, growths 4, growthListElements 60, pieces 718, listElementsIntoPlans 57, materializedStringBytes 2745, materializedListElements 57
+* counters copies: stringBytes 2745, listElements 117
+* <program> mvshare MutableVector x1 16B at p12-actor-messages.bot:64:1 with
+* <program> mvshare MutableVector x1 48B at p12-actor-messages.bot:65:1 with#2
+* <program> mvshare MutableVector x1 16B at p12-actor-messages.bot:66:1 with#3
+* std::event_loop::no_tasks listnew List x3 72B at event_loop.bot:422:36 no_tasks()/call/arg1
+* std::event_loop::no_tasks mvfromlist MutableVector x3 48B at event_loop.bot:422:5 no_tasks()/call
+* std::event_loop::no_ints listnew List x14 336B at event_loop.bot:425:36 no_ints()/call/arg1
+* std::event_loop::no_ints mvfromlist MutableVector x14 224B at event_loop.bot:425:5 no_ints()/call
+* std::event_loop::no_strs listnew List x1 24B at event_loop.bot:428:36 no_strs()/call/arg1
+* std::event_loop::no_strs mvfromlist MutableVector x1 16B at event_loop.bot:428:5 no_strs()/call
+* std::event_loop::registers listnew List x1 24B at event_loop.bot:431:15 registers()/initial=/value
+* std::event_loop::registers construct ListPlan x1 72B at event_loop.bot:431:15 registers()/initial=/value
+* std::event_loop::registers construct List x1 416B at event_loop.bot:431:15 registers()/initial=/value
+* std::event_loop::registers mutarrayfromlist MutableArray x1 440B at event_loop.bot:440:5 registers()/call
+* std::event_loop::create structnew Struct x1 184B at event_loop.bot:453:5 create()/namedstruct
+* std::event_loop::outcomes_checked listnew List x1 24B at event_loop.bot:605:11 outcomes_checked()/out=/value
+* std::event_loop::outcomes_checked structnew Struct x2 112B at event_loop.bot:608:9 outcomes_checked()/out=/value/namedstruct
+* std::event_loop::outcomes_checked construct ListPlan x1 72B at event_loop.bot:605:11 outcomes_checked()/out=/value
+* std::event_loop::outcomes_checked construct List x1 40B at event_loop.bot:605:11 outcomes_checked()/out=/value
+* std::event_loop::channel_checked structnew Struct x4 192B at event_loop.bot:919:5 channel_checked()/name
+* std::event_loop::revoke_all listnew List x1 24B at event_loop.bot:1823:5 revoke_all()/loop
+* std::event_loop::revoke_all structnew Struct x2 96B at event_loop.bot:1825:25 revoke_all()/loop/if/then/call/arg1
+* std::event_loop::revoke_all construct ListPlan x1 72B at event_loop.bot:1823:5 revoke_all()/loop
+* std::event_loop::revoke_all construct List x1 56B at event_loop.bot:1823:5 revoke_all()/loop
+* std::actor::ints listnew List x6 144B at actor.bot:261:36 ints()/call/arg1
+* std::actor::ints mvfromlist MutableVector x6 96B at actor.bot:261:5 ints()/call
+* std::actor::regs listnew List x2 48B at actor.bot:264:36 regs()/call/arg1
+* std::actor::regs mvfromlist MutableVector x2 32B at actor.bot:264:5 regs()/call
+* std::actor::values listnew List x1 24B at actor.bot:267:36 values()/call/arg1
+* std::actor::values mvfromlist MutableVector x1 16B at actor.bot:267:5 values()/call
+* std::actor::create mutarraycreate MutableArray x1 176B at actor.bot:275:19 create()/namedstruct/field10
+* std::actor::create structnew Struct x1 112B at actor.bot:271:5 create()/namedstruct
+* std::actor::request structnew Struct x405 29160B at actor.bot:282:5 request()/namedstruct
+* std::actor::request structnew Struct x200 14400B at actor.bot:282:5 request()/namedstruct
+* std::actor::request structnew Struct x200 14400B at actor.bot:282:5 request()/namedstruct
+* std::actor::listen structnew Struct x1 48B at actor.bot:297:5 listen()/namedstruct
+* std::actor::listen structnew Struct x1 48B at actor.bot:297:5 listen()/namedstruct
+* std::actor::opened structnew Struct x2 96B at actor.bot:428:13 opened()/namedstruct/field1
+* std::actor::opened structnew Struct x2 80B at actor.bot:429:55 opened()/namedstruct/field2/field3
+* std::actor::opened structnew Struct x2 112B at actor.bot:429:16 opened()/namedstruct/field2
+* std::actor::opened structnew Struct x2 96B at actor.bot:427:5 opened()/namedstruct
+* std::actor::take structnew Struct x400 25600B at actor.bot:553:5 take()/namedstruct
+* std::actor::status_answer structnew Struct x405 25920B at actor.bot:556:5 status_answer()/namedstruct
+* std::actor::spawned structnew Struct x2 96B at actor.bot:648:5 spawned()/namedstruct
+* std::actor::start closure Block x2 144B at actor.bot:861:5 start()/coroutine/thunk
+* std::actor::start cocreate Coroutine x2 192B at actor.bot:861:5 start()/coroutine
+* std::event_loop::deterministic::ints listnew List x7 168B at deterministic.bot:74:36 ints()/call/arg1
+* std::event_loop::deterministic::ints mvfromlist MutableVector x7 112B at deterministic.bot:74:5 ints()/call
+* std::event_loop::deterministic::create mutarraycreate MutableArray x1 120B at deterministic.bot:79:16 create()/namedstruct/field1
+* std::event_loop::deterministic::create structnew Struct x1 96B at deterministic.bot:78:5 create()/namedstruct
+* server inttostr String x200 5545B at p12-actor-messages.bot:29:45 server()/n=/value/body=/value/arg1
+* server construct String x200 7745B at p12-actor-messages.bot:30:44 server()/n=/value/methodcall/arg1/field2
+* server structnew Struct x200 9600B at p12-actor-messages.bot:30:22 server()/n=/value/methodcall/arg1
+* client structnew Struct x200 11200B at p12-actor-messages.bot:39:20 client()/total=/value/methodcall/arg1
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> closure Block x1 48B at p12-actor-messages.bot:50:9 main()/s=/value/coroutine/thunk
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> cocreate Coroutine x1 96B at p12-actor-messages.bot:50:9 main()/s=/value/coroutine
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> closure Block x1 72B at p12-actor-messages.bot:54:9 main()/c=/value/coroutine/thunk
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> cocreate Coroutine x1 96B at p12-actor-messages.bot:54:9 main()/c=/value/coroutine
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> listnew List x1 24B at p12-actor-messages.bot:61:5 main()/loop
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> construct ListPlan x1 72B at p12-actor-messages.bot:61:5 main()/loop
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> construct List x1 40B at p12-actor-messages.bot:61:5 main()/loop
+
+## Native allocations, coroutine fusion off
+
+allocations 2561, bytes 149650, peak live 2561 objects/149650B, gc cycles 0, peak reachable (GC stress) 66 objects/9183B; String 400/13290B, List 42/1464B, Struct 2036/132040B, MutableArray 6/880B, Block 4/264B, ListPlan 4/288B, Coroutine 4/384B, MutableVector 65/1040B
+* counters mutableVector: shares 31, detaches 18, growths 42, growthBytes 6304
+* counters coroutines: stacksMapped 4, released 4
+* counters construction: materializations 204, plansCreated 4, extensions 53, merges 4, growths 4, growthListElements 60, pieces 718, listElementsIntoPlans 57, materializedStringBytes 2745, materializedListElements 57
+* counters copies: stringBytes 2745, listElements 117
+* <program> mvshare MutableVector x1 16B at p12-actor-messages.bot:64:1 with
+* <program> mvshare MutableVector x1 48B at p12-actor-messages.bot:65:1 with#2
+* <program> mvshare MutableVector x1 16B at p12-actor-messages.bot:66:1 with#3
+* std::event_loop::no_tasks listnew List x3 72B at event_loop.bot:422:36 no_tasks()/call/arg1
+* std::event_loop::no_tasks mvfromlist MutableVector x3 48B at event_loop.bot:422:5 no_tasks()/call
+* std::event_loop::no_ints listnew List x14 336B at event_loop.bot:425:36 no_ints()/call/arg1
+* std::event_loop::no_ints mvfromlist MutableVector x14 224B at event_loop.bot:425:5 no_ints()/call
+* std::event_loop::no_strs listnew List x1 24B at event_loop.bot:428:36 no_strs()/call/arg1
+* std::event_loop::no_strs mvfromlist MutableVector x1 16B at event_loop.bot:428:5 no_strs()/call
+* std::event_loop::registers listnew List x1 24B at event_loop.bot:431:15 registers()/initial=/value
+* std::event_loop::registers construct ListPlan x1 72B at event_loop.bot:431:15 registers()/initial=/value
+* std::event_loop::registers construct List x1 416B at event_loop.bot:431:15 registers()/initial=/value
+* std::event_loop::registers mutarrayfromlist MutableArray x1 440B at event_loop.bot:440:5 registers()/call
+* std::event_loop::create structnew Struct x1 184B at event_loop.bot:453:5 create()/namedstruct
+* std::event_loop::outcomes_checked listnew List x1 24B at event_loop.bot:605:11 outcomes_checked()/out=/value
+* std::event_loop::outcomes_checked structnew Struct x2 112B at event_loop.bot:608:9 outcomes_checked()/out=/value/namedstruct
+* std::event_loop::outcomes_checked construct ListPlan x1 72B at event_loop.bot:605:11 outcomes_checked()/out=/value
+* std::event_loop::outcomes_checked construct List x1 40B at event_loop.bot:605:11 outcomes_checked()/out=/value
+* std::event_loop::channel_checked structnew Struct x4 192B at event_loop.bot:919:5 channel_checked()/name
+* std::event_loop::revoke_all listnew List x1 24B at event_loop.bot:1823:5 revoke_all()/loop
+* std::event_loop::revoke_all structnew Struct x2 96B at event_loop.bot:1825:25 revoke_all()/loop/if/then/call/arg1
+* std::event_loop::revoke_all construct ListPlan x1 72B at event_loop.bot:1823:5 revoke_all()/loop
+* std::event_loop::revoke_all construct List x1 56B at event_loop.bot:1823:5 revoke_all()/loop
+* std::actor::ints listnew List x6 144B at actor.bot:261:36 ints()/call/arg1
+* std::actor::ints mvfromlist MutableVector x6 96B at actor.bot:261:5 ints()/call
+* std::actor::regs listnew List x2 48B at actor.bot:264:36 regs()/call/arg1
+* std::actor::regs mvfromlist MutableVector x2 32B at actor.bot:264:5 regs()/call
+* std::actor::values listnew List x1 24B at actor.bot:267:36 values()/call/arg1
+* std::actor::values mvfromlist MutableVector x1 16B at actor.bot:267:5 values()/call
+* std::actor::create mutarraycreate MutableArray x1 176B at actor.bot:275:19 create()/namedstruct/field10
+* std::actor::create structnew Struct x1 112B at actor.bot:271:5 create()/namedstruct
+* std::actor::request structnew Struct x405 29160B at actor.bot:282:5 request()/namedstruct
+* std::actor::request structnew Struct x200 14400B at actor.bot:282:5 request()/namedstruct
+* std::actor::request structnew Struct x200 14400B at actor.bot:282:5 request()/namedstruct
+* std::actor::listen structnew Struct x1 48B at actor.bot:297:5 listen()/namedstruct
+* std::actor::listen structnew Struct x1 48B at actor.bot:297:5 listen()/namedstruct
+* std::actor::opened structnew Struct x2 96B at actor.bot:428:13 opened()/namedstruct/field1
+* std::actor::opened structnew Struct x2 80B at actor.bot:429:55 opened()/namedstruct/field2/field3
+* std::actor::opened structnew Struct x2 112B at actor.bot:429:16 opened()/namedstruct/field2
+* std::actor::opened structnew Struct x2 96B at actor.bot:427:5 opened()/namedstruct
+* std::actor::take structnew Struct x400 25600B at actor.bot:553:5 take()/namedstruct
+* std::actor::status_answer structnew Struct x405 25920B at actor.bot:556:5 status_answer()/namedstruct
+* std::actor::spawned structnew Struct x2 96B at actor.bot:648:5 spawned()/namedstruct
+* std::actor::start closure Block x2 144B at actor.bot:861:5 start()/coroutine/thunk
+* std::actor::start cocreate Coroutine x2 192B at actor.bot:861:5 start()/coroutine
+* std::event_loop::deterministic::ints listnew List x7 168B at deterministic.bot:74:36 ints()/call/arg1
+* std::event_loop::deterministic::ints mvfromlist MutableVector x7 112B at deterministic.bot:74:5 ints()/call
+* std::event_loop::deterministic::create mutarraycreate MutableArray x1 120B at deterministic.bot:79:16 create()/namedstruct/field1
+* std::event_loop::deterministic::create structnew Struct x1 96B at deterministic.bot:78:5 create()/namedstruct
+* server inttostr String x200 5545B at p12-actor-messages.bot:29:45 server()/n=/value/body=/value/arg1
+* server construct String x200 7745B at p12-actor-messages.bot:30:44 server()/n=/value/methodcall/arg1/field2
+* server structnew Struct x200 9600B at p12-actor-messages.bot:30:22 server()/n=/value/methodcall/arg1
+* client structnew Struct x200 11200B at p12-actor-messages.bot:39:20 client()/total=/value/methodcall/arg1
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> closure Block x1 48B at p12-actor-messages.bot:50:9 main()/s=/value/coroutine/thunk
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> cocreate Coroutine x1 96B at p12-actor-messages.bot:50:9 main()/s=/value/coroutine
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> closure Block x1 72B at p12-actor-messages.bot:54:9 main()/c=/value/coroutine/thunk
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> cocreate Coroutine x1 96B at p12-actor-messages.bot:54:9 main()/c=/value/coroutine
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> listnew List x1 24B at p12-actor-messages.bot:61:5 main()/loop
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> construct ListPlan x1 72B at p12-actor-messages.bot:61:5 main()/loop
+* main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> construct List x1 40B at p12-actor-messages.bot:61:5 main()/loop
+
+## C backend
+
+* stdlib/event_loop.bot:453:5: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:422:5: the C backend cannot compile the native operation std::mutable_vector::from_list yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:425:5: the C backend cannot compile the native operation std::mutable_vector::from_list yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:428:5: the C backend cannot compile the native operation std::mutable_vector::from_list yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:431:15: the C backend cannot compile a collecting loop whose List is used (a List of a length not known statically needs storage) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:469:53: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:472:42: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:475:53: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:478:61: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:481:51: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:484:59: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:487:32: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:491:24: the C backend cannot compile a value of type str yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:494:16: the C backend cannot compile a value of type str yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:518:35: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:539:55: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:550:30: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:555:32: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:583:78: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:603:37: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:615:26: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:623:29: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:645:50: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:650:217: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:663:27: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:672:32: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:677:30: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:683:59: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:690:45: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:704:51: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:725:54: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:733:57: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:737:45: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:748:47: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:765:52: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:771:52: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:784:34: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:793:82: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:828:50: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:831:44: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:837:28: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:865:30: the C backend cannot compile a value of type str yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:869:71: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:883:55: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:916:68: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:923:64: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:948:49: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:960:57: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:968:56: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:972:42: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1006:45: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1022:29: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1102:76: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1126:74: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1183:68: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1196:43: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1244:28: the C backend cannot compile shift_right of an Int the compiler cannot prove fits int64_t (the v1 runtime-service interface has no shift services) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1258:52: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1268:61: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1298:53: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1314:177: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1330:160: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1375:169: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1387:174: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1392:161: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1406:145: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1493:32: the C backend cannot compile a value of type str yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1502:153: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1572:80: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1618:38: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1637:28: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1709:31: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1778:36: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1822:31: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:261:5: the C backend cannot compile the native operation std::mutable_vector::from_list yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:264:5: the C backend cannot compile the native operation std::mutable_vector::from_list yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:267:5: the C backend cannot compile the native operation std::mutable_vector::from_list yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:271:5: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:282:5: the C backend cannot compile a value of type any yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:281:28: the C backend cannot compile a value of type str yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:292:10: the C backend cannot compile an application of the parameterized struct std::actor::Inbox yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:302:30: the C backend cannot compile an application of the parameterized struct std::actor::Receiver yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:310:11: the C backend cannot compile an application of the parameterized struct std::actor::Receiver yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:334:8: the C backend cannot compile an application of the parameterized struct std::actor::Address yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:341:11: the C backend cannot compile an application of the parameterized struct std::actor::Address yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:361:53: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:364:61: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:367:53: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:370:61: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:373:54: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:377:59: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:381:56: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:387:57: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:424:51: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:435:41: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:441:47: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:461:45: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:488:28: the C backend cannot compile a value of type any yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:511:24: the C backend cannot compile a value of type any yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:530:51: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:541:45: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:556:5: the C backend cannot compile a value of type any yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:647:20: the C backend cannot compile a value of type any yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:650:30: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:670:56: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:675:68: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:690:69: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:696:73: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:710:74: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:745:32: the C backend cannot compile a value of type any yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:775:26: the C backend cannot compile a value of type any yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:798:27: the C backend cannot compile a value of type any yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:806:25: the C backend cannot compile a value of type any yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:837:39: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:842:48: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:847:61: the C backend cannot compile the context struct std::actor::Actors, whose field "boxes" has type MutableVector[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:855:9: the C backend cannot compile the affine struct std::actor::Spawned yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:874:33: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/actor.bot:897:17: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:74:5: the C backend cannot compile the native operation std::mutable_vector::from_list yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:78:5: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:83:41: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:86:53: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:89:53: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:92:61: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:95:53: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:98:61: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:101:55: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:104:53: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:114:50: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:118:31: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:130:74: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:231:18: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:236:32: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:249:29: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:256:49: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:294:33: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:299:33: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:322:24: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:327:45: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:332:23: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:335:21: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:338:21: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:341:33: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:366:24: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:372:56: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop/deterministic.bot:383:36: the C backend cannot compile the context struct std::event_loop::deterministic::Deterministic, whose field "clock" has type MutableArray[int], yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p12-actor-messages.bot:21:10: the C backend cannot compile an application of the parameterized struct std::actor::Inbox yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p12-actor-messages.bot:34:10: the C backend cannot compile an application of the parameterized struct std::actor::Address yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1606:34: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1587:36: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1667:33: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1735:32: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1769:16: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1827:50: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* stdlib/event_loop.bot:1844:34: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service
+* p12-actor-messages.bot:46:25: the C backend cannot compile the context struct std::event_loop::Loop, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one) yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service

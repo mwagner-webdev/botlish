@@ -12,6 +12,8 @@
 # std::linux::read and std::linux::io are one source on both architectures. The only
 # live syscalls it makes are getpid and write(2) to a descriptor known to be
 # invalid (1000), through the portable wrappers or the host's own transport.
+#
+# canary: covers native/src/runtime/syscall.rs
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]

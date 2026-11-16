@@ -7,6 +7,8 @@
 # the sender gone before the receiver decodes. The static half is
 # tests/sendability.test; native/src/runtime/transfer.rs's unit tests carry
 # values between two Vms of one process, the first dropped first.
+#
+# canary: covers native/src/runtime/transfer.rs core/transfer.tcl
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]

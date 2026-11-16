@@ -24,11 +24,15 @@ that runs one (tests/platform/tier.tcl on macOS and Windows), from the
 acceptance jobs of the newest successful push run on main of the host's
 workflow -- a test file's between the lines that start the files, a golden
 suite's between the lines its predecessor and it print. tier.tcl balances
-its shards by them (CI-RUNS.md, "The canary").
+its shards by them (CI-RUNS.md, "The canary"). And per host the Rust
+toolchain of the newest successful push run on main of its workflow, as the
+build-native action names it there (`Rust toolchain: rustc-RELEASE-COMMIT`,
+the canary job's log; macOS: the smoke job's): tests/canary.tcl runs the
+toolchain-sensitive items first when a run's toolchain is not it.
 
 It prints tests/canary.tsv (--write writes it): the history lines, the most
 failing first, of the items that still exist in this checkout, then the
-duration lines, then the cost lines. Deterministic for a given API state. tests/canary.tcl reads
+toolchain lines, then the duration lines, then the cost lines. Deterministic for a given API state. tests/canary.tcl reads
 the file; tools/ci/test_runs.py tests this with a fake of the API.
 """
 import argparse
@@ -49,6 +53,8 @@ HOSTS = ("linux-x86_64", "linux-aarch64", "macos-aarch64", "windows-x86_64")
 ACCEPTANCE = (("macos-arm64.yml", "macos-aarch64"), ("windows-x86_64.yml", "windows-x86_64"))
 BROKEN = 5
 STAMP = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z) ?")
+# The build-native action's line naming the toolchain it built with.
+TOOLCHAIN = re.compile(r"^Rust toolchain: (rustc-\S+)$")
 
 
 def host_of(job):
@@ -275,12 +281,42 @@ def costs(api, out=lambda line: None):
     return found
 
 
+def toolchains(api, out=lambda line: None):
+    """{host: rustc-RELEASE-COMMIT}: per host, the toolchain the newest
+    successful push run on main of its workflow built with, from the logs of
+    its jobs on that host, the canary's (macOS: the smoke job's) first."""
+    found = {}
+    for workflow, host in zip(WORKFLOWS, HOSTS):
+        for r in api.workflow_runs(workflow, branch="main", event="push", status="success", per_page=5):
+            jobs = [j for j in api.jobs(r["id"]) if j.get("conclusion") == "success" and host_of(j) == host]
+            jobs.sort(key=lambda j: 0 if re.match(r"(canary|smoke)\b", j.get("name") or "") else 1)
+            name = None
+            for job in jobs[:3]:
+                try:
+                    text = api.log(job["id"])
+                except runs.ApiError as e:
+                    out("history: %s: %s" % (job.get("name"), e))
+                    continue
+                for _, line in lines_of(text):
+                    m = TOOLCHAIN.match(line)
+                    if m:
+                        name = m.group(1)
+                        break
+                if name:
+                    break
+            if name:
+                out("history: %s toolchain %s from %s" % (host, name, runs.link(api, r)))
+                found[host] = name
+                break
+    return found
+
+
 def clean(text):
     """A reason as one field of a tab-separated line."""
     return re.sub(r"\s+", " ", text).strip() or "-"
 
 
-def render(rows, seconds, days, today, root=ROOT, costs=None):
+def render(rows, seconds, days, today, root=ROOT, costs=None, toolchains=None):
     exists = lambda item: os.path.isfile(os.path.join(root, item))  # noqa: E731
     lines = [
         "# canary.tsv -- the canary's records (CI-RUNS.md, \"The canary\"), written by",
@@ -292,6 +328,10 @@ def render(rows, seconds, days, today, root=ROOT, costs=None):
         "# targets, * for all four), last on LAST, with REASON (its first failing",
         "# test then). The canary runs these after what a push changes, the most",
         "# failing first.",
+        "#",
+        "# toolchain HOST NAME: the Rust toolchain (rustc-RELEASE-COMMIT) the newest",
+        "# green push run on main built with on HOST. A canary whose own toolchain",
+        "# is another runs the toolchain-sensitive items first.",
         "#",
         "# duration ITEM SECONDS: ITEM's wall seconds on linux-x86_64 (a Tcl test",
         "# file on interp, a golden suite on all four backends), the canary's",
@@ -306,6 +346,11 @@ def render(rows, seconds, days, today, root=ROOT, costs=None):
     for item, hosts, commits, last, reason in rows:
         if exists(item):
             lines.append("\t".join(["history", item, hosts, str(commits), last, clean(reason)]))
+    if toolchains:
+        lines.append("")
+        for host in HOSTS:
+            if host in toolchains:
+                lines.append("\t".join(["toolchain", host, toolchains[host]]))
     lines.append("")
     for item in sorted(seconds):
         if exists(item):
@@ -332,7 +377,8 @@ def main(argv, api=None, out=print, today=None):
         except runs.ApiError as e:
             print("history.py: %s" % e, file=sys.stderr)
             return 2
-    text = render(history(api, a.days, today, out), durations(api, out), a.days, today, costs=costs(api, out))
+    text = render(history(api, a.days, today, out), durations(api, out), a.days, today, costs=costs(api, out),
+                  toolchains=toolchains(api, out))
     if a.write:
         with open(os.path.join(ROOT, "tests", "canary.tsv"), "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
