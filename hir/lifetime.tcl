@@ -752,6 +752,16 @@ proc hir::lifetime::Call {hir gVar e node cur used} {
     if {[dict get $g handled] eq $e} {
         set err x:$e
     }
+    # The error value this call lets leave the unit ("" when none): what a
+    # callee fails with -- its own objects, or the arguments its payload
+    # holds -- escapes this unit too when no handler here takes it
+    # (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md, "Soundness fixes
+    # the integration found").
+    set perr ""
+    if {$names ne {}} {
+        set perr xp:$e
+        Con g sink error $perr $e "the payload of an error the call lets through"
+    }
     if {$tkind eq "native"} {
         NativeCall $hir g $e $n $tid $argExprs $vals $res $err $holds $type
     } elseif {$tkind eq "block"} {
@@ -770,7 +780,7 @@ proc hir::lifetime::Call {hir gVar e node cur used} {
             # nested ones too (kept as a producer only where one lands).
             Producer $hir g $e [ResultKind $type $holds $err] $n
             Con g containobj o:$e o:$e
-            Con g call $e $callee $tid $vals $calleeVal $res $err [KindOf $type]
+            Con g call $e $callee $tid $vals $calleeVal $res $err [KindOf $type] $perr
             if {[hir::coroutines::MayYield $hir $tid]} {
                 dict set g nodes $n suspends [list call $tid $vals]
             }
@@ -1323,29 +1333,45 @@ proc hir::lifetime::Solve {g summaries} {
                     }
                 }
                 call {
-                    lassign $rest e unit f vals cv res err kind
+                    # PERR: the error value the call lets leave the unit,
+                    # which may hold what a handler's ERR may.
+                    lassign $rest e unit f vals cv res err kind perr
                     set s [dict getdef $summaries $unit [EmptySummary]]
+                    set fresh [dict get $s fresh]
                     set i 0
                     foreach v $vals {
                         if {$i in [dict get $s resultParams]} {
                             set r [Reach $contents [PtsOf $pts $v]]
                             if {[Add pts $res [OfKind $kinds $r $kind]]} { set changed 1 }
                             if {[Add pts $err $r]} { set changed 1 }
+                            if {[Add pts $perr $r]} { set changed 1 }
+                            # A fresh result may hold what the parameter
+                            # reaches without being it (a struct the callee
+                            # builds around a String it is given): the kind
+                            # filter above keeps only what the result may
+                            # be, so the fresh objects contain the rest
+                            # (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md,
+                            # "Soundness fixes the integration found").
+                            if {$fresh && [Add contents o:$e $r]} { set changed 1 }
                         }
                         incr i
                     }
                     if {[dict get $s fresh]} {
                         if {[Add pts $res [dict create o:$e 1]]} { set changed 1 }
                         if {[Add pts $err [dict create o:$e 1]]} { set changed 1 }
+                        if {[Add pts $perr [dict create o:$e 1]]} { set changed 1 }
                     }
                     foreach o [dict get $s global] {
                         if {[Add pts $res [dict create $o 1]]} { set changed 1 }
                         if {[Add pts $err [dict create $o 1]]} { set changed 1 }
+                        if {[Add pts $perr [dict create $o 1]]} { set changed 1 }
                     }
                     if {[dict get $s capResult] && $cv ne ""} {
                         set r [Reach $contents [PtsOf $pts $cv]]
                         if {[Add pts $res [OfKind $kinds $r $kind]]} { set changed 1 }
                         if {[Add pts $err $r]} { set changed 1 }
+                        if {[Add pts $perr $r]} { set changed 1 }
+                        if {$fresh && [Add contents o:$e $r]} { set changed 1 }
                     }
                     foreach pair [dict get $s stores] {
                         lassign $pair from into
@@ -1590,6 +1616,9 @@ proc hir::lifetime::Summaries {hir graphs units} {
                 set g [dict get $graphs $id]
                 lassign [Solve $g $summaries] pts contents
                 set s [Summary $hir $g $summaries $pts $contents]
+                if {[dict exists $summaries $id]} {
+                    set s [KeepReasons [dict get $summaries $id] $s]
+                }
                 if {![dict exists $summaries $id] || [dict get $summaries $id] ne $s} {
                     dict set summaries $id $s
                     set changed 1
@@ -1601,6 +1630,28 @@ proc hir::lifetime::Summaries {hir graphs units} {
         }
     }
     return $summaries
+}
+
+# Summary S of a unit whose previous round's summary was PREVIOUS, with
+# every escape PREVIOUS already had keeping PREVIOUS's reason. A reason
+# through a recursive component names the path it took ("through A's
+# parameter x: through B's parameter y: ..."), and a path around the cycle
+# is one step longer every round: without this the facts would stop
+# changing and their text would not (STORAGE-COMPILER-MANAGED-SCRATCH-
+# MILESTONE-1.md, "Soundness fixes the integration found"). Which
+# parameters escape still only grows; the reason is the first one found.
+proc hir::lifetime::KeepReasons {previous s} {
+    dict for {i why} [dict get $s escParams] {
+        if {[dict exists $previous escParams $i]} {
+            dict set s escParams $i [dict get $previous escParams $i]
+        }
+    }
+    foreach key {capEscape msg} {
+        if {[dict size [dict get $s $key]] && [dict size [dict get $previous $key]]} {
+            dict set s $key [dict get $previous $key]
+        }
+    }
+    return $s
 }
 
 proc hir::lifetime::SelfCalling {graphs id} {

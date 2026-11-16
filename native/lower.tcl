@@ -452,6 +452,13 @@ namespace eval native::lower {
     # several exact call sites.
     variable tinyLeafInlineOpt 1
     variable leafEligible {}
+    # Compiler-managed scratch storage (see "Scratch storage" below;
+    # STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md): whether it is
+    # enabled, the program's storage-use plan (hir/storageplan.tcl; "" when
+    # disabled) and what lowering emitted for each selected site.
+    variable scratchOpt 1
+    variable storagePlan ""
+    variable scratchEmitted {}
     # The small, fixed, auditable operation-count budget (TINY-EXACT-LEAF-
     # INLINING.md): comfortably above both real target bodies
     # (std::byte::high_nibble's 1 native call, std::byte::nibble's 4), with headroom
@@ -1399,6 +1406,9 @@ proc native::lower::Program {hirProgram args} {
     variable leafEligible
     variable construction
     variable constructionOpt
+    variable scratchOpt
+    variable storagePlan
+    variable scratchEmitted
     # The module-static slot table is per program: without this declaration
     # the reset below assigned a local variable and slot numbers (and the
     # header's statics=N) leaked from one compilation to the next in the same
@@ -1483,6 +1493,8 @@ proc native::lower::Program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT) eq "0" ? 0 : 1}]
     set constructionDefault [expr {[info exists ::env(BOTLISH_NATIVE_VIRTUAL_CONSTRUCTION_OPT)]
         && $::env(BOTLISH_NATIVE_VIRTUAL_CONSTRUCTION_OPT) eq "0" ? 0 : 1}]
+    set scratchDefault [expr {[info exists ::env(BOTLISH_NATIVE_SCRATCH_OPT)]
+        && $::env(BOTLISH_NATIVE_SCRATCH_OPT) eq "0" ? 0 : 1}]
     set dfaDispatchDefault [if {[info exists ::env(BOTLISH_NATIVE_DFA_DISPATCH)]} {set ::env(BOTLISH_NATIVE_DFA_DISPATCH)} else {string cat auto}]
     set options [hir::Options native::lower::program \
         [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault \
@@ -1501,7 +1513,8 @@ proc native::lower::Program {hirProgram args} {
             -recursive-result-range-opt $recursiveRangeDefault -recursive-range-limit $recursiveLimitDefault \
             -raw-int-abi-opt $rawIntAbiDefault -raw-demand-opt $rawDemandDefault -raw-mixed-policy $rawMixedDefault \
             -short-string-opt $shortStringDefault -ascii-pack-opt $asciiPackDefault -short-demand-opt $shortDemandDefault \
-            -virtual-construction-opt $constructionDefault -dfa-dispatch $dfaDispatchDefault -exports {} -application 0 \
+            -virtual-construction-opt $constructionDefault -scratch-opt $scratchDefault \
+            -dfa-dispatch $dfaDispatchDefault -exports {} -application 0 \
             -fault [if {[info exists ::env(BOTLISH_NATIVE_FAULT)]} {set ::env(BOTLISH_NATIVE_FAULT)} else {string cat ""}]] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
@@ -1581,6 +1594,7 @@ proc native::lower::Program {hirProgram args} {
     set traversalOpt [dict get $options -string-traversal-opt]
     set tinyLeafInlineOpt [dict get $options -tiny-leaf-inline-opt]
     set constructionOpt [dict get $options -virtual-construction-opt]
+    set scratchOpt [dict get $options -scratch-opt]
     variable fault
     set fault [dict get $options -fault]
     if {$fault ni {"" eager-foreign-result}} {
@@ -1667,6 +1681,11 @@ proc native::lower::Program {hirProgram args} {
     set context [dict get $spec context]
     set selfTail [dict get $context selfTails]
     set envless [dict get $context envless]
+    # The storage-use plan (see "Scratch storage" below), fixed before any
+    # function is lowered: a caller passes a destination only to a callee
+    # the plan frames.
+    set storagePlan [if {$scratchOpt} {ScratchPlan $hirProgram $spec} else {string cat ""}]
+    set scratchEmitted [dict create]
     set captureLists [dict create]
     set usedNatives {}
     set staticSlots [dict create]
@@ -1867,7 +1886,8 @@ proc native::lower::Program {hirProgram args} {
     return [dict create text $text functions $infos statistics [Statistics $infos] \
         specialization $spec abiPlan $abiPlan shortPlan $shortPlan construction $construction structCensus [hir::escape::census $escape] \
         transportFacts [hir::escape::transportFacts $escape] foldSlots [FoldSlotReport $hirProgram $spec $escape] \
-        escapeRounds [dict getdef $escape rounds 1]]
+        escapeRounds [dict getdef $escape rounds 1] \
+        storagePlan [dict create plan $storagePlan emitted $scratchEmitted]]
 }
 
 # The fold slots of ESCAPE (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md), one
@@ -2592,6 +2612,9 @@ proc native::lower::Function {id} {
             set extraParams 1
         }
     }
+    # A scratch frame (see "Scratch storage" below): its registers, before
+    # the body is lowered (the body's loops enter their regions in it).
+    ScratchFrameStart fn $id
     if {$region ne "program"} {
         dict set fn planResult [hir::construction::resultFamily $construction $id]
     }
@@ -2644,6 +2667,7 @@ proc native::lower::Function {id} {
     if {$result ne "never"} {
         Emit fn "ret $result"
     }
+    ScratchFrameFinish fn $id
     set pnames [lmap b $params {dict get [hir::binding $hir $b] name}]
     set captures {}
     if {$env} {
@@ -3412,6 +3436,255 @@ proc native::lower::FieldsCompanionFunction {id} {
         rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
         short [ShortCounters fn]]
     return [list $text $info]
+}
+
+# ---------------------------------------------------------------------------
+# Scratch storage (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md)
+#
+# The realization of the storage-use plan (hir/storageplan.tcl) in native
+# code: confined temporary Strings placed in compiler-managed scratch
+# storage (native/src/runtime/scratch.rs) instead of the managed heap. The
+# plan decides which sites and regions; this lowering decides only what it
+# can represent and emits:
+#
+#   * a frame in a planned unit's canonical function (ScratchFrameStart,
+#     ScratchFrameFinish): `%d = op scratchtake` first when the unit takes a
+#     destination, `%m = op scratchmark`, and the whole body under
+#     `pusherrorexit` of a label that runs the exit and `reraise`s, so every
+#     exit -- each `ret`, the error exit -- runs `op scratchexit %m %d` (or
+#     `op scratchreset %m` in a unit that takes no destination). No other
+#     variant of a function (companion, region, internal, fields) gets a
+#     frame, and so none places anything in scratch storage;
+#   * a region per iteration of each planned loop (ScratchLoopEnter right
+#     before the jump to the loop's head, ScratchLoopReset right after its
+#     head label and right after its exit label): every iteration starts,
+#     and the loop ends, with the iteration's objects released;
+#   * `op scratchreq R` immediately before each instruction that makes a
+#     selected String site's object (matched by the operations that native
+#     can lower it to: `inttostr`, `strcat`, `substr`, `substrproven`,
+#     `strappendchar`, `construct str flat`), and `op scratchdest R`
+#     immediately before each plain `call` of a selected call site's
+#     canonical callee -- R the constant 1 for a site confined to its
+#     innermost region, the unit's `%d` for one that escapes only through
+#     the unit's result. The instructions are the site's own (its HIR
+#     origin) and those attributed to a direct use of the binding that
+#     binds it in the same innermost region (a deferred String built where
+#     it is first read), so each runs at most once per instance of the
+#     region. A site with no such instruction (a virtual construction
+#     piece, an inlined callee, a companion call) keeps its ordinary
+#     allocation; the plan's lowered record says which (`storagePlan
+#     emitted`).
+#
+# nir.rs's `validate_scratch` checks the protocol structurally: a request
+# reaches only an operation that honors it, a destination only a callee
+# whose first instruction takes it. -scratch-opt 0
+# (BOTLISH_NATIVE_SCRATCH_OPT=0) computes no plan and emits nothing.
+
+# The storage-use plan of HIR under SPEC: the lifetime facts, and the units
+# the backend cannot frame (a self tail call jumps back to its function's
+# entry with its arguments live: hir::aot::selfTailCalls).
+proc native::lower::ScratchPlan {hir spec} {
+    variable selfTail
+    set excluded [dict create]
+    foreach id [dict get $spec used] {
+        if {![dict exists $spec instances $id]} continue
+        dict for {call target} [dict getdef [dict get $spec instances $id] calls {}] {
+            if {$target eq $id && [dict exists $selfTail $call]} {
+                dict set excluded $id "it makes a self tail call (its frame is reused)"
+                break
+            }
+        }
+    }
+    set facts [hir::lifetime::analyze $hir -spec $spec]
+    return [hir::storageplan::plan $hir $facts $spec -excluded $excluded]
+}
+
+# Opens the frame of unit ID's canonical function when the plan has one:
+# its registers and exit label, and its loops' regions (fn scratch).
+proc native::lower::ScratchFrameStart {fnVar id} {
+    upvar 1 $fnVar fn
+    variable storagePlan
+    if {$storagePlan eq ""} return
+    set u [hir::storageplan::unit $storagePlan $id]
+    if {![dict get $u frame]} return
+    dict set fn scratch [dict create unit $u loops [dict get $u loops] loopMarks [dict create]]
+}
+
+# Loop E's region entry: its mark, right before the jump to its head (after
+# its operands, its accumulator and anything hoisted out of its body).
+proc native::lower::ScratchLoopEnter {fnVar e} {
+    upvar 1 $fnVar fn
+    if {![dict exists $fn scratch] || $e ni [dict get $fn scratch loops]} return
+    dict set fn scratch loopMarks $e [Assign fn "op scratchmark" $e]
+}
+
+# Loop E's region reset: at its head (every iteration starts empty) and at
+# its exit (the last iteration's objects released).
+proc native::lower::ScratchLoopReset {fnVar e} {
+    upvar 1 $fnVar fn
+    if {![dict exists $fn scratch loopMarks $e]} return
+    Assign fn "op scratchreset [dict get $fn scratch loopMarks $e]" $e
+}
+
+# The innermost loop whose body runs expression E, within E's function
+# (a loop's operands run before its iterations), or "".
+proc native::lower::ScratchLoopOf {e} {
+    variable baseHir
+    set child $e
+    set x [Parent $e]
+    while {$x ne ""} {
+        set node [dict get $baseHir exprs $x]
+        set kind [dict get $node kind]
+        if {$kind eq "block"} {
+            return ""
+        }
+        if {$kind in {loop listloop countloop lockloop} && $child in [dict getdef $node body {}]} {
+            return $x
+        }
+        set child $x
+        set x [Parent $x]
+    }
+    return ""
+}
+
+# The operations a selected String site of native NAME may be lowered to.
+proc native::lower::ScratchOps {name} {
+    switch -- $name {
+        std::int::to_string { return {inttostr} }
+        std::str::concat { return {strcat construct} }
+        std::str::substring { return {substr substrproven} }
+        std::str::append_char { return {strappendchar construct} }
+    }
+    return {}
+}
+
+# Closes unit ID's frame: the requests and destinations of its selected
+# sites, the exit before every `ret`, the prologue and the error exit.
+proc native::lower::ScratchFrameFinish {fnVar id} {
+    upvar 1 $fnVar fn
+    variable scratchEmitted
+    variable hir
+    if {![dict exists $fn scratch]} return
+    set s [dict get $fn scratch]
+    set u [dict get $s unit]
+    set lines [dict get $fn lines]
+    # The candidate instructions, by origin.
+    set ops [dict create]
+    set calls [dict create]
+    set index 0
+    foreach line $lines {
+        if {[regexp {^\s+tail(env)? } $line]} {
+            throw {NATIVE BUG} "native lowering: framed function of instance $id makes a self tail call"
+        }
+        if {[regexp {^\s+%\d+ = (?:op (\S+)|(construct) str flat) .* @(e\d+)$} $line -> op construct origin]} {
+            if {$op eq ""} {
+                set op construct
+            }
+            dict lappend ops $origin [list $index $op]
+        } elseif {[regexp {^\s+%\d+ = call (\x01[^\x02]*\x02)(?: .*)? @(e\d+)$} $line -> callee origin]} {
+            dict lappend calls $origin [list $index $callee]
+        }
+        incr index
+    }
+    # An instruction attributed to a use of a binding stands for the value
+    # it binds: native lowering builds a deferred String where it is first
+    # read (a construction plan materialized at the reference). Such an
+    # instruction is a site's only when the binding binds the site's
+    # expression directly and the use runs in the site's innermost region
+    # (an inner loop's reset would release an object its iteration does not
+    # own).
+    foreach table {ops calls} {
+        dict for {origin entries} [set $table] {
+            set node [dict get $hir exprs $origin]
+            if {[dict get $node kind] ne "ref" || [dict get $node binding] eq ""
+                    || ![dict exists $hir bindings [dict get $node binding]]} continue
+            set bind [dict get $hir bindings [dict get $node binding] declaredBy]
+            if {$bind eq "" || ![dict exists $hir exprs $bind] || [dict get $hir exprs $bind kind] ne "bind"} continue
+            set value [dict get $hir exprs $bind value]
+            if {$value eq "" || [ScratchLoopOf $origin] ne [ScratchLoopOf $value]} continue
+            dict lappend $table $value {*}$entries
+        }
+    }
+    # The instructions each selected site places, and with which value
+    # (`one`: the constant 1; `dest`: the unit's own destination).
+    set before [dict create]
+    dict for {site d} [dict get $u sites] {
+        if {[dict get $d status] ne "selected"} continue
+        set e [dict get $d expr]
+        set placement [dict get $d placement]
+        if {[lindex $placement 0] eq "iteration" && ![dict exists $s loopMarks [lindex $placement 1]]} {
+            dict set scratchEmitted $id $site [dict create status "not emitted" reason "its loop entered no region in this function"]
+            continue
+        }
+        set value [if {[dict get $d request] eq "dest"} {string cat dest} else {string cat one}]
+        if {[dict get $d form] eq "call"} {
+            set want [Placeholder [dict get $d callee]]
+            set found [lmap c [dict getdef $calls $e {}] {
+                if {[lindex $c 1] ne $want} continue
+                lindex $c 0
+            }]
+            set op scratchdest
+        } else {
+            set allowed [ScratchOps [dict get $d native]]
+            set found [lmap c [dict getdef $ops $e {}] {
+                if {[lindex $c 1] ni $allowed} continue
+                lindex $c 0
+            }]
+            set op scratchreq
+        }
+        if {[llength $found] == 0} {
+            dict set scratchEmitted $id $site [dict create status "not emitted" \
+                reason "no instruction of its own (virtual, inlined or a companion call)"]
+            continue
+        }
+        # Every match makes the site's value (at the site, or where a use in
+        # the same region materializes it), at most once per instance of
+        # the region: each gets its own request.
+        foreach index $found {
+            dict lappend before $index [list $op $value]
+        }
+        dict set scratchEmitted $id $site [dict create status emitted reason "" instructions [llength $found]]
+    }
+    if {[dict size $before] == 0 && ![dict get $u capable]} {
+        # Nothing of this function is placed in scratch storage (every
+        # selected site virtual, inlined or a companion's) and no caller
+        # gives it a destination: no frame, and its loops' regions go too.
+        dict set fn lines [lmap line $lines {
+            if {[regexp {^\s+%\d+ = op scratch(?:mark|reset)\M} $line]} continue
+            set line
+        }]
+        return
+    }
+    # The frame's registers and exit label.
+    set regs [dict create one [NewReg fn] dest ""]
+    if {[dict get $u capable]} {
+        dict set regs dest [NewReg fn]
+    }
+    set mark [NewReg fn]
+    set label [NewLabel fn]
+    set exit [if {[dict get $regs dest] ne ""} {string cat "op scratchexit $mark [dict get $regs dest]"} else {string cat "op scratchreset $mark"}]
+    set prologue {}
+    if {[dict get $regs dest] ne ""} {
+        lappend prologue "    [dict get $regs dest] = op scratchtake"
+    }
+    lappend prologue "    $mark = op scratchmark" "    [dict get $regs one] = int 1" "    pusherrorexit $label"
+    set out $prologue
+    set index 0
+    foreach line $lines {
+        if {[dict exists $before $index]} {
+            foreach pair [dict get $before $index] {
+                lassign $pair op value
+                lappend out "    [NewReg fn] = op $op [dict get $regs $value]"
+            }
+        }
+        if {[regexp {^\s+ret\M} $line]} {
+            lappend out "    [NewReg fn] = $exit"
+        }
+        lappend out $line
+        incr index
+    }
+    lappend out "  label $label" "    poperrorexit" "    [NewReg fn] = $exit" "    reraise"
+    dict set fn lines $out
 }
 
 proc native::lower::NewReg {fnVar} {
@@ -13147,8 +13420,10 @@ proc native::lower::ListLoop {fnVar e node} {
     # What the body needs built of a deferred value bound outside it,
     # built once, here (C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
     HoistDeferredUses fn [dict get $node body] $e
+    ScratchLoopEnter fn $e
     Emit fn "jump $head" $e
     EmitLabel fn $head
+    ScratchLoopReset fn $e
     if {$consuming} {
         set empty [Assign fn "op ${drain}empty $iterReg" $e]
         Emit fn "br $empty $normalExit $bodyLabel" $e
@@ -13189,6 +13464,7 @@ proc native::lower::ListLoop {fnVar e node} {
     LoopResultFinish fn $e $mode $accReg $resultReg
     Emit fn "jump $exit" $e
     EmitLabel fn $exit
+    ScratchLoopReset fn $e
     return $resultReg
 }
 
@@ -13354,8 +13630,10 @@ proc native::lower::CountLoop {fnVar e node} {
     # What the body needs built of a deferred value bound outside it,
     # built once, here (C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
     HoistDeferredUses fn [dict get $node body] $e
+    ScratchLoopEnter fn $e
     Emit fn "jump $head" $e
     EmitLabel fn $head
+    ScratchLoopReset fn $e
     set cmp [Assign fn "op $compareOp $idxReg $endReg" $e]
     if {$raw} {
         dict incr fn rawCompare
@@ -13392,6 +13670,7 @@ proc native::lower::CountLoop {fnVar e node} {
     LoopResultFinish fn $e $mode $accReg $resultReg
     Emit fn "jump $exit" $e
     EmitLabel fn $exit
+    ScratchLoopReset fn $e
     return $resultReg
 }
 
@@ -13518,8 +13797,10 @@ proc native::lower::LockLoop {fnVar e node} {
     # What the body needs built of a deferred value bound outside it,
     # built once, here (C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
     HoistDeferredUses fn [dict get $node body] $e
+    ScratchLoopEnter fn $e
     Emit fn "jump $head" $e
     EmitLabel fn $head
+    ScratchLoopReset fn $e
     if {[dict get $first kind] eq "list"} {
         set cmp [Assign fn "op ilt $posReg $firstLen" $e]
     } else {
@@ -13577,6 +13858,7 @@ proc native::lower::LockLoop {fnVar e node} {
     LoopResultFinish fn $e $mode $accReg $resultReg
     Emit fn "jump $exit" $e
     EmitLabel fn $exit
+    ScratchLoopReset fn $e
     return $resultReg
 }
 
@@ -13791,8 +14073,10 @@ proc native::lower::Loop {fnVar e node} {
     # What the body needs built of a deferred value bound outside it,
     # built once, here (C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
     HoistDeferredUses fn [dict get $node body] $e
+    ScratchLoopEnter fn $e
     Emit fn "jump $head" $e
     EmitLabel fn $head
+    ScratchLoopReset fn $e
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
     if {$mode in {fold vfold}} {
@@ -13816,6 +14100,7 @@ proc native::lower::Loop {fnVar e node} {
         return never
     }
     EmitLabel fn $exit
+    ScratchLoopReset fn $e
     return $result
 }
 

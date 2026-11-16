@@ -244,6 +244,28 @@ impl StrInit {
         StrInit { thin, byte_len, written: 0 }
     }
 
+    /// Like `new`, in the block at THIN, which the caller provides: at
+    /// least `str_layout(byte_len)` bytes, 8-aligned, owned by scratch
+    /// storage (runtime/scratch.rs; STORAGE-COMPILER-MANAGED-SCRATCH-
+    /// MILESTONE-1.md) rather than the system allocator. The object is
+    /// dynamic (`is_static` 0) and is never released with `free_str`.
+    ///
+    /// # Safety
+    /// THIN must be valid for `str_layout(byte_len).size()` bytes of writes
+    /// and 8-aligned, and nothing else may use those bytes while the String
+    /// is live.
+    pub unsafe fn in_block(thin: *mut u8, byte_len: usize, chars: usize, ascii: bool) -> StrInit {
+        debug_assert!(ascii == (byte_len == chars), "ASCII flag disagrees with the counts");
+        debug_assert!(thin as usize % STR_ALIGN == 0);
+        unsafe {
+            (thin as *mut Header).write(Header::new(KIND_STR, false));
+            (thin.add(offset_of!(StrObj, chars)) as *mut usize).write(chars);
+            (thin.add(offset_of!(StrObj, byte_len)) as *mut usize).write(byte_len);
+            thin.add(offset_of!(StrObj, ascii)).write(ascii as u8);
+        }
+        StrInit { thin, byte_len, written: 0 }
+    }
+
     /// The object's address (what a `Value` holds).
     #[inline]
     pub fn addr(&self) -> u64 {

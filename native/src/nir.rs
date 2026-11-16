@@ -877,6 +877,43 @@ pub enum OpCode {
     /// an Ascii word longer than one character, is simply unequal), a tagged
     /// Bool.
     AsciiShortEq,
+    /// Compiler-managed scratch storage (STORAGE-COMPILER-MANAGED-SCRATCH-
+    /// MILESTONE-1.md; runtime/scratch.rs). None allocates, fails or is a
+    /// safepoint; marks and flags are small Ints (never GC roots of note).
+    ///
+    /// `%d = op scratchtake`: a framed function's first instruction (and
+    /// only there): reads and clears the Vm's destination word, the small
+    /// Int 1 when the caller's `scratchdest` gave this call a destination.
+    ScratchTake,
+    /// `%m = op scratchmark`: the scratch position at a region's entry.
+    ScratchMark,
+    /// `%u = op scratchreset %m`: releases everything allocated in scratch
+    /// storage since mark %m (a loop iteration's start, the loop's exit).
+    ScratchReset,
+    /// `%u = op scratchexit %m %d`: a framed function's exit: resets to %m
+    /// unless %d is 1 (the caller's region keeps what this call made).
+    ScratchExit,
+    /// `%u = op scratchreq %r`: the next instruction (a String operation of
+    /// `scratch_request_target`) places its result in scratch storage when
+    /// %r is the small Int 1. Code generation folds it into that
+    /// instruction's helper call (a store before it, a clear after it).
+    ScratchReq,
+    /// `%u = op scratchdest %r`: the next instruction (a `call` of a
+    /// function whose first instruction is `scratchtake`) gives the callee
+    /// a destination when %r is the small Int 1.
+    ScratchDest,
+}
+
+/// Whether INST may follow a `scratchreq`: a String operation whose helper
+/// allocates at most one String, its result (STORAGE-COMPILER-MANAGED-
+/// SCRATCH-MILESTONE-1.md, "Supported operations").
+pub fn scratch_request_target(inst: &Inst) -> bool {
+    use OpCode::*;
+    match inst {
+        Inst::Op { op, .. } => matches!(op, IntToStr | StrCat | Substr | SubstrProven | StrAppendChar),
+        Inst::Construct { list, plan, .. } => !*list && !*plan,
+        _ => false,
+    }
 }
 
 /// The physical representation class of a register (`rawregs=`/`shortregs=`
@@ -1186,6 +1223,12 @@ op_spellings! {
     "asciieq" => AsciiEq,
     "asciitoshort" => AsciiToShort,
     "asciishorteq" => AsciiShortEq,
+    "scratchtake" => ScratchTake,
+    "scratchmark" => ScratchMark,
+    "scratchreset" => ScratchReset,
+    "scratchexit" => ScratchExit,
+    "scratchreq" => ScratchReq,
+    "scratchdest" => ScratchDest,
 }
 
 /// What a floating-point operation computes (OpCode::float).
@@ -1241,7 +1284,8 @@ impl OpCode {
         use OpCode::*;
         match self {
             ListNew | CleanupTable => None,
-            Argv | CPtrNull | CoFailed | EnumUnmatched => Some(0),
+            Argv | CPtrNull | CoFailed | EnumUnmatched | ScratchTake | ScratchMark => Some(0),
+            ScratchReset | ScratchReq | ScratchDest => Some(1),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
             StrLen | StrLower | ListLen | ListFlat | TreeChildren | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
@@ -3436,6 +3480,42 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
     })
 }
 
+/// The scratch storage protocol (STORAGE-COMPILER-MANAGED-SCRATCH-
+/// MILESTONE-1.md), structurally: `scratchtake` only as a function's first
+/// instruction, `scratchreq` immediately before a String operation that
+/// honors it, `scratchdest` immediately before a `call` of a function that
+/// takes the destination. A request or destination that reached anything
+/// else could place an object the plan never proved confined.
+fn validate_scratch(program: &Program, f: &Function) -> Result<(), String> {
+    for (i, inst) in f.body.iter().enumerate() {
+        let Inst::Op { op, .. } = inst else { continue };
+        match op {
+            OpCode::ScratchTake if i != 0 || f.id == 0 => {
+                return Err(format!("scratchtake at instruction {i}: only a function's first instruction takes a destination"));
+            }
+            OpCode::ScratchReq => {
+                if !f.body.get(i + 1).is_some_and(scratch_request_target) {
+                    return Err(format!("scratchreq at instruction {i} is not immediately followed by a String operation that honors it"));
+                }
+            }
+            OpCode::ScratchDest => {
+                let takes = match f.body.get(i + 1) {
+                    Some(Inst::Call { func, .. }) => program
+                        .functions
+                        .get(*func as usize)
+                        .is_some_and(|g| matches!(g.body.first(), Some(Inst::Op { op: OpCode::ScratchTake, .. }))),
+                    _ => false,
+                };
+                if !takes {
+                    return Err(format!("scratchdest at instruction {i} is not immediately followed by a call of a function that takes a destination"));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// Structural checks, so code generation can assume well-formed input
 /// (`parse` runs them; a pass that rewrites a program runs them again).
 pub fn validate(program: &Program) -> Result<(), NirError> {
@@ -3567,6 +3647,9 @@ fn validate_selected(program: &Program, only: Option<usize>) -> Result<(), NirEr
         // function receives a machine word it did not get from C itself).
         if let Some(i) = (0..f.params as usize).find(|i| f.i64_regs[*i] || f.u64_regs[*i]) {
             return fail(ctx(format!("parameter register %{i} is declared a C word")));
+        }
+        if let Err(m) = validate_scratch(program, f) {
+            return fail(ctx(m));
         }
         let mut labels = HashSet::new();
         for inst in &f.body {
@@ -5322,5 +5405,61 @@ mod callback_tests {
         assert!(parse("nir 1\nforeign 0 \"f\" params=\"i32\" result=i32 callbacks=1 name=\"m::f\"\n").err().unwrap().message.contains("callbacks=1 needs a pointer parameter"));
         let program = parse("nir 1\nforeign 0 \"f\" params=\"ptr\" result=i32 callbacks=1 name=\"m::f\"\n\nfunc 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    %0 = int 0\n    ret %0\nend\n").unwrap();
         assert!(program.foreigns[0].callbacks);
+    }
+}
+
+#[cfg(test)]
+mod scratch_tests {
+    use super::*;
+
+    // A program whose function 1 takes a destination and function 2 does not
+    // (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md): PROGRAM is the
+    // program function's body, which calls them.
+    fn checked(program: &str) -> Result<(), String> {
+        let text = format!(
+            "nir 1\n\nfunc 0 \"<program>\" params=0 env=0 regs=6 pnames=\"\" captures=0\n{program}end\n\n\
+             func 1 \"taker\" params=1 env=0 regs=5 pnames=\"i\" captures=0\n    %1 = op scratchtake\n    %2 = op scratchmark\n    %3 = op scratchreq %1\n    %4 = op inttostr %0\n    ret %4\nend\n\n\
+             func 2 \"plain\" params=1 env=0 regs=2 pnames=\"i\" captures=0\n    %1 = op inttostr %0\n    ret %1\nend\n"
+        );
+        let parsed = parse(&text).map_err(|e| e.message)?;
+        validate(&parsed).map_err(|e| e.message)
+    }
+
+    #[test]
+    fn the_protocol_is_checked_structurally() {
+        // A destination reaches a callee that takes it; a request the
+        // String operation right after it.
+        checked("    %0 = int 1\n    %1 = op scratchdest %0\n    %2 = call 1 %0\n    %3 = op scratchreq %0\n    %4 = op inttostr %2\n    ret %4\n").unwrap();
+        for (body, expected) in [
+            // A destination before a callee that does not take one.
+            ("    %0 = int 1\n    %1 = op scratchdest %0\n    %2 = call 2 %0\n    ret %2\n", "takes a destination"),
+            // Anything between the destination and its call.
+            ("    %0 = int 1\n    %1 = op scratchdest %0\n    %3 = int 2\n    %2 = call 1 %0\n    ret %2\n", "takes a destination"),
+            // A request before an operation that does not honor it.
+            ("    %0 = int 1\n    %1 = op scratchreq %0\n    %2 = op iadd %0 %0\n    ret %2\n", "honors it"),
+            // A request at the end of a block.
+            ("    %0 = int 1\n    %1 = op scratchreq %0\n    ret %0\n", "honors it"),
+            // A take anywhere but a function's first instruction.
+            ("    %0 = int 1\n    %1 = op scratchtake\n    ret %0\n", "first instruction"),
+        ] {
+            let error = checked(body).err().unwrap_or_else(|| panic!("accepted:\n{body}"));
+            assert!(error.contains(expected), "{body}: {error}");
+        }
+    }
+
+    #[test]
+    fn requests_reach_only_the_operations_that_honor_them() {
+        use crate::runtime::ops::op_may_allocate;
+        for op in [OpCode::IntToStr, OpCode::StrCat, OpCode::Substr, OpCode::SubstrProven, OpCode::StrAppendChar] {
+            assert!(scratch_request_target(&Inst::Op { dst: 0, op, args: vec![] }));
+            assert!(op_may_allocate(op), "{op:?} allocates its result");
+        }
+        assert!(scratch_request_target(&Inst::Construct { dst: 0, list: false, plan: false, pieces: vec![] }));
+        assert!(!scratch_request_target(&Inst::Construct { dst: 0, list: false, plan: true, pieces: vec![] }));
+        assert!(!scratch_request_target(&Inst::Construct { dst: 0, list: true, plan: false, pieces: vec![] }));
+        assert!(!scratch_request_target(&Inst::Op { dst: 0, op: OpCode::StrLower, args: vec![] }));
+        for op in [OpCode::ScratchTake, OpCode::ScratchMark, OpCode::ScratchReset, OpCode::ScratchExit, OpCode::ScratchReq, OpCode::ScratchDest] {
+            assert!(!op_may_allocate(op) && !crate::runtime::ops::op_may_error(op), "{op:?} neither allocates nor fails");
+        }
     }
 }

@@ -91,8 +91,11 @@ proc underStress {script} {
 }
 
 # The `strings` section and the String kind line of the allocation report.
+# (Scratch storage off: these Strings' storage is the heap's evidence of this
+# milestone; STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md places confined
+# temporaries in scratch storage, measured by tests/scratch-storage.test.)
 proc census {text args} {
-    set report [native::allocationReport [srcHir $text] summary 1 {*}$args]
+    set report [native::allocationReport [srcHir $text] summary 1 -scratch-opt 0 {*}$args]
     return [list [dict get $report strings] [dict get $report byKind String]]
 }
 

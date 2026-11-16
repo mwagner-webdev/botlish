@@ -1270,6 +1270,12 @@ fn sites_tcl(sites: &[Site], stats: &std::collections::HashMap<u32, SiteStats>) 
                 s.allocations.to_string(),
                 "allocatedBytes".to_string(),
                 s.allocated_bytes.to_string(),
+                "scratchAllocations".to_string(),
+                s.scratch_allocations.to_string(),
+                "scratchBytes".to_string(),
+                s.scratch_bytes.to_string(),
+                "scratchFallbacks".to_string(),
+                s.scratch_fallbacks.to_string(),
             ]))
         })
         .collect();

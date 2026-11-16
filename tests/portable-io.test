@@ -455,7 +455,10 @@ test io-write-failed {a negative write result (the kernel's -errno, here an inje
 test io-allocations {allocation evidence: the context-trait path adds nothing -- std::io::print_line(text) allocates exactly what the direct std::linux::io::write_text(std::str::append_char(text, '\n')) does: the line String, the UTF-8 byte List and the Bytes (the operation's own), plus std::linux::io::create's 7 structs and the one struct std::linux::write builds} -constraints {nativeLinux} -body {
     set pre "import std::io\nimport std::linux::io\nimport std::str\nwith context std::linux::io::create()\n"
     lmap call {{std::io::print_line("Hello, world!")} {std::linux::io::write_text(std::str::append_char("Hello, world!", '\n'))}} {
-        set report [native::allocationReport [ioHir "${pre}r = $call:\n    on std::io::WriteFailed:\n        unit\nr\n"] summary]
+        # (Scratch storage off: the line String is a confined temporary that
+        # STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md places in scratch storage
+        # on both paths alike; this evidence is the heap's.)
+        set report [native::allocationReport [ioHir "${pre}r = $call:\n    on std::io::WriteFailed:\n        unit\nr\n"] summary 1 -scratch-opt 0]
         list [dict get $report total allocations] [dict get $report total allocatedBytes] \
             [lmap {k v} [dict get $report byKind] {expr {[dict get $v allocations] ? "$k=[dict get $v allocations]" : [continue]}}]
     }
