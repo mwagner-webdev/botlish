@@ -99,8 +99,15 @@ screenshot() { # NAME
 # (lmkd's own log line, "Kill 'PKG' (PID)"): a background process Android
 # may end whenever it needs the memory -- the emulator images with 16 KiB
 # pages run under steady memory pressure. Prints lmkd's line.
+#
+# The reader takes all of its input (awk, never `grep -m1`): the callers run
+# under pipefail, and a reader that stops at the first match ends the writers
+# before them with SIGPIPE, so the pipeline failed (141) after printing the
+# very line it found (run 13, at d0f3f5c2: the counter killed by lmkd on the
+# 16 KiB image, reported "not by the low-memory killer").
 lmkdKilled() { # PID (read from the continuous capture: a phase may clear logcat)
-    { cat "$OUT/logcat-all.txt" 2>/dev/null; adb logcat -d -v threadtime; } | tr -d '\r' | grep -m1 "lowmemorykiller: Kill '$PKG' ($1)"
+    { cat "$OUT/logcat-all.txt" 2>/dev/null; adb logcat -d -v threadtime; } | tr -d '\r' |
+        awk -v want="lowmemorykiller: Kill '$PKG' ($1)" '!found && index($0, want) { print; found = 1 } END { exit !found }'
 }
 
 # The thread id of the application process PID's SDLThread ("" if none).
