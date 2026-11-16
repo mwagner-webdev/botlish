@@ -1,0 +1,18 @@
+# tools/mutants.sh, rerun in a fresh scratch directory: each mutant of the
+# resumable prototype built --features fallback-roots, each program run under
+# BOTLISH_NATIVE_GC_STRESS=1. Every line is a kill: the correct values are
+#   c2-nested  [30, 61, 183, 306, 430, 555, 555, 555, true]
+#   c4-gc      [0, 20000, 18411, 20000, 10, true]
+#   c5-cancel  [101, 102, 100, 111, 119, 110, 300, 401, 400, 500, 599, 600, 601]
+#   c6b-many   50025000
+# (results/corpus.txt). M1 reads freed memory, so its wrong values differ from
+# run to run: an earlier run printed no value for c4-gc and 288058036878824597
+# for c6b-many. Exit 139 is a segmentation fault.
+M1-untraced-slots c2-nested: exit 0 error {CORE SEMANTIC COROUTINE-STATE} {the coroutine was never started}
+M1-untraced-slots c4-gc: exit 0 value {list {{int 0} {int 20000} {int 397340547004861476} {int 20000} {int 140132434981296} {bool true}}}
+M1-untraced-slots c5-cancel: exit 0 value {list {{int 101} {int 102} {int 100} {int 111} {int 119} {int 110} {int 401} {int 400} {int 500} {int 599} {int 600} {int 601}}}
+M1-untraced-slots c6b-many: exit 0 value {int 49995000}
+M2-incomplete-save c2-nested: exit 139 
+M2-incomplete-save c4-gc: exit 139 
+M2-incomplete-save c5-cancel: exit 139 
+M2-incomplete-save c6b-many: exit 139 

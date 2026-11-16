@@ -1,0 +1,41 @@
+# Repeated suspension and resumption: one generator resumed 1,000,000
+# times, then 10,000 coroutines suspended at once (each holding a small
+# List across its yield) and resumed in turn.
+import std::coroutine
+import std::list
+import std::mutable_vector
+
+fn gen(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        yield i
+        acc + i
+    -1
+
+fn drain(n: int) -> int:
+    coroutine {step: g, first: f} = gen(n)
+    fold i from 0 to n with intermediate acc f:
+        acc + g()
+
+fn holder(i: int) -> int:
+    xs = [i, i + 1, i + 2]
+    yield i
+    std::list::length(xs) + i
+
+fn no_tasks() -> MutableVector[Coroutine{args: [], return: int, errors: []}]:
+    std::mutable_vector::from_list([])
+
+fn many(n: int) -> int errors IndexNotFound:
+    tasks = no_tasks()
+    loop i from 0 to n:
+        coroutine {step: s} = holder(i)
+        tasks.push(s)
+    sums = loop i from 0 to n:
+        s = tasks.take(0)
+        s()
+    fold v in sums with intermediate acc 0:
+        acc + v
+
+m = many(10000):
+    on IndexNotFound:
+        -1
+[drain(1000000), m]
