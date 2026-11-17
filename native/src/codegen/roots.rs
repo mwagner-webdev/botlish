@@ -58,41 +58,38 @@
 //! exactly the simplest sound model the brief asks for).
 
 use crate::nir::{Function, Inst, Label, OpCode, Program, Reg};
+pub use crate::runtime::capabilities::RootMode;
 use crate::runtime::ops::op_may_allocate;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write as _;
 
 /// Where a function's physical root slots (`RootPlan::slot_of`/`num_slots`)
 /// actually live: this is a storage-location decision made *after* F3's own
-/// coloring, never a change to the coloring/liveness itself.
+/// coloring, never a change to the coloring/liveness itself. `plan`'s
+/// `RootMode` (runtime::capabilities) decides it for every function alike:
 ///
-/// * `NativeFrame`: the physical slots live in a Cranelift-managed stack
-///   slot inside this function's own native frame (rbp/rsp-relative).
-///   `plan`'s NATIVE_FRAME_SUPPORTED argument selects one of two ways the
-///   collector discovers these slots (see that argument's doc and
-///   codegen::clif's prologue for the actual emitted sequences):
+/// * `NativeFrame` (RootMode::NativeFrame, stack maps): the physical slots
+///   live in a Cranelift-managed stack slot inside this function's own
+///   native frame (rbp/rsp-relative). Every function, called or not,
+///   recursive or not. Its slots are discovered by the collector walking
+///   the machine call stack's frame-pointer chain and consulting
+///   per-safepoint stack-map metadata (`RootPlan::safepoint_slots`,
+///   runtime/framewalk.rs) -- no publish/restore of any kind is emitted.
 ///
-///     - on the x86-64 native-stack-map path (NATIVE_FRAME_SUPPORTED true):
-///       every such function, called or not, recursive or not, qualifies.
-///       Its slots are discovered by the collector walking the machine
-///       call stack's rbp chain and consulting per-safepoint stack-map
-///       metadata (`RootPlan::safepoint_slots`, runtime/framewalk.rs) --
-///       no publish/restore of any kind is emitted for them.
-///     - on the fallback path (NATIVE_FRAME_SUPPORTED false, e.g. a
-///       non-x86-64 host where the frame-walker is not implemented): only
-///       a function with no Botlish call qualifies (`Function::has_botlish_call`),
-///       exactly the original, narrower rule, published to the collector
-///       through `Vm::native_roots_ptr`/`_len` (at most one such
-///       registration can ever be active along any single call chain,
-///       since a function *with* a call is never eligible here).
-///
-/// * `RuntimeStack`: the shared `Vm::shadow` array indexed via
-///   `ss_top`/`ss_limit`, scanned as one contiguous region. Used as
-///   physical *root storage* only on the fallback path, for a function
-///   that contains a Botlish call (mirrors the original, pre-stack-map
-///   mechanism exactly). On the native-stack-map path this storage is
-///   never used for roots, and the array is not allocated (`Vm::new`):
-///   only the fallback plan has one, for its roots and its depth bound.
+/// * `RuntimeStack` (RootMode::ShadowOnly,
+///   WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md): the Vm's one
+///   LIFO shadow array, indexed via `ss_top`/`ss_limit` and scanned as one
+///   contiguous region. Every function with at least one root slot reserves
+///   its frame there -- leaf or not: nothing is ever published anywhere
+///   else, so code an operation runs (a cleanup, a factory, a coroutine
+///   segment) pushes its frames above the caller's and can never hide them
+///   (invariant I9; the old fallback plan's leaf publication through one Vm
+///   pointer lost them: audit/wasm-architecture/corpus/leaf-reentry.bot) --
+///   and pops it on every exit. A function with no root slot touches
+///   nothing, unless the mode's depth token makes one with a Botlish call
+///   reserve one slot (a host without the stack guard, where the shadow
+///   array's end is the only bound on recursion). On the stack-map path the
+///   array is not allocated (`Vm::new`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootStorage {
     NativeFrame,
@@ -139,12 +136,10 @@ pub struct RootPlan {
     /// `slot_of`/`num_slots`/`entry_zero` above (this module's own doc: "a
     /// storage-location change, not a new root allocator").
     pub storage: RootStorage,
-    /// The function bounds recursion in its prologue
-    /// (`native_stack::depth_checked`, for a function with a Botlish call):
-    /// its shadow slots against the shadow array's end, which only the
-    /// fallback plan's `RuntimeStack` storage has. False wherever native
-    /// frames hold the roots: every such host has the stack guard, which
-    /// reports an exhausted stack (runtime::native_stack's assertion).
+    /// The function reserves a shadow slot to bound recursion even without a
+    /// root (the ShadowOnly mode's depth token, for a function with a Botlish
+    /// call): only where no stack guard exists. False wherever the guard
+    /// reports an exhausted stack, on either plan (runtime::capabilities).
     pub depth_reservation: bool,
     /// The function compares its stack pointer with the Vm's stack limit in
     /// its prologue and fails with NATIVE LIMIT STACK below it (codegen::
@@ -271,6 +266,17 @@ pub(crate) fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
         Inst::Jump(_) => (vec![], vec![]),
         Inst::Ret(r) => (vec![], vec![*r]),
         Inst::RetMulti(rs) => (vec![], rs.clone()),
+        // A suspension reads the frame, the callee frame and every register
+        // it saves; a resume point defines every register it restores
+        // (codegen::resumable).
+        Inst::FrameSave { frame, callee, tagged, raw, .. } => {
+            let mut use_ = vec![*frame];
+            use_.extend(callee.iter().copied());
+            use_.extend(tagged);
+            use_.extend(raw);
+            (vec![], use_)
+        }
+        Inst::FrameRestore { frame, tagged, raw } => (tagged.iter().chain(raw).copied().collect(), vec![*frame]),
     }
 }
 
@@ -816,51 +822,36 @@ fn entry_zero_slots(f: &Function, cfg: &Cfg, slot_of: &[Option<u32>], num_slots:
     needs_zero
 }
 
-/// Computes F's root-allocation plan (see this module's doc).
-///
-/// NATIVE_FRAME_SUPPORTED: whether the collector can discover
-/// `RootStorage::NativeFrame` roots by walking the native machine stack and
-/// consulting per-safepoint stack maps (runtime/framewalk.rs) -- true on
-/// the primary x86-64 path (codegen::clif passes `module.isa().name() ==
-/// "x64"`, the same check `Symbols::direct_helpers` already uses), false on
-/// the fallback path where that walker is not implemented and `NativeFrame`
-/// keeps its original, narrower meaning (see `RootStorage`'s own doc for
-/// both). This is a pure storage/discovery decision: it never changes
-/// `slot_of`/`entry_zero`/liveness/coloring above, and on the fallback path
-/// it reproduces the pre-stack-map behavior exactly, byte for byte.
-pub fn plan(f: &Function, native_frame_supported: bool) -> RootPlan {
-    plan_with_stack_check(f, native_frame_supported, false)
+/// Computes F's root-allocation plan (see this module's doc) for root mode
+/// MODE (the runtime's: runtime::capabilities's `root_mode`). The mode is a
+/// pure storage/discovery decision: it never changes
+/// `slot_of`/`entry_zero`/liveness/coloring above.
+pub fn plan(f: &Function, mode: RootMode) -> RootPlan {
+    plan_with_stack_check(f, mode, false)
 }
 
 /// `plan`, for a function of a program whose functions check their stack
 /// pointer when STACK_CHECK (a native library's: nir::Program's
-/// `stack_limit_checked`): `stack_check` exactly for one with a Botlish call
-/// and native-frame storage, the functions nir's call effects make fallible
-/// for it.
-pub fn plan_with_stack_check(f: &Function, native_frame_supported: bool, stack_check: bool) -> RootPlan {
+/// `stack_limit_checked`): `stack_check` exactly for one with a Botlish
+/// call, the functions nir's call effects make fallible for it.
+pub fn plan_with_stack_check(f: &Function, mode: RootMode, stack_check: bool) -> RootPlan {
     let cfg = Cfg::build(f);
     let liveness = analyze(f, &cfg);
     let (slot_of, colored_slots, root_candidates) = color(f.regs, &liveness.safepoint_roots, &liveness.def_edges);
     let max_live = liveness.safepoint_roots.iter().map(Vec::len).max().unwrap_or(0) as u32;
     let has_call = f.has_botlish_call();
-    let depth_reservation = has_call && crate::runtime::native_stack::depth_checked(native_frame_supported);
-    // On the native-stack-map path every function qualifies for NativeFrame
-    // (called or not: the frame-walker discovers roots across any number of
-    // nested native frames, so a Botlish call no longer disqualifies it --
-    // this milestone's own goal). On the fallback path, unchanged: only a
-    // function with no Botlish call qualifies (RootStorage's own doc).
-    let storage = if native_frame_supported || !has_call {
-        RootStorage::NativeFrame
-    } else {
-        RootStorage::RuntimeStack
+    // Stack maps for every function on the native-frame plan; the one
+    // shadow stack for every function on ShadowOnly (RootStorage's doc).
+    let (storage, depth_reservation) = match mode {
+        RootMode::NativeFrame => (RootStorage::NativeFrame, false),
+        RootMode::ShadowOnly { depth_token } => (RootStorage::RuntimeStack, depth_token && has_call),
     };
-    // Fallback RuntimeStack storage retains its one-slot minimum for
-    // recursion protection. NativeFrame needs only actual colored roots;
-    // Linux's native guard protects recursion independently.
-    let num_slots = match storage {
-        RootStorage::RuntimeStack => colored_slots.max(1),
-        RootStorage::NativeFrame => colored_slots,
-    };
+    // Only the actual colored roots, plus the depth token where it exists:
+    // a ShadowOnly function with no root slot touches no shadow state at
+    // all (codegen::clif's `prologue_runtime_stack`), its recursion bounded
+    // by the stack guard -- and a full shadow array is detected, before any
+    // slot is written, by every frame that does reserve slots.
+    let num_slots = if depth_reservation { colored_slots.max(1) } else { colored_slots };
     let entry_zero = entry_zero_slots(f, &cfg, &slot_of, num_slots);
     let mut safepoint_slots = BTreeMap::new();
     if storage == RootStorage::NativeFrame {
@@ -875,7 +866,7 @@ pub fn plan_with_stack_check(f: &Function, native_frame_supported: bool, stack_c
     // storage leaves it to the stack guard (codegen::clif reserves nothing
     // for it).
     assert!(!(depth_reservation && storage == RootStorage::NativeFrame), "native-frame storage with a depth reservation");
-    let stack_check = stack_check && has_call && storage == RootStorage::NativeFrame;
+    let stack_check = stack_check && has_call;
     RootPlan {
         slot_of,
         num_slots,
@@ -902,13 +893,12 @@ pub fn plan_with_stack_check(f: &Function, native_frame_supported: bool, stack_c
 /// unaffected by this module's definite-initialization analysis, the
 /// second is entirely its output.
 pub fn report(program: &Program) -> String {
-    // What this host's actual JIT compile decides (codegen::clif's
-    // `stack_maps`): the same capability, runtime::framewalk's
-    // NATIVE_FRAME_ROOTS.
-    let native_frame_supported = crate::runtime::framewalk::NATIVE_FRAME_ROOTS;
+    // What code generation decides for the program's runtime (codegen::clif
+    // reads the same capabilities).
+    let mode = program.capabilities.root_mode();
     let mut out = String::new();
     for f in &program.functions {
-        let plan = plan(f, native_frame_supported);
+        let plan = plan(f, mode);
         let (regs, raw) = RootPlan::counts(f);
         writeln!(out, "function {} \"{}\"", f.id, f.name).unwrap();
         writeln!(out, "  NIR regs: {regs}").unwrap();
@@ -926,7 +916,7 @@ pub fn report(program: &Program) -> String {
             "  storage: {}",
             match plan.storage {
                 RootStorage::NativeFrame => "native frame",
-                RootStorage::RuntimeStack => "runtime stack",
+                RootStorage::RuntimeStack => "shadow stack",
             }
         )
         .unwrap();
@@ -940,6 +930,10 @@ pub fn report(program: &Program) -> String {
 mod tests {
     use super::*;
     use crate::nir;
+
+    /// The ShadowOnly mode of a runtime with the stack guard (the
+    /// `fallback-roots` build's): no depth token.
+    const SHADOW: RootMode = RootMode::ShadowOnly { depth_token: false };
 
     /// Parses PROGRAM (possibly several `func`s) and returns it whole.
     fn parse_program(text: &str) -> nir::Program {
@@ -987,7 +981,7 @@ mod tests {
             "0 1 2",
             "    %0 = rawint 1\n    %1 = rawint 2\n    %2 = op riadd %0 %1\n    %3 = op rbox %2\n    ret %3\n",
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 0);
         assert_eq!(plan.root_candidates, 0);
         // This function also makes no Botlish call, so it is RootStorage::
@@ -1032,7 +1026,7 @@ mod tests {
                 "    ret %6\n",
             ),
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert!(plan.safepoints >= 3);
         assert!(plan.slot_of[0].is_none(), "the short scalar must never get a root slot");
         assert!(plan.safepoint_slots.values().flatten().count() > 0, "the live Lists are rooted");
@@ -1056,7 +1050,7 @@ mod tests {
                 "    ret %3\n",
             ),
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert!(plan.slot_of[0].is_none());
         assert!(plan.slot_of[1].is_some(), "the materialized String is live across listnew and must be a root");
     }
@@ -1070,7 +1064,7 @@ mod tests {
     #[test]
     fn tagged_dead_before_safepoint_needs_no_slot() {
         let f = program_of(3, "", "    %0 = int 7\n    %1 = int 2\n    %2 = op ilt %0 %1\n    ret %2\n");
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 0);
         assert_eq!(plan.root_candidates, 0);
         assert!(plan.slot_of.iter().all(Option::is_none));
@@ -1089,7 +1083,7 @@ mod tests {
             "",
             "    %0 = str \"a\"\n    %1 = op listnew\n    %2 = op streq %0 %0\n    ret %2\n",
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 1);
         assert_eq!(plan.max_live, 1, "only %0 is live across the list allocation");
         assert_eq!(plan.root_candidates, 1);
@@ -1110,7 +1104,7 @@ mod tests {
             "    %0 = int 1\n",
             "func 1 \"f\" params=1 env=0 regs=6 pnames=\"i\" captures=0\n    %1 = op scratchtake\n    %2 = op scratchmark\n    %3 = op listnew\n    %4 = op scratchexit %2 %1\n    %5 = op scratchreset %2\n    ret %3\nend\n",
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 1, "the list allocation");
         assert_eq!(plan.root_candidates, 0, "the mark and the flag live across it, unrooted");
         assert!(plan.slot_of.iter().all(Option::is_none));
@@ -1128,7 +1122,7 @@ mod tests {
             "",
             "    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = op strcat %0 %1\n    ret %2\n",
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 1);
         // Both %0 and %1 are live-in at the strcat: they are its operands,
         // needed while it runs, even though neither survives past it.
@@ -1147,7 +1141,7 @@ mod tests {
             "",
             "    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = op listnew\n    %3 = op streq %0 %1\n    ret %3\n",
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 1);
         assert_eq!(plan.max_live, 2);
         assert!(plan.slot_of[0].is_some() && plan.slot_of[1].is_some());
@@ -1175,7 +1169,7 @@ mod tests {
                 "    ret %5\n",
             ),
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert!(
             plan.num_slots < plan.root_candidates,
             "some slot must be reused: {} candidates, {} slots",
@@ -1211,7 +1205,7 @@ mod tests {
             "    ret %2\n",
             "end\n",
         ));
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 2);
         assert_eq!(plan.max_live, 1);
         // %1 and %3 never co-occur at any single safepoint: they may share.
@@ -1250,7 +1244,7 @@ mod tests {
             "    ret %0\n",
             "end\n",
         ));
-        let plan = plan(&program.functions[0], true);
+        let plan = plan(&program.functions[0], RootMode::NativeFrame);
         assert_eq!(plan.max_live, 1, "%0 and %1 are never roots at the same safepoint");
         assert!(plan.slot_of[0].is_some());
         assert!(plan.slot_of[1].is_some());
@@ -1274,7 +1268,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 1);
         // %0 (the carried accumulator) and %1 (this iteration's fresh
         // temporary) are both operands of the strcat, so both are live-in
@@ -1307,7 +1301,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 1);
         assert_eq!(plan.max_live, 1);
         assert!(plan.slot_of[0].is_some());
@@ -1327,8 +1321,8 @@ mod tests {
             "    ret %5\n",
             "end\n",
         ));
-        let a = plan(&f, true).slot_of;
-        let b = plan(&f, true).slot_of;
+        let a = plan(&f, RootMode::NativeFrame).slot_of;
+        let b = plan(&f, RootMode::NativeFrame).slot_of;
         assert_eq!(a, b);
     }
 
@@ -1349,7 +1343,7 @@ mod tests {
             "    ret %0\n",
             "end\n",
         ));
-        let plan = plan(&program.functions[0], true);
+        let plan = plan(&program.functions[0], RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 1);
         assert_eq!(plan.max_live, 0, "the call has no argument and its result is only defined after it");
     }
@@ -1398,7 +1392,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         // Two recursive calls, plus the final `+` that combines their
         // results (conservatively a safepoint too: see this test's doc).
         assert_eq!(plan.safepoints, 3);
@@ -1447,7 +1441,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 1);
         let slot = plan.slot_of[0].expect("the parameter is live across the strcat");
         assert!(!plan.entry_zero[slot as usize], "the prologue's own parameter store already initializes it");
@@ -1475,7 +1469,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 1);
         let slot0 = plan.slot_of[0].expect("the parameter is live across the strcat on the L1 path");
         let slot2 = plan.slot_of[2].expect("the fresh string is live across the strcat too");
@@ -1511,7 +1505,7 @@ mod tests {
             "    ret %0\n",
             "end\n",
         ));
-        let plan = plan(&program.functions[1], true);
+        let plan = plan(&program.functions[1], RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 2);
         let slot = plan.slot_of[1].expect("%1 is live across the second call");
         assert!(plan.entry_zero[slot as usize], "the first call can scan %1's slot before %1 is ever defined");
@@ -1540,7 +1534,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 1);
         let slot = plan.slot_of[1].expect("%1 is live across the call on the L2 join");
         assert!(plan.entry_zero[slot as usize], "the L1 (false) branch reaches the safepoint without defining %1");
@@ -1569,7 +1563,7 @@ mod tests {
                 "    ret %5\n",
             ),
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert!(plan.num_slots < plan.root_candidates, "some slot must be reused (see the sibling F3 test)");
         assert_eq!(plan.slot_of[3], plan.slot_of[0], "reg 3 should reuse reg 0's now-dead slot");
         for slot in 0..plan.num_slots {
@@ -1597,7 +1591,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f, true);
+        let plan = plan(&f, RootMode::NativeFrame);
         assert_eq!(plan.safepoints, 1);
         let slot = plan.slot_of[0].expect("the carried accumulator is live across the strcat");
         assert!(!plan.entry_zero[slot as usize], "bound by the prologue, then rebound by every `tail`, before the loop's one safepoint");
@@ -1610,10 +1604,13 @@ mod tests {
     // paths, since a no-call function is NativeFrame either way).
 
     /// A root candidate whose only safepoint is an internal (non-Botlish)
-    /// allocating op, with no Botlish call anywhere in the function: always
-    /// eligible for `NativeFrame` (both paths), with exactly the physical
-    /// slots F3's own coloring already decided (unaffected by the storage
-    /// decision), and no depth reservation (nothing here can recurse).
+    /// allocating op, with no Botlish call anywhere in the function -- a
+    /// leaf: native-frame storage on the stack-map plan, and on ShadowOnly a
+    /// frame in the shadow stack like every other function with a root
+    /// (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md, invariant I9:
+    /// no leaf publication), with exactly the physical slots F3's own
+    /// coloring already decided (unaffected by the storage decision), and no
+    /// depth reservation (nothing here can recurse).
     #[test]
     fn root_with_no_botlish_calls_is_native_frame() {
         let f = program_of(
@@ -1621,9 +1618,9 @@ mod tests {
             "",
             "    %0 = str \"a\"\n    %1 = op listnew\n    %2 = op streq %0 %0\n    ret %2\n",
         );
-        for native_frame_supported in [true, false] {
-            let plan = plan(&f, native_frame_supported);
-            assert_eq!(plan.storage, RootStorage::NativeFrame);
+        for (mode, storage) in [(RootMode::NativeFrame, RootStorage::NativeFrame), (SHADOW, RootStorage::RuntimeStack)] {
+            let plan = plan(&f, mode);
+            assert_eq!(plan.storage, storage);
             assert_eq!(plan.num_slots, 1);
             assert!(plan.slot_of[0].is_some());
             assert!(!plan.depth_reservation);
@@ -1631,10 +1628,10 @@ mod tests {
     }
 
     /// A loop-carried root reached purely by a self `tail` back-edge (no
-    /// Botlish call at all): also `NativeFrame` on both paths -- a self
-    /// tail call is a CFG jump within this same frame, never a machine
-    /// `call` (codegen::clif's own doc), so it cannot grow the native call
-    /// stack and needs no recursion-depth bound.
+    /// Botlish call at all): a self tail call is a CFG jump within this same
+    /// frame, never a machine `call` (codegen::clif's own doc), so it cannot
+    /// grow the native call stack and needs no recursion-depth bound -- even
+    /// where the mode has a depth token.
     #[test]
     fn tail_self_loop_alone_is_native_frame() {
         let f = parse_with_one_arg(
@@ -1648,18 +1645,17 @@ mod tests {
                 "end\n",
             ),
         );
-        assert_eq!(plan(&f, true).storage, RootStorage::NativeFrame);
-        assert_eq!(plan(&f, false).storage, RootStorage::NativeFrame);
+        assert_eq!(plan(&f, RootMode::NativeFrame).storage, RootStorage::NativeFrame);
+        assert_eq!(plan(&f, SHADOW).storage, RootStorage::RuntimeStack);
+        assert!(!plan(&f, RootMode::ShadowOnly { depth_token: true }).depth_reservation);
     }
 
-    /// A direct Botlish call anywhere in the function always sets
-    /// `depth_reservation` (fib<int>'s own shape, `fib_shape_needs_two_
-    /// slots`, is the flagship instance: two recursive calls with genuine
-    /// cross-call roots) -- but, on the native-stack-map path, no longer
-    /// forces `RuntimeStack` *storage*: the frame-walker can discover a
-    /// `NativeFrame` function's roots regardless of how many further calls
-    /// nest on top of it (this milestone's own goal). Only the fallback
-    /// path (no frame-walker) keeps the old, narrower rule.
+    /// A direct Botlish call reserves a slot with no root only under the
+    /// ShadowOnly mode's depth token (a runtime without the stack guard).
+    /// With the guard -- the native-frame plan, and the `fallback-roots`
+    /// build's ShadowOnly plan alike -- a function with no root touches no
+    /// shadow state at all (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+    /// MILESTONE-1.md: the depth token's removal).
     #[test]
     fn any_botlish_call_sets_depth_reservation_but_only_fallback_forces_runtime_stack() {
         let program = parse_program(concat!(
@@ -1673,15 +1669,19 @@ mod tests {
             "    ret %0\n",
             "end\n",
         ));
-        let native = plan(&program.functions[0], true);
+        let native = plan(&program.functions[0], RootMode::NativeFrame);
         assert_eq!(native.storage, RootStorage::NativeFrame, "the stack-map path discovers roots across calls too");
-        assert_eq!(native.depth_reservation, !crate::runtime::native_stack::native_stack_overflow_supported());
+        assert!(!native.depth_reservation);
         assert_eq!(native.num_slots, 0, "no RuntimeStack floor: NativeFrame storage needs none");
 
-        let fallback = plan(&program.functions[0], false);
-        assert_eq!(fallback.storage, RootStorage::RuntimeStack, "no frame-walker: the old, narrower rule applies");
-        assert!(fallback.depth_reservation);
-        assert_eq!(fallback.num_slots, 1, "RuntimeStack's own recursion-depth floor, unchanged on the fallback path");
+        let shadow = plan(&program.functions[0], SHADOW);
+        assert_eq!(shadow.storage, RootStorage::RuntimeStack);
+        assert!(!shadow.depth_reservation, "the guard bounds the recursion: no depth token");
+        assert_eq!(shadow.num_slots, 0, "no root, no token: the function touches no shadow state");
+
+        let tokened = plan(&program.functions[0], RootMode::ShadowOnly { depth_token: true });
+        assert!(tokened.depth_reservation);
+        assert_eq!(tokened.num_slots, 1, "the depth token: one slot for a Botlish call without a guard");
     }
 
     /// fib<int>'s own shape (`fib_shape_needs_two_slots`): two recursive
@@ -1723,9 +1723,9 @@ mod tests {
                 "end\n",
             ),
         );
-        let native = plan(&f, true);
+        let native = plan(&f, RootMode::NativeFrame);
         assert_eq!(native.storage, RootStorage::NativeFrame);
-        assert_eq!(native.depth_reservation, !crate::runtime::native_stack::native_stack_overflow_supported());
+        assert!(!native.depth_reservation);
         assert_eq!(native.num_slots, 2, "same F3 coloring as fib_shape_needs_two_slots, unaffected by storage");
         // See fib_shape_needs_two_slots's own breakdown: %9/%10 share one
         // physical slot (call it A), %14/%15 the other (B). Body indices
@@ -1744,7 +1744,7 @@ mod tests {
         let add_slots = native.safepoint_slots.get(&19).expect("the final `+` is a safepoint");
         assert_eq!(add_slots, &vec![slot_a.min(slot_b), slot_a.max(slot_b)], "both call results are live at the final +");
 
-        let fallback = plan(&f, false);
+        let fallback = plan(&f, SHADOW);
         assert_eq!(fallback.storage, RootStorage::RuntimeStack);
         assert!(fallback.safepoint_slots.is_empty(), "safepoint_slots is only populated for NativeFrame storage");
     }

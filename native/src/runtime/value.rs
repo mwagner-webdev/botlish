@@ -260,6 +260,11 @@ pub const KIND_RAWF64: u8 = 20;
 /// case's immediate word, which stays the representation of every
 /// payload-free case: the two forms are one semantic kind.
 pub const KIND_ENUMCASE: u8 = 21;
+/// One suspended activation of a resumable function: runtime/resumable.rs's
+/// FrameObj (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md). Never a
+/// program value: reachable only from a coroutine, another frame, or the
+/// registers of the activation running with it.
+pub const KIND_FRAME: u8 = 22;
 
 #[repr(C)]
 pub struct Header {

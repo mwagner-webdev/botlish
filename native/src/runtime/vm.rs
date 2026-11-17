@@ -165,20 +165,6 @@ pub struct Vm {
     /// it), meaning "the pieces of your result may go to my region". 0
     /// everywhere else, so a function entered any other way reads 0.
     pub scratch_dest: u32,
-    /// The currently active `RootStorage::NativeFrame` function's own root
-    /// block (null when none is active): codegen::clif's prologue publishes
-    /// its Cranelift stack slot's address and slot count here instead of
-    /// participating in `ss_top`/`ss_limit`/`shadow` below, and restores
-    /// whatever was here on entry before returning (see codegen::roots's
-    /// `RootStorage` doc for why at most one such registration can ever be
-    /// active at a time). Scanned by `collect_with` alongside the shadow
-    /// stack, the pending error, and `temp_roots` -- a fourth, minimal root
-    /// source, not a replacement for any of the others.
-    pub native_roots_ptr: *mut Value,
-    /// A plain word (not `u32`) so generated code can store/reload it with
-    /// the same I64 op it already uses for `native_roots_ptr`, without a
-    /// second width.
-    pub native_roots_len: u64,
     /// The lowest stack pointer a frame that checks its stack may run at
     /// (codegen::clif's `prologue_stack_limit`): set only in a native
     /// library's instance (`check_stack_limit`), whose code checks it in
@@ -370,8 +356,6 @@ pub const VM_CONSTS_OFFSET: i32 = offset_of!(Vm, consts) as i32;
 pub const VM_ALLOC_SITE_OFFSET: i32 = offset_of!(Vm, alloc_site) as i32;
 pub const VM_SCRATCH_REQUEST_OFFSET: i32 = offset_of!(Vm, scratch_request) as i32;
 pub const VM_SCRATCH_DEST_OFFSET: i32 = offset_of!(Vm, scratch_dest) as i32;
-pub const VM_NATIVE_ROOTS_PTR_OFFSET: i32 = offset_of!(Vm, native_roots_ptr) as i32;
-pub const VM_NATIVE_ROOTS_LEN_OFFSET: i32 = offset_of!(Vm, native_roots_len) as i32;
 pub const VM_STATICS_OFFSET: i32 = offset_of!(Vm, statics_ptr) as i32;
 pub const VM_STACK_LIMIT_OFFSET: i32 = offset_of!(Vm, stack_limit) as i32;
 pub const VM_CONTEXT_OFFSET: i32 = offset_of!(Vm, context_ptr) as i32;
@@ -399,8 +383,6 @@ impl Vm {
             alloc_site: 0,
             scratch_request: 0,
             scratch_dest: 0,
-            native_roots_ptr: std::ptr::null_mut(),
-            native_roots_len: 0,
             stack_limit: 0,
             stack_limit_checked: false,
             statics_ptr: std::ptr::null_mut(),
@@ -738,20 +720,11 @@ impl Vm {
         } else {
             unsafe { std::slice::from_raw_parts(self.ss_base, self.ss_top.offset_from(self.ss_base) as usize) }
         };
-        // The currently active RootStorage::NativeFrame function's own root
-        // block, if any (see that field's doc): empty when no such function
-        // is on the call stack right now (native_roots_ptr null, or -- same
-        // thing -- native_roots_len 0). Fallback path only (non-x86-64, or
-        // any function `roots::plan` still routes there): on the stack-map
-        // path below, `native_roots_ptr`/`_len` are never written at all
-        // (codegen::clif's `prologue_native_frame`), so this is always empty
-        // there -- see `native_frame_roots` below for why this is not a
-        // double-count either way.
-        let native = if self.native_roots_ptr.is_null() {
-            &[][..]
-        } else {
-            unsafe { std::slice::from_raw_parts(self.native_roots_ptr, self.native_roots_len as usize) }
-        };
+        // The shadow stack above is the ShadowOnly plan's only root storage
+        // for running code (codegen::roots): every function with a root slot
+        // keeps its frame there, leaf or not, so a function an operation
+        // re-enters Botlish code under can never hide an older activation's
+        // roots (invariant I9: there is no per-function published block).
         // Every `RootStorage::NativeFrame` function currently suspended
         // anywhere on the native call stack, on the x86-64 stack-map path
         // (runtime::framewalk; a no-op elsewhere -- see that module's own
@@ -802,7 +775,6 @@ impl Vm {
         let roots = stack
             .iter()
             .copied()
-            .chain(native.iter().copied())
             .chain(native_frame_roots)
             .chain(error_values)
             .chain(self.declared_payload.iter().copied())
@@ -851,8 +823,6 @@ impl Vm {
 
     pub fn reset(&mut self) {
         self.ss_top = self.ss_base;
-        self.native_roots_ptr = std::ptr::null_mut();
-        self.native_roots_len = 0;
         self.error = None;
         self.declared_error = 0;
         self.declared_payload.clear();

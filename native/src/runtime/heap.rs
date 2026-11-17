@@ -132,6 +132,13 @@ impl Heap {
         self.ownership = Some(statics);
     }
 
+    /// Test hook: every object the heap holds (registered and not yet
+    /// swept), for tests that check what a collection kept.
+    #[cfg(test)]
+    pub fn objects_for_test(&self) -> &[*mut Header] {
+        &self.objects
+    }
+
     /// Test hook: no allocation-triggered collection until the next explicit
     /// one (so an allocation-counting test sees only the String's own block,
     /// not the collector's scratch vectors).
@@ -242,6 +249,10 @@ impl Heap {
                 // of every frame on its stack, from where it switched away
                 // (runtime/coroutine.rs). A running one's stack is walked
                 // with the running chain (Vm::collect_with).
+                // A resumable activation's frame (runtime/resumable.rs): its
+                // suspended callee's frame and exactly the tagged slots its
+                // suspension point saved; raw slots are never traced.
+                KIND_FRAME => stack.extend(super::resumable::frame_of(v).traced()),
                 KIND_COROUTINE => {
                     let co = super::coroutine::coroutine_of(v);
                     stack.extend(super::coroutine::fields(co));
@@ -286,7 +297,7 @@ impl Heap {
                     let k = &mut reclaimed_by_kind[header.kind as usize];
                     k.0 += 1;
                     k.1 += size as u64;
-                    if header.kind == KIND_COROUTINE && super::coroutine::coroutine_of(object as Value).stack.is_some() {
+                    if header.kind == KIND_COROUTINE && super::coroutine::holds_suspended_state(super::coroutine::coroutine_of(object as Value)) {
                         // Abandoned suspended, not released at its last use.
                         metrics.record_coroutine_swept();
                     }
@@ -362,6 +373,7 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
             KIND_STRPLAN => size_of::<StrPlanObj>() + super::construct::strplan_of(v).buf.len(),
             KIND_LISTPLAN => size_of::<ListPlanObj>() + super::construct::listplan_of(v).items.capacity() * 8,
             KIND_COROUTINE => size_of::<super::coroutine::CoroutineObj>(),
+            KIND_FRAME => super::resumable::frame_of(v).object_size(),
             KIND_MUTVEC => super::mutvec::object_size(v),
             KIND_FLOAT | KIND_DECIMAL | KIND_RAWF32 | KIND_RAWF64 => size_of::<FloatObj>(),
             kind => panic!("bad heap object kind {kind}"),
@@ -422,6 +434,8 @@ pub unsafe fn free_object(object: *mut Header) {
             // Its stack, if it still has one (an abandoned suspended
             // coroutine), goes back to the pool: nothing on it runs.
             KIND_COROUTINE => drop(Box::from_raw(object as *mut super::coroutine::CoroutineObj)),
+            // One block, fields and slots (runtime/resumable.rs).
+            KIND_FRAME => super::resumable::free_frame(object),
             // The header's share of its backing goes back (the backing is
             // freed with its last header).
             KIND_MUTVEC => drop(Box::from_raw(object as *mut super::mutvec::MutVecObj)),

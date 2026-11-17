@@ -23,6 +23,7 @@ pub mod library;
 #[cfg(all(windows, target_arch = "x86_64", feature = "jit"))]
 pub mod jitunwind;
 pub mod nirtext;
+pub mod resumable;
 pub mod roots;
 pub mod target;
 pub mod unwind;

@@ -99,7 +99,6 @@
 use crate::codegen::nirtext;
 use crate::codegen::roots::{def_use, live_at_many};
 use crate::nir::{self, FuncId, Function, Inst, Label, OpCode, Piece, Program, Reg, RegKind};
-use crate::runtime::coroutine::STACK_SWITCHING;
 use std::collections::HashSet;
 
 /// The state of a completed and of a failed fused coroutine (`st`).
@@ -118,11 +117,14 @@ const SITES_PER_FUNCTION: usize = 64;
 /// the start or resume the copy belongs to.
 const BACK: Label = 0;
 
-/// Whether the driver fuses coroutines: on every host with native
-/// coroutines (elsewhere the general runtime refuses them, and fusion must
-/// not make such a program run), unless BOTLISH_NATIVE_COROUTINE_FUSION=0.
-pub fn enabled() -> bool {
-    STACK_SWITCHING && std::env::var("BOTLISH_NATIVE_COROUTINE_FUSION").map_or(true, |v| v != "0")
+/// Whether the driver fuses PROGRAM's coroutines: wherever a general
+/// coroutine mechanism runs every coroutine -- stack switching, or the
+/// resumable lowering (codegen::resumable) that runs after fusion -- so
+/// fusion never makes a program run that the general mechanism would refuse
+/// (runtime::capabilities's `coroutines`); unless
+/// BOTLISH_NATIVE_COROUTINE_FUSION=0.
+pub fn enabled(program: &Program) -> bool {
+    program.capabilities.coroutines() && std::env::var("BOTLISH_NATIVE_COROUTINE_FUSION").map_or(true, |v| v != "0")
 }
 
 /// What became of one construction site.
@@ -287,7 +289,7 @@ pub fn report(reports: &[SiteReport]) -> String {
 /// Per function: whether it may yield through direct calls -- it contains a
 /// `coyield`, or a direct call of a function that may (a function that may
 /// yield is never a value: COROUTINES.md point 37).
-fn yielding(program: &Program) -> Vec<bool> {
+pub(crate) fn yielding(program: &Program) -> Vec<bool> {
     let mut y: Vec<bool> = program
         .functions
         .iter()
@@ -311,7 +313,7 @@ fn yielding(program: &Program) -> Vec<bool> {
 }
 
 /// The function INST calls directly, if it is a direct call.
-fn callee(inst: &Inst) -> Option<FuncId> {
+pub(crate) fn callee(inst: &Inst) -> Option<FuncId> {
     match inst {
         Inst::Call { func, .. } | Inst::CallEnv { func, .. } | Inst::CallMulti { func, .. } | Inst::CallEnvMulti { func, .. } => {
             Some(*func)
@@ -329,7 +331,7 @@ fn name_of(f: &Function) -> String {
     if f.name.is_empty() { format!("#{}", f.id) } else { f.name.clone() }
 }
 
-fn max_label(f: &Function) -> Option<Label> {
+pub(crate) fn max_label(f: &Function) -> Option<Label> {
     f.body.iter().filter_map(|i| if let Inst::Label(l) = i { Some(*l) } else { None }).max()
 }
 
@@ -998,7 +1000,7 @@ impl<'p> Builder<'p> {
 
 /// INST with every register R read or written as REG(R) and every label L
 /// as LABEL(L).
-fn rename(inst: &Inst, reg: &dyn Fn(Reg) -> Reg, label: &dyn Fn(Label) -> Label) -> Inst {
+pub(crate) fn rename(inst: &Inst, reg: &dyn Fn(Reg) -> Reg, label: &dyn Fn(Label) -> Label) -> Inst {
     let regs = |rs: &[Reg]| rs.iter().map(|r| reg(*r)).collect::<Vec<Reg>>();
     match inst {
         Inst::Label(l) => Inst::Label(label(*l)),
@@ -1095,6 +1097,14 @@ fn rename(inst: &Inst, reg: &dyn Fn(Reg) -> Reg, label: &dyn Fn(Label) -> Label)
         Inst::StructNew { dst, shape, fields } => Inst::StructNew { dst: reg(*dst), shape: *shape, fields: regs(fields) },
         Inst::StructGet { dst, slot, value } => Inst::StructGet { dst: reg(*dst), slot: *slot, value: reg(*value) },
         Inst::Reraise => Inst::Reraise,
+        Inst::FrameSave { frame, point, callee, tagged, raw } => Inst::FrameSave {
+            frame: reg(*frame),
+            point: *point,
+            callee: callee.map(reg),
+            tagged: regs(tagged),
+            raw: regs(raw),
+        },
+        Inst::FrameRestore { frame, tagged, raw } => Inst::FrameRestore { frame: reg(*frame), tagged: regs(tagged), raw: regs(raw) },
     }
 }
 

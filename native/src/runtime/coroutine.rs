@@ -184,6 +184,10 @@ pub struct CoroutineObj {
     /// The coroutine whose segment resumed this one (null: the main stack),
     /// while this one runs.
     pub resumer: *mut CoroutineObj,
+    /// A suspended resumable coroutine's outermost frame (runtime/resumable.rs:
+    /// its whole suspended state, the chain of its frames); UNIT otherwise --
+    /// a running one's frames belong to its activations.
+    pub frame: Value,
 }
 
 pub fn coroutine_of<'a>(v: Value) -> &'a mut CoroutineObj {
@@ -191,9 +195,16 @@ pub fn coroutine_of<'a>(v: Value) -> &'a mut CoroutineObj {
     unsafe { &mut *(v as *mut CoroutineObj) }
 }
 
+/// Whether CO is suspended holding its suspended state: a stack (stack
+/// switching) or a frame chain (runtime/resumable.rs) -- what a release or a
+/// sweep of it gives back.
+pub fn holds_suspended_state(co: &CoroutineObj) -> bool {
+    co.state == CO_SUSPENDED && (co.stack.is_some() || co.frame != UNIT)
+}
+
 /// Values a coroutine object refers to directly (not its stack's roots).
 pub fn fields(co: &CoroutineObj) -> Vec<Value> {
-    let mut values = vec![co.thunk, co.value];
+    let mut values = vec![co.thunk, co.value, co.frame];
     if let Some(failure) = &co.failure {
         values.extend(failure.0.values());
         values.extend(failure.2.iter().copied());
@@ -643,6 +654,7 @@ pub extern "C" fn rt_co_create(p: *mut Vm, thunk: Value) -> Value {
             saved_sp: SwitchPoint::default(),
             resumer_sp: SwitchPoint::default(),
             resumer: std::ptr::null_mut(),
+            frame: UNIT,
         },
         0,
     )
@@ -657,6 +669,11 @@ pub extern "C" fn rt_co_start(p: *mut Vm, handle: Value) -> Value {
     unsafe {
         if (*co).state != CO_FRESH {
             return vm(p).fail(RtError::Semantic { kind: "COROUTINE-STATE", message: "the coroutine was already started".to_string() });
+        }
+        if super::resumable::RESUMABLE {
+            // A resumable coroutine (runtime/resumable.rs) holds no stack:
+            // its suspended state is heap frames, paced like any allocation.
+            return super::resumable::segment(p, co);
         }
         if !super::framewalk::NATIVE_FRAME_ROOTS {
             return vm(p).fail(RtError::Unsupported(
@@ -774,7 +791,7 @@ unsafe fn segment(p: *mut Vm, co: *mut CoroutineObj) -> Value {
 }
 
 /// Raises CO's cached terminal failure again (stable terminal failure).
-unsafe fn reraise(p: *mut Vm, co: *mut CoroutineObj) -> Value {
+pub(super) unsafe fn reraise(p: *mut Vm, co: *mut CoroutineObj) -> Value {
     unsafe {
         let Some(failure) = &(*co).failure else {
             return vm(p).fail(RtError::Bug("a failed coroutine has no cached failure".to_string()));
@@ -796,7 +813,7 @@ fn resume(p: *mut Vm, handle: Value, message: Value) -> Value {
         match (*co).state {
             CO_SUSPENDED => {
                 (*co).value = message;
-                segment(p, co)
+                if super::resumable::RESUMABLE { super::resumable::segment(p, co) } else { segment(p, co) }
             }
             // Stable terminal success: the cached result, no body code.
             CO_COMPLETED => (*co).value,
@@ -840,6 +857,12 @@ pub extern "C" fn rt_co_yield(p: *mut Vm, value: Value) -> Value {
                 message: "yield outside a coroutine: no coroutine is running here".to_string(),
             });
         }
+        if super::resumable::RESUMABLE {
+            // No stack to switch: a resumable coroutine suspends by returning
+            // its frames (codegen::resumable), which code generation refuses
+            // to skip; this is defense in depth.
+            return vm(p).fail(RtError::Bug("a stack-switching yield on a resumable runtime".to_string()));
+        }
         (*co).value = value;
         (*co).state = CO_SUSPENDED;
         bl_co_switch(&mut (*co).saved_sp, (*co).resumer_sp, 0);
@@ -871,7 +894,7 @@ pub extern "C" fn rt_co_abandon(p: *mut Vm, handle: Value) -> Value {
     // SAFETY: as in rt_co_start: HANDLE is a live coroutine object, touched
     // through the raw pointer around the switch; it is rooted meanwhile.
     unsafe {
-        if (*co).state != CO_SUSPENDED || (*co).stack.is_none() {
+        if !holds_suspended_state(&*co) {
             return rt_co_release(p, handle);
         }
         vm(p).metrics.record_coroutine_abandoned();
@@ -882,7 +905,7 @@ pub extern "C" fn rt_co_abandon(p: *mut Vm, handle: Value) -> Value {
             vm(p).declared_payload.clear();
             vm(p).fail(RtError::Semantic { kind: "COROUTINE-ABANDONED", message: "a coroutine was abandoned".to_string() });
             (*co).value = NO_VALUE;
-            let outcome = segment(p, co);
+            let outcome = if super::resumable::RESUMABLE { super::resumable::segment(p, co) } else { segment(p, co) };
             if outcome != NO_VALUE {
                 // A body that completed instead: it caught nothing (no
                 // handler can name the abandonment), so it cannot have.
@@ -928,8 +951,11 @@ pub extern "C" fn rt_co_release(p: *mut Vm, handle: Value) -> Value {
         // handle is never one of the running chain.
         return UNIT;
     }
-    vm(p).metrics.record_coroutine_release(co.state == CO_SUSPENDED && co.stack.is_some());
+    vm(p).metrics.record_coroutine_release(holds_suspended_state(co));
     co.stack = None;
+    // A resumable coroutine's frame chain goes with it (invariant I8):
+    // nothing runs it again, and nothing else holds it.
+    co.frame = UNIT;
     co.thunk = UNIT;
     co.value = UNIT;
     co.failure = None;
@@ -960,6 +986,7 @@ pub extern "C" fn rt_co_failed(p: *mut Vm) -> Value {
             saved_sp: SwitchPoint::default(),
             resumer_sp: SwitchPoint::default(),
             resumer: std::ptr::null_mut(),
+            frame: UNIT,
         },
         0,
     );
@@ -2022,36 +2049,133 @@ mod tests {
     }
 }
 
-/// The fallback root plan runs no native coroutine (STACK_SWITCHING): its
-/// shadow stack cannot hold a suspended coroutine's roots, and it is never
-/// made coroutine-aware (WINDOWS-X86-64-MILESTONE-3.md, -5.md). A start is
-/// NATIVE UNSUPPORTED, before any stack is made.
+/// The fallback root plan runs coroutines as resumable state machines
+/// (runtime/resumable.rs; WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+/// MILESTONE-1.md): no stack is ever made. These drive the segment protocol
+/// with hand-written entries in the shape codegen::resumable gives a thunk.
 #[cfg(all(test, feature = "fallback-roots"))]
 mod fallback_tests {
     use super::*;
     use crate::runtime::metrics::AllocMode;
+    use crate::runtime::resumable::{frame_of, is_frame, rt_co_msg, rt_co_suspend, rt_frame_new};
     use crate::runtime::vm::ProgramInfo;
 
-    extern "C" fn never(_p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
-        panic!("a coroutine body ran on the fallback root plan")
+    fn thunk(vm: &mut Vm, entry: extern "C" fn(*mut Vm, Value, *const Value) -> Value) -> Value {
+        let caps: Box<[Value]> = Vec::new().into_boxed_slice();
+        vm.alloc(
+            ClosureObj { hdr: Header::new(KIND_CLOSURE, false), func: 0, arity: 1, code: entry as *const () as usize, ncaps: 0, caps: Box::into_raw(caps) as *mut Value },
+            0,
+        )
+    }
+
+    fn vm() -> Box<Vm> {
+        Vm::new(std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary)
+    }
+
+    /// Yields 1, then the message plus 10, then completes with 99: a fresh
+    /// activation makes its frame and suspends at point 1; resumed with it,
+    /// it reuses it for point 2.
+    extern "C" fn counter(p: *mut Vm, _closure: Value, args: *const Value) -> Value {
+        let frame = unsafe { *args };
+        let vm = unsafe { &mut *p };
+        if !is_frame(frame) {
+            assert_eq!(frame, UNIT, "a fresh activation's hidden frame argument is UNIT");
+            rt_co_suspend(p, make_small(1));
+            let f = rt_frame_new(p, 0, 0);
+            frame_of(f).point = 1;
+            return f;
+        }
+        let point = frame_of(frame).point;
+        frame_of(frame).point = 0;
+        let message = rt_co_msg(p);
+        if message == NO_VALUE {
+            return NO_VALUE; // abandoned: the pending abandonment unwinds
+        }
+        match point {
+            1 => {
+                rt_co_suspend(p, make_small(small_of(message) + 10));
+                frame_of(frame).point = 2;
+                frame
+            }
+            2 => make_small(99),
+            _ => vm.fail(RtError::Bug("bad point".into())),
+        }
+    }
+
+    /// Pushes a shadow-stack frame and suspends without popping it: a
+    /// violation of invariant I1, which the segment reports.
+    extern "C" fn leaky(p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+        let vm = unsafe { &mut *p };
+        vm.ss_top = unsafe { vm.ss_top.add(1) };
+        rt_frame_new(p, 0, 0)
+    }
+
+    fn make_small(n: i64) -> Value {
+        ((n << 1) | 1) as Value
     }
 
     #[test]
-    fn the_fallback_plan_refuses_native_coroutines() {
-        assert!(!STACK_SWITCHING);
-        let mut vm = Vm::new(std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary);
-        let caps: Box<[Value]> = Vec::new().into_boxed_slice();
-        let t = vm.alloc(
-            ClosureObj { hdr: Header::new(KIND_CLOSURE, false), func: 0, arity: 0, code: never as *const () as usize, ncaps: 0, caps: Box::into_raw(caps) as *mut Value },
-            0,
-        );
+    fn the_fallback_plan_runs_resumable_coroutines() {
+        assert!(!STACK_SWITCHING && crate::runtime::resumable::RESUMABLE);
+        let mut vm = vm();
+        let t = thunk(&mut vm, counter);
         vm.temp_roots.push(t);
         let co = rt_co_create(&mut *vm, t);
         vm.temp_roots.push(co);
-        let before = pooled_stacks();
+        let top = vm.ss_top;
+        assert_eq!(rt_co_start(&mut *vm, co), make_small(1));
+        assert_eq!(coroutine_of(co).state, CO_SUSPENDED);
+        assert!(coroutine_of(co).stack.is_none(), "no stack is ever made");
+        let frame = coroutine_of(co).frame;
+        assert!(is_frame(frame), "the suspended state is the frame chain");
+        assert_eq!(rt_co_resume(&mut *vm, co, make_small(5)), make_small(15));
+        assert_eq!(coroutine_of(co).frame, frame, "steady-state suspension reuses the activation's frame");
+        assert_eq!(rt_co_resume(&mut *vm, co, UNIT), make_small(99));
+        assert_eq!(coroutine_of(co).state, CO_COMPLETED);
+        assert_eq!(coroutine_of(co).frame, UNIT, "completion leaves no frame (I8)");
+        assert_eq!(vm.ss_top, top, "every segment restored the shadow stack (I1)");
+        assert_eq!(vm.metrics.by_kind[KIND_FRAME as usize].allocations, 1, "one frame for one activation, however often it suspends");
+    }
+
+    /// Release and abandonment drop the frame chain (I8): a released
+    /// suspended coroutine holds no frame, and an abandoned one is unwound
+    /// (its yield fails with the abandonment) and then released.
+    #[test]
+    fn release_and_abandonment_drop_the_frame_chain() {
+        let mut vm = vm();
+        let t = thunk(&mut vm, counter);
+        vm.temp_roots.push(t);
+        let released = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(released);
+        rt_co_start(&mut *vm, released);
+        assert!(holds_suspended_state(coroutine_of(released)));
+        rt_co_release(&mut *vm, released);
+        assert_eq!(coroutine_of(released).frame, UNIT);
+        assert_eq!(vm.metrics.coroutines.released_suspended, 1);
+
+        let abandoned = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(abandoned);
+        rt_co_start(&mut *vm, abandoned);
+        assert_eq!(rt_co_abandon(&mut *vm, abandoned), UNIT, "unwound to its end: the abandonment is spent");
+        assert!(vm.error.is_none());
+        assert_eq!(coroutine_of(abandoned).state, CO_RELEASED);
+        assert_eq!(coroutine_of(abandoned).frame, UNIT);
+        assert_eq!(vm.metrics.resources.abandoned, 1);
+    }
+
+    /// I1 is checked: a segment that leaves a shadow-stack frame behind
+    /// fails (a code generation bug, never a program's), and the shadow
+    /// stack is put back.
+    #[test]
+    fn a_segment_that_leaks_a_shadow_frame_is_a_bug() {
+        let mut vm = vm();
+        let t = thunk(&mut vm, leaky);
+        vm.temp_roots.push(t);
+        let co = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(co);
+        let top = vm.ss_top;
         assert_eq!(rt_co_start(&mut *vm, co), NO_VALUE);
-        assert_eq!(vm.error.take().map(|e| e.error_code()), Some(vec!["NATIVE", "UNSUPPORTED", "value"]));
-        assert!(coroutine_of(co).stack.is_none());
-        assert_eq!(pooled_stacks(), before);
+        assert!(matches!(vm.error.take(), Some(RtError::Bug(m)) if m.contains("invariant I1")));
+        assert_eq!(vm.ss_top, top);
     }
 }

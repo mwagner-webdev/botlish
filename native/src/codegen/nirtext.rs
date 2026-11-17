@@ -89,6 +89,9 @@ pub fn header(f: &Function) -> String {
             let _ = write!(line, " {key}={}", quote(&positions(flags)));
         }
     }
+    if let Some(shape) = f.frame {
+        let _ = write!(line, " resumable=\"{} {}\"", shape.tagged, shape.raw);
+    }
     for (key, flag) in [
         ("planresult", f.plan_result),
         ("rawresult", f.raw_result),
@@ -222,6 +225,11 @@ pub fn inst(program: &Program, inst: &Inst) -> String {
         Inst::StructNew { dst, shape, fields } => format!("    %{dst} = structnew {shape}{}", regs(fields)),
         Inst::StructGet { dst, slot, value } => format!("    %{dst} = structget {slot} %{value}"),
         Inst::Reraise => "    reraise".to_string(),
+        Inst::FrameSave { frame, point, callee, tagged, raw } => {
+            let callee = callee.map(|c| format!(" callee %{c}")).unwrap_or_default();
+            format!("    frsave %{frame} {point}{callee} tagged{} raw{}", regs(tagged), regs(raw))
+        }
+        Inst::FrameRestore { frame, tagged, raw } => format!("    frrestore %{frame} tagged{} raw{}", regs(tagged), regs(raw)),
     }
 }
 

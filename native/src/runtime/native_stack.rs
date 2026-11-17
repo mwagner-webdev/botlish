@@ -63,18 +63,6 @@ pub const fn native_stack_overflow_supported() -> bool {
     ))
 }
 
-/// Whether the shadow stack's depth check bounds Botlish recursion
-/// (codegen::roots's `depth_reservation`) for code whose roots are in
-/// native frames exactly when NATIVE_FRAME_ROOTS says so: unless they are
-/// and the stack guard reports an exhausted stack, every function that
-/// makes a Botlish call checks its depth in its prologue and fails with
-/// NATIVE LIMIT STACK, an error its callers see (nir's call effects). Only
-/// the fallback plan checks: its shadow stack, which holds the roots, is
-/// the bound.
-pub const fn depth_checked(native_frame_roots: bool) -> bool {
-    !(native_frame_roots && native_stack_overflow_supported())
-}
-
 /// Native-frame roots and the stack guard are two capabilities, but a host
 /// with the first needs the second: with the roots in native frames nothing
 /// else bounds recursion (the shadow stack holds nothing, and its depth
@@ -104,12 +92,17 @@ mod tests {
         assert!(!suspended.is_guard_fault(0x1fff));
     }
 
-    /// Recursion is bounded by the guard wherever native frames hold the
-    /// roots, by the shadow stack's depth check on the fallback plan.
+    /// Recursion is bounded by the guard on both root plans of every host
+    /// the native backend runs on: a depth token exists only where nothing
+    /// but the shadow stack bounds it (runtime::capabilities).
     #[test]
-    fn the_depth_is_checked_only_on_the_fallback_plan() {
-        assert!(depth_checked(false), "the fallback plan's bound is the shadow stack's");
-        assert_eq!(depth_checked(true), !native_stack_overflow_supported());
-        assert_eq!(depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS), !crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
+    fn the_depth_is_checked_only_without_the_guard() {
+        use crate::runtime::capabilities::{RootMode, RuntimeCapabilities};
+        let host = RuntimeCapabilities::host();
+        assert_eq!(host.stack_guard, native_stack_overflow_supported());
+        assert_eq!(host.prologue_may_fail(), !native_stack_overflow_supported());
+        if let RootMode::ShadowOnly { depth_token } = host.root_mode() {
+            assert_eq!(depth_token, !native_stack_overflow_supported());
+        }
     }
 }

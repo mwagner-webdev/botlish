@@ -82,14 +82,23 @@
 //!                                        `kept` with the reason; empty when
 //!                                        fusion is off
 //!   botlish-native fused FILE.nir        the NIR the program is after fusion
+//!                                        and the resumable lowering
 //!                                        (codegen::nirtext), what every other
 //!                                        command compiles
+//!   botlish-native resumable FILE.nir    what the resumable lowering did
+//!                                        (codegen::resumable's Report): each
+//!                                        lowered function's frame shape and
+//!                                        the suspension points; empty where
+//!                                        coroutines switch stacks
 //!   botlish-native capabilities          what this build of the driver
 //!                                        can do: `jit 1|0` (whether it has
 //!                                        the in-process code generator,
 //!                                        the `jit` cargo feature:
 //!                                        MACOS-BOTLISH-DISTRIBUTION-
-//!                                        MILESTONE-1.md) and `aot-run 1`
+//!                                        MILESTONE-1.md), `aot-run 1`,
+//!                                        `roots native-frame|shadow-only` and
+//!                                        `coroutines stackful|resumable`
+//!                                        (runtime::capabilities)
 //!   botlish-native target TRIPLE         how this driver reads a target
 //!                                        triple: architecture, operating
 //!                                        system, pointer width, object format,
@@ -725,6 +734,12 @@ fn cli(args: &[String]) -> i32 {
         // feature, so a build without it says so instead of being probed.
         emit(&format!("jit {}", u8::from(cfg!(feature = "jit"))));
         emit("aot-run 1");
+        // The runtime this driver generates code for (runtime::capabilities):
+        // where GC roots live and which general mechanism runs coroutines --
+        // what a test lane checks it is exercising, never a job's name.
+        let caps = codegen::target::host_runtime();
+        emit(if caps.frame_roots { "roots native-frame" } else { "roots shadow-only" });
+        emit(if caps.resumable { "coroutines resumable" } else { "coroutines stackful" });
         return 0;
     }
     if command == "target" {
@@ -759,7 +774,7 @@ fn cli(args: &[String]) -> i32 {
             Ok(n) if (1..=32).contains(&n) => (n, file),
             _ => return usage(),
         },
-        ("run" | "clif" | "vcode" | "size" | "roots" | "calls" | "check" | "fusion" | "fused" | "link-plan", [file, ..]) => (1, file),
+        ("run" | "clif" | "vcode" | "size" | "roots" | "calls" | "check" | "fusion" | "fused" | "resumable" | "link-plan", [file, ..]) => (1, file),
         _ => return usage(),
     };
     let text = match read(file) {
@@ -778,7 +793,23 @@ fn cli(args: &[String]) -> i32 {
     };
     // Coroutine fusion (codegen::fusion, COROUTINE-FUSION-MILESTONE-1.md):
     // every command sees the program code generation compiles.
-    let fusion = if codegen::fusion::enabled() { codegen::fusion::fuse(&mut program) } else { Vec::new() };
+    let fusion = if codegen::fusion::enabled(&program) { codegen::fusion::fuse(&mut program) } else { Vec::new() };
+    // The resumable lowering (codegen::resumable, WASM-RESUMABLE-COROUTINES-
+    // SHADOW-ROOTS-MILESTONE-1.md): every coroutine fusion left to the
+    // general mechanism, on a runtime without a stack switch. After fusion,
+    // which it never depends on; a refusal is a compiler bug upstream (the
+    // pass checks the facts it relies on), never a program it cannot run.
+    let resumable = if codegen::resumable::applies(&program) {
+        match codegen::resumable::lower(&mut program) {
+            Ok(report) => Some(report),
+            Err(message) => {
+                emit_error(&["NATIVE", "BUG"], &format!("the resumable coroutine lowering: {message}"));
+                return 0;
+            }
+        }
+    } else {
+        None
+    };
     // BOTLISH_NATIVE_COROUTINE_FUSION_LOG=FILE appends the `fusion`
     // command's report of every program the driver loads: a census of a
     // whole test run (audit/coroutine-fusion/tools/census.tcl).
@@ -825,6 +856,15 @@ fn cli(args: &[String]) -> i32 {
         }
         "fusion" => {
             emit(&codegen::fusion::report(&fusion));
+            0
+        }
+        // What the resumable lowering did: every lowered function's frame
+        // shape and the counts of suspension points (empty where coroutines
+        // switch stacks).
+        "resumable" => {
+            if let Some(report) = &resumable {
+                emit(&report.text());
+            }
             0
         }
         "fused" => {
