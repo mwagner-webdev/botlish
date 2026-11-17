@@ -975,9 +975,9 @@ struct), which the four new tests pin. After the fourth fix the oracle's
 selftest, `fuzz.tcl -seeds 1-5` (200 programs, 0 unsound, every verdict
 precise), `-seeds 6-8 -strings 0` (0 violations), `persist.tcl` (identical
 to its record) and `reachability.tcl` (0 contradictions) were rerun, and
-the mutants beside the changed rule (`caller-object-empty`,
-`result-params-ignored`) are killed by the same tests as before
-(`kind-filter-off`'s rerun is pending).
+the mutants beside the changed rule (`kind-filter-off`,
+`caller-object-empty`, `result-params-ignored`) are killed by the same
+tests as before.
 
 ## 20. GC-stress results
 
