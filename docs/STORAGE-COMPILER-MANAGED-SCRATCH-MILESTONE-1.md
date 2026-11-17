@@ -75,7 +75,7 @@ Acceptance criteria (brief section 25):
 | 14 | backing reservations measured apart from suballocations | met | sections 17, 23 |
 | 15 | value, error, ownership and context semantics unchanged | met: no front-end decision changes; outcomes equal | sections 14, 18, 19 |
 | 16 | interp, Tcl compiler, unoptimized and optimized native agree | met | sections 18, 19 |
-| 17 | independent tests and mutants detect unsafe reuse | met: 24 mutants killed, 240 fuzzed programs | section 19 |
+| 17 | independent tests and mutants detect unsafe reuse | met: 25 mutants killed, 240 fuzzed programs in five modes | section 19 |
 | 18 | compatible with strict bounded storage and execution owners | met by design: policy and placement are the provider's, regions are the plan's | sections 10, 26 |
 | 19 | no backend or language behavior weakened | met | sections 14, 24 |
 | 20 | regression and CI checks pass | pending: CI of `1d26dc9b`; local runs pass | section 24 |
@@ -864,27 +864,36 @@ own generator (no compiler code) writes programs whose helpers build,
 return, box, list, fail with, relay, recurse over and pass Strings through
 function values, with loops left by `continue`, nested loops, handled and
 let-through failures, closures, and Strings kept in vectors that outlive
-their loops; every kept String is folded into the value. Each runs on
-interp (the oracle), on the Tcl compiler and natively in four modes: scratch
-storage on, under GC stress (released storage poisoned), with 48-byte
-chunks (growth on every path), and with scratch storage off.
+their loops, and Strings read back out of a helper's struct through a
+function that projects them (`label(b: Box) -> str`); every kept String is
+folded into the value. Each runs on interp (the oracle), on the Tcl
+compiler and natively in five modes: scratch storage on, under GC stress
+(released storage poisoned), with 48-byte chunks (growth on every path),
+with scratch storage off, and on cranelift-generic under GC stress, whose
+canonical functions return structs (the specialized backend keeps a struct
+result in registers, a companion with no frame).
 **[measurement]** `tclsh9.0 audit/storage-scratch/tools/fuzz.tcl -seeds 1-40 -count 6`
-(`results/fuzz.txt`): 240 programs, 0 failures, 0 that do not compile --
-every outcome equal to interp's on the Tcl compiler and in all four native
-modes, no stale root and no protocol error. The plan selected 3,563 sites;
-lowering placed 1,374 of them (27,731 Strings in scratch storage over the
-runs); 939 had no instruction of their own and 1,250 were in instances that
-have no canonical function (section 25). The run after section 24's
-frame-cost fix (`e18e11de`, recursive units without regions) gave the same
-result, count for count: no generated program had a placed site in a
-recursive unit.
+(`results/fuzz.txt`, at `1d26dc9b`): 240 programs, 0 failures, 0 that do
+not compile -- every outcome equal to interp's on the Tcl compiler and in
+all five native modes, no stale root and no protocol error. The plan
+selected 4,181 sites; the specialized lowering placed 1,403 of them (30,128
+Strings in scratch storage over the runs, 163,382 heap allocations instead
+of 193,510); 1,148 had no instruction of their own and 1,630 were in
+instances that have no canonical function there (section 25). Before
+section 24's fixes the same seeds, without the projection and the generic
+mode, gave 3,563 sites, 1,374 placed and 27,731 Strings; the frame-cost
+fix (`e18e11de`, recursive units without regions) left those counts
+unchanged.
 
-**[probe]** Positive control: with each of the two unsound lifetime facts of
-section 5 reintroduced, 8 of 8 generated programs fail (NATIVE BUG or
-EILSEQ under poisoning). Before the fuzzer called a helper through a
-function value no specialization makes exact, it missed the fresh-result
-defect (the companion and exact-callable specialization hid it): that call
-is now in every generated program.
+**[probe]** Positive control: with each of the first two unsound lifetime
+facts of section 5 reintroduced, 8 of 8 generated programs fail (NATIVE BUG
+or EILSEQ under poisoning); with the third (a fresh part's kinds), 6 of 6
+fail in the generic mode (`-seeds 1-2 -count 3`). Before the fuzzer called
+a helper through a function value no specialization makes exact, it missed
+the fresh-result defect (the companion and exact-callable specialization
+hid it); before it ran cranelift-generic and projected a helper's String
+through a function, it missed the fresh-part defect, which CI found
+(section 24). Both shapes are now in every generated program.
 
 **The mutants** (`audit/storage-scratch/tools/mutate.tcl`,
 `tools/mutants.txt`): each breaks one rule in a private copy of the tree
@@ -892,9 +901,9 @@ is now in every generated program.
 names -- a test of behavior, a GC-stress or poisoned run, an instrumented
 count, the fuzzer or a Rust test, never a comparison of generated text.
 **[test]** `tclsh9.0 audit/storage-scratch/tools/mutate.tcl` (`results/mutants.md`):
-the unmutated copy passes every detector, and all 24 mutants apply, build
+the unmutated copy passes every detector, and all 25 mutants apply, build
 and are killed by a detector their line names (the record run of 22, and
-the reruns of the mutants section 24's fix touched or added):
+the reruns of the mutants section 24's fixes touched or added):
 
 | mutant | the broken rule | killed by |
 |---|---|---|
@@ -958,10 +967,17 @@ and no violation; `reachability.tcl` (run with scratch storage off, since it
 checks the facts against the heap's own reachability: `-scratch-opt 0` is
 its one change) gives the same twelve shapes and no contradiction; and
 `mutate.tcl` kills all 26 of its mutants of `hir/lifetime.tcl`, each by the
-same tests as before. The three fixes therefore changed no verdict of the
+same tests as before. The fixes therefore changed no verdict of the
 oracle's corpus; they change what the corpus did not reach (a let-through
 error's payload, a fresh result holding a parameter, a recursive
-component's reasons), which the three new tests pin.
+component's reasons, a fresh part's kinds -- the oracle's programs build no
+struct), which the four new tests pin. After the fourth fix the oracle's
+selftest, `fuzz.tcl -seeds 1-5` (200 programs, 0 unsound, every verdict
+precise), `-seeds 6-8 -strings 0` (0 violations), `persist.tcl` (identical
+to its record) and `reachability.tcl` (0 contradictions) were rerun, and
+the mutants beside the changed rule (`caller-object-empty`,
+`result-params-ignored`) are killed by the same tests as before
+(`kind-filter-off`'s rerun is pending).
 
 ## 20. GC-stress results
 
