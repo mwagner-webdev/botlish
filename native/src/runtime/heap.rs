@@ -8,15 +8,14 @@
 //! a threshold (twice the live bytes after the last collection, at least
 //! `MIN_THRESHOLD`, 1 MB). It never runs except inside an allocation.
 //!
-//! Roots are precise, from five sources (`Vm::collect_with`):
-//!   * the shadow stack: every register of every active `RootStorage::
-//!     RuntimeStack` frame (the generated prologue reserves and clears one
-//!     slot per register, and every definition of a register is stored to
-//!     its slot) -- on the x86-64 stack-map path this region only ever
-//!     is empty and not allocated on x86-64/Linux
-//!   * `Vm::native_roots_ptr`/`_len`: the currently active `RootStorage::
-//!     NativeFrame` function's own root block, on the fallback (non-x86-64)
-//!     path only -- see codegen::roots's `RootStorage` doc
+//! Roots are precise, from these sources (`Vm::collect_with`):
+//!   * the shadow stack (the ShadowOnly root plan, codegen::roots): the
+//!     root slots of every running function that has any, leaf or not
+//!     (the generated prologue reserves its slots, and every definition of
+//!     a rooted register is stored to its slot) -- not allocated where
+//!     native frames hold the roots
+//!   * suspended resumable coroutines' frames (runtime/resumable.rs), traced
+//!     like any object through their coroutine (KIND_FRAME below)
 //!   * the native call stack itself, walked through `runtime::framewalk`
 //!     (x86-64 only): every `RootStorage::NativeFrame` function's roots,
 //!     for however many such frames are nested, discovered via per-safepoint

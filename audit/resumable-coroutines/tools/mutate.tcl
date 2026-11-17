@@ -212,7 +212,7 @@ proc corpusRuns {corpus} {
     set runs {}
     dict for {name entry} $corpus {
         foreach stress {0 1} {
-            if {$stress && $name in {precision dfa-tail generator}} continue
+            if {$stress && $name in {precision dfa-tail generator loop-calls}} continue
             lappend runs $name $stress
         }
     }
@@ -249,6 +249,7 @@ proc corpusDetector {driver scratch corpus reference timeout} {
     set evidence {
         generator {ResumeFrame allocations} {== 2}
         dfa-tail {ResumeFrame allocations} {< 16}
+        loop-calls {ResumeFrame allocations} {< 16}
         many {ResumeFrame allocations} {== 20000}
         reclaim {ResumeFrame currentLiveObjects} {== 0}
         precision {String currentLiveObjects} {< 50000}

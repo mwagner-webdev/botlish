@@ -731,8 +731,12 @@ standalone executables, C calls (against libraries MSVC's cl builds),
 Windows I/O, the collector under GC stress (its roots found in native
 frames, checked against Windows' own unwinder), every Tcl test file on
 the Tcl backends and every golden suite on all four, on Windows x86-64
-with MSVC's toolchain. Nothing here is a promise about
-other platforms.
+with MSVC's toolchain. On Linux x86-64, CI also runs the native backend
+built without stack switching -- every running frame's GC roots on one
+shadow stack, every coroutine as resumable state on the heap, the
+mechanism a target without stack switching (WebAssembly) uses -- through
+the golden suites, the coroutine tests and the collector under GC stress.
+Nothing here is a promise about other platforms.
 
 == PER COMPONENT
     interp, compile          Tcl 9.0 or newer (Unicode-correct strings);
@@ -746,8 +750,11 @@ other platforms.
                              x86-64 (a Windows fiber per coroutine
                              stack), or, for a coroutine closed inside
                              one function, none (it is fused into that
-                             function); the Tcl backends run coroutines
-                             everywhere
+                             function); a driver built without stack
+                             switching (a test build) runs every
+                             coroutine as resumable frames on the heap,
+                             with the same values, errors and releases;
+                             the Tcl backends run coroutines everywhere
     native stack overflow    NATIVE LIMIT STACK, for the thread's stack
                              and a coroutine's, on Linux x86-64 and
                              AArch64, macOS AArch64 and Windows x86-64

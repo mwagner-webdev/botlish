@@ -50,13 +50,17 @@
 //!   label Y_k; %d = op comsg`, and D_k continues at Y_k: the message, or
 //!   the abandonment's failure, at the yield's own place in its handler
 //!   spans -- so release pads and handlers run exactly as natively.
-//! * **A yielding call** `%d = call g ARGS` becomes `%h = unit; label C_k;
-//!   %t = call g ARGS %h; br (frisframe %t) S_k N_k; label N_k; %d = %t`
-//!   (unboxed for a scalar result). D_k reloads, defines the arguments the
-//!   callee ignores on a resume, takes the callee's frame into `%h`
-//!   (`frcallee`) and jumps to C_k: the same call instruction, in the same
-//!   handler spans, continues the callee where it stopped, and its failure
-//!   reaches the handler it would natively.
+//! * **A yielding call** `%d = call g ARGS` becomes `label C_k; %t = call g
+//!   ARGS %h; br (frisframe %t) S_k N_k; label N_k; %d = %t` (unboxed for a
+//!   scalar result), `%h` the site's hand-off register (UNIT from START).
+//!   D_k reloads, defines the arguments the callee ignores on a resume,
+//!   takes the callee's frame into `%h` (`frcallee`) and jumps to C_k: the
+//!   same call instruction, in the same handler spans, continues the callee
+//!   where it stopped, and its failure reaches the handler it would
+//!   natively. Once the callee returns, `%h` still holds the frame of that
+//!   finished activation, which nothing else owns: the site's next call
+//!   hands it down again, and the callee (its point 0) starts afresh in it
+//!   -- a yielding call in a loop makes one frame, not one per iteration.
 //! * **A self tail call** passes `%fr` as the new activation's frame: the
 //!   finished activation's frame is reused (its point is 0 while it runs,
 //!   so the entry dispatch starts the body afresh), and a loop written as
@@ -304,8 +308,34 @@ fn lower_function(original: &Function, y: &[bool], unboxing: &[Option<OpCode>], 
         f.ascii_result = false;
         report.boxed_results += 1;
     }
+    // Each yielding call site's hand-off register (the frame its call passes
+    // down, see below), made before liveness is computed: defined (UNIT) at
+    // the body's start and read by its call as the callee's hidden frame
+    // argument, so the root planner's liveness saves it across every
+    // suspension point after which its call can still run.
+    let mut handoffs: Vec<Reg> = Vec::new();
+    for i in 0..f.body.len() {
+        let is_site = matches!(&f.body[i],
+            Inst::Call { func, .. } | Inst::CallEnv { func, .. } | Inst::CallMulti { func, .. } | Inst::CallEnvMulti { func, .. }
+                if y[*func as usize]);
+        if !is_site {
+            continue;
+        }
+        let h = new_reg(&mut f, RegKind::Tagged);
+        handoffs.push(h);
+        match &mut f.body[i] {
+            Inst::Call { args, .. } | Inst::CallEnv { args, .. } | Inst::CallMulti { args, .. } | Inst::CallEnvMulti { args, .. } => {
+                args.push(h)
+            }
+            _ => unreachable!("a call site"),
+        }
+    }
+    for h in handoffs.iter().rev() {
+        f.body.insert(0, Inst::Unit { dst: *h });
+        f.origins.insert(0, None);
+    }
     // The suspension points, and what each saves: the root planner's own
-    // liveness, on the renumbered body before anything is inserted.
+    // liveness, on the body before the protocol is inserted.
     let mut sites: Vec<(usize, Site)> = Vec::new();
     for (j, inst) in f.body.iter().enumerate() {
         match inst {
@@ -323,13 +353,18 @@ fn lower_function(original: &Function, y: &[bool], unboxing: &[Option<OpCode>], 
     let mut saved: Vec<(Vec<Reg>, Vec<Reg>)> = Vec::new();
     for ((j, _), (_, out)) in sites.iter().zip(&live) {
         let inst = &f.body[*j];
-        let (dsts, closure): (Vec<Reg>, Option<Reg>) = match inst {
+        // A call's own hand-off register is redefined by its resume point
+        // (frcallee) before the call reads it: never saved there.
+        let (mut dsts, closure): (Vec<Reg>, Option<Reg>) = match inst {
             Inst::Op { dst, .. } | Inst::Call { dst, .. } => (vec![*dst], None),
             Inst::CallEnv { dst, closure, .. } => (vec![*dst], Some(*closure)),
             Inst::CallMulti { dsts, .. } => (dsts.clone(), None),
             Inst::CallEnvMulti { dsts, closure, .. } => (dsts.clone(), Some(*closure)),
             _ => unreachable!("a suspension point"),
         };
+        if let Inst::Call { args, .. } | Inst::CallEnv { args, .. } | Inst::CallMulti { args, .. } | Inst::CallEnvMulti { args, .. } = inst {
+            dsts.push(*args.last().expect("the hand-off argument"));
+        }
         let mut tagged = Vec::new();
         let mut raw = Vec::new();
         for r in 0..out.len() as Reg {
@@ -381,6 +416,15 @@ fn lower_function(original: &Function, y: &[bool], unboxing: &[Option<OpCode>], 
     origins.push(None);
     body.push(Inst::Label(l_start));
     origins.push(None);
+    // Each yielding call site's hand-off register (the body, below, starts
+    // by setting every one to UNIT): the frame its next call passes down --
+    // UNIT at a fresh activation; the callee's own frame while it is
+    // suspended (frcallee); and, once the callee has returned, the frame of
+    // that finished activation, which nothing else holds any more: the
+    // site's next call hands it down again (its point is 0, so the callee
+    // starts afresh and reuses it), and a yielding call in a loop -- an
+    // event loop's yield_now per dispatch -- makes one frame, not one per
+    // iteration.
 
     let mut site_of = std::collections::HashMap::new();
     for (k, (j, _)) in sites.iter().enumerate() {
@@ -431,32 +475,31 @@ fn lower_function(original: &Function, y: &[bool], unboxing: &[Option<OpCode>], 
                 }
                 Site::Call { unbox } => {
                     report.call_sites += 1;
-                    let h = new_reg(&mut f, RegKind::Tagged);
+                    let h = match &inst {
+                        Inst::Call { args, .. } | Inst::CallEnv { args, .. } | Inst::CallMulti { args, .. } | Inst::CallEnvMulti { args, .. } => {
+                            *args.last().expect("the hand-off argument")
+                        }
+                        _ => unreachable!("a call site"),
+                    };
                     let l_cont = label();
-                    body.push(Inst::Unit { dst: h });
-                    origins.push(None);
                     body.push(Inst::Label(l_back));
                     origins.push(None);
                     // The call, its results into fresh tagged registers.
                     let (call, args, dsts) = match inst {
-                        Inst::Call { dst, func, mut args, may_error, may_gc } => {
-                            args.push(h);
+                        Inst::Call { dst, func, args, may_error, may_gc } => {
                             let t = new_reg(&mut f, RegKind::Tagged);
                             (Inst::Call { dst: t, func, args: args.clone(), may_error, may_gc }, args, vec![(dst, t)])
                         }
-                        Inst::CallEnv { dst, func, closure, mut args, may_error, may_gc } => {
-                            args.push(h);
+                        Inst::CallEnv { dst, func, closure, args, may_error, may_gc } => {
                             let t = new_reg(&mut f, RegKind::Tagged);
                             (Inst::CallEnv { dst: t, func, closure, args: args.clone(), may_error, may_gc }, args, vec![(dst, t)])
                         }
-                        Inst::CallMulti { dsts, func, mut args, may_error, may_gc } => {
-                            args.push(h);
+                        Inst::CallMulti { dsts, func, args, may_error, may_gc } => {
                             let ts: Vec<Reg> = dsts.iter().map(|_| new_reg(&mut f, RegKind::Tagged)).collect();
                             let pairs = dsts.iter().copied().zip(ts.iter().copied()).collect();
                             (Inst::CallMulti { dsts: ts, func, args: args.clone(), may_error, may_gc }, args, pairs)
                         }
-                        Inst::CallEnvMulti { dsts, func, closure, mut args, may_error, may_gc } => {
-                            args.push(h);
+                        Inst::CallEnvMulti { dsts, func, closure, args, may_error, may_gc } => {
                             let ts: Vec<Reg> = dsts.iter().map(|_| new_reg(&mut f, RegKind::Tagged)).collect();
                             let pairs = dsts.iter().copied().zip(ts.iter().copied()).collect();
                             (Inst::CallEnvMulti { dsts: ts, func, closure, args: args.clone(), may_error, may_gc }, args, pairs)
@@ -551,4 +594,120 @@ fn lower_function(original: &Function, y: &[bool], unboxing: &[Option<OpCode>], 
     f.may_gc = true;
     report.functions.push((name_of(&f), shape));
     Ok(f)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A coroutine program: `leaf` yields with a String live across the
+    /// yield; `middle` calls it twice (two sites of one callee); the thunk
+    /// (function 3) calls `middle`.
+    const PROGRAM: &str = concat!(
+        "nir 1 call-effects=1\n\n",
+        "func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0\n",
+        "    %0 = fnvalue 3\n    %1 = op cocreate %0\n    %2 = op costart %1\n    ret %2\nend\n",
+        "func 1 \"leaf\" params=1 env=0 regs=4 pnames=\"n\" captures=0\n",
+        "    %1 = str \"kept\"\n    %2 = op coyield %0\n    %3 = op strlen %1\n    ret %3\nend\n",
+        "func 2 \"middle\" params=1 env=0 regs=4 pnames=\"n\" captures=0\n",
+        "    %1 = call 1 %0\n    %2 = call 1 %1\n    %3 = op iadd %1 %2\n    ret %3\nend\n",
+        "func 3 \"\" params=0 env=0 regs=2 pnames=\"\" captures=0\n",
+        "    %0 = int 7\n    %1 = call 2 %0\n    ret %1\nend\n",
+    );
+
+    fn lowered() -> (Program, Report) {
+        let mut program = nir::parse(PROGRAM).unwrap_or_else(|e| panic!("{e}"));
+        let report = lower(&mut program).unwrap_or_else(|e| panic!("{e}"));
+        (program, report)
+    }
+
+    /// Every yielding function gains a frame shape and a hidden tagged frame
+    /// parameter, its last; no `coyield` remains; the program validates.
+    #[test]
+    fn yielding_functions_become_state_machines() {
+        let (program, report) = lowered();
+        assert_eq!((report.yield_sites, report.call_sites, report.functions.len()), (1, 3, 3));
+        for (id, params) in [(1, 2), (2, 2), (3, 1)] {
+            let f = &program.functions[id];
+            assert!(f.frame.is_some(), "{} has a frame shape", f.name);
+            assert_eq!(f.params, params, "{}: the hidden frame parameter", f.name);
+            assert_eq!(f.kind_of(params - 1), RegKind::Tagged);
+        }
+        assert!(program.functions[0].frame.is_none(), "the program function constructs, it does not yield");
+        assert!(!program.functions.iter().flat_map(|f| &f.body).any(|i| matches!(i, Inst::Op { op: OpCode::CoYield, .. })));
+        nir::validate(&program).unwrap();
+    }
+
+    /// I4/I5: a suspension saves exactly what is live after it -- leaf keeps
+    /// its String (not its parameter, dead after the yield); middle's first
+    /// site keeps the second site's hand-off register and the first result
+    /// is the second call's argument, so the shape is the widest point's.
+    #[test]
+    fn a_suspension_saves_exactly_the_live_registers() {
+        let (program, _) = lowered();
+        let saves = |id: usize| -> Vec<(u32, usize, usize)> {
+            program.functions[id]
+                .body
+                .iter()
+                .filter_map(|i| if let Inst::FrameSave { point, tagged, raw, .. } = i { Some((*point, tagged.len(), raw.len())) } else { None })
+                .collect()
+        };
+        assert_eq!(saves(1), vec![(1, 1, 0)], "leaf: only the String");
+        assert_eq!(program.functions[1].frame, Some(FrameShape { tagged: 1, raw: 0 }));
+        assert_eq!(saves(2), vec![(1, 1, 0), (2, 1, 0)], "middle: the next site's hand-off, then the first result");
+    }
+
+    /// Lowering a lowered program changes nothing: no `coyield` is left, so
+    /// no function yields any more (the driver's `fused` output reads back
+    /// and runs as it is).
+    #[test]
+    fn lowering_is_idempotent() {
+        let (mut program, _) = lowered();
+        let before: Vec<String> = program.functions.iter().map(|f| crate::codegen::nirtext::function(&program, f)).collect();
+        let report = lower(&mut program).unwrap();
+        assert!(report.functions.is_empty());
+        let after: Vec<String> = program.functions.iter().map(|f| crate::codegen::nirtext::function(&program, f)).collect();
+        assert_eq!(before, after);
+        // And the text reads back to the same program.
+        let text = program.functions.iter().map(|f| crate::codegen::nirtext::function(&program, f)).collect::<Vec<_>>().join("\n");
+        let back = nir::parse(&format!("nir 1 call-effects=1\n\n{text}")).unwrap_or_else(|e| panic!("{e}\n{text}"));
+        assert_eq!(back.functions[2].frame, program.functions[2].frame);
+    }
+
+    /// A yielding self tail call passes the activation's frame on: the new
+    /// activation reuses it (its point is 0 while it runs).
+    #[test]
+    fn a_yielding_tail_call_passes_its_frame() {
+        let text = concat!(
+            "nir 1 call-effects=1\n\n",
+            "func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0\n",
+            "    %0 = fnvalue 2\n    %1 = op cocreate %0\n    %2 = op costart %1\n    ret %2\nend\n",
+            "func 1 \"spin\" params=1 env=0 regs=3 pnames=\"n\" captures=0\n",
+            "    %1 = op coyield %0\n    %2 = int 1\n    %0 = op isub %0 %2\n    tail %0\nend\n",
+            "func 2 \"\" params=0 env=0 regs=2 pnames=\"\" captures=0\n",
+            "    %0 = int 3\n    %1 = call 1 %0\n    ret %1\nend\n",
+        );
+        let mut program = nir::parse(text).unwrap();
+        let report = lower(&mut program).unwrap();
+        assert_eq!(report.tail_sites, 1);
+        let spin = &program.functions[1];
+        let fr = match &spin.body[0] {
+            Inst::Move { dst, src } if *src + 1 == spin.params => *dst,
+            other => panic!("the entry takes the hidden frame: {other:?}"),
+        };
+        let tail = spin.body.iter().find_map(|i| if let Inst::Tail { args } = i { Some(args.clone()) } else { None }).unwrap();
+        assert_eq!(tail.last(), Some(&fr), "the tail call hands the activation's frame to the next one");
+    }
+
+    /// The boundaries the lowering relies on: a yielding C callback or
+    /// library export, or a yielding program function, is refused -- a
+    /// compiler bug upstream, never a program the language allows.
+    #[test]
+    fn a_yield_reachable_from_c_or_the_program_is_refused() {
+        let mut program = nir::parse(PROGRAM).unwrap();
+        program.exports.push(nir::ExportDecl { symbol: "lib_leaf".into(), func: 1, params: vec![], result: nir::Boundary::Unit });
+        assert!(lower(&mut program).unwrap_err().contains("lib_leaf"));
+        let mut yielding_program = nir::parse(&PROGRAM.replace("    %0 = fnvalue 3\n    %1 = op cocreate %0\n    %2 = op costart %1\n    ret %2\n", "    %0 = int 1\n    %1 = call 1 %0\n    %2 = move %1\n    ret %2\n")).unwrap();
+        assert!(lower(&mut yielding_program).unwrap_err().contains("program function"));
+    }
 }

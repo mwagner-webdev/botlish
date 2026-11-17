@@ -1943,16 +1943,25 @@ checkout's). A change to native stack switching or its GC walk also needs a
 Native coroutines switch stacks with hand-written x86-64 and AArch64
 assembly on Linux x86-64, Linux AArch64 and macOS AArch64
 (MACOS-AARCH64-MILESTONE-3.md), and with Windows fibers on Windows x86-64
-(WINDOWS-X86-64-MILESTONE-5.md; "Windows x86-64 (MSVC)", below); elsewhere,
-and on the fallback root plan, the native backend reports them unsupported
-(the Tcl backends run them everywhere). The AArch64 switch is
+(WINDOWS-X86-64-MILESTONE-5.md; "Windows x86-64 (MSVC)", below); on a
+runtime without a stack switch -- the `fallback-roots` build, and
+WebAssembly next -- they run as resumable heap frames ("Resumable
+coroutines and ShadowOnly roots", below). Exactly one of the two general
+mechanisms runs every coroutine on any build (runtime::capabilities). The AArch64 switch is
 one text (`aarch64_switch!`, `aarch64_trampoline!` in
 runtime/coroutine.rs) in ELF and Mach-O spelling: change it for both, run
 the coroutine Rust tests on Linux AArch64 (CI's arm64 workflow, or
 qemu-user) and on macOS (the macOS workflow's smoke job runs them), and
-never touch x18. A Tcl test that needs coroutines, the collector around
-them or native counters carries `nativeCoroutines` (tests/helpers.tcl), a
-capability of the host target, not `nativeLinux`.
+never touch x18. A Tcl test that needs coroutines or the collector around
+them carries `nativeCoroutines` (tests/helpers.tcl), a capability of the
+host target, not `nativeLinux`; one of a mechanism's own evidence -- the
+stackful runtime's stacks and stack counters, or resumable frames --
+carries `nativeStackfulCoroutines` or `nativeResumableCoroutines`, which
+the driver itself reports (`botlish-native capabilities`), and a test that
+reads the allocation report's coroutine counters compares
+`coroutineCounters` with `expectedCoroutineCounters`: the counters both
+mechanisms share always, the stack counters only where coroutines switch
+stacks.
 
 ## Storage lifetime facts (hir/lifetime.tcl)
 
@@ -2146,9 +2155,11 @@ compile the fused program. Keep it so:
 * The only runtime addition is `op cofailed` (`rt_co_failed`): a fused
   coroutine's cached failure, raised again by `coresume0`. Fusion adds no
   coroutine-specific code to the collector or codegen.
-* Fusion runs only where native coroutines exist
-  (`runtime::coroutine::STACK_SWITCHING`): it must not make a program run
-  where the general runtime refuses it.
+* Fusion runs only where a general coroutine mechanism runs every
+  coroutine (runtime::capabilities's `coroutines`: stack switching, or the
+  resumable lowering that runs after fusion): it must not make a program
+  run where the general mechanism refuses it, and no program depends on it
+  to run (the resumable lowering takes every coroutine fusion leaves).
 
 If you change fusion.rs, nirtext.rs, `cofailed`, `live_at_many`/`def_use`,
 or what NIR the coroutine operations lower to, run
@@ -2164,6 +2175,76 @@ take the census of a whole run (`audit/coroutine-fusion/tools/census.tcl
 fused function "does not validate" is a fusion bug to fix, never a fallback
 to accept. `audit/coroutine-fusion/tools/evidence.tcl` regenerates the
 native evidence (commit it); `bench/coroutine-fusion.tcl` is the
+performance report.
+
+## Resumable coroutines and ShadowOnly roots
+
+Where no stack switch exists (runtime::capabilities's `resumable`: the
+`fallback-roots` build, and WebAssembly next), the native backend runs
+coroutines as resumable state machines over heap frames
+(WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md;
+native/src/codegen/resumable.rs, runtime/resumable.rs), and keeps the roots
+of running code on one LIFO shadow stack (codegen::roots's ShadowOnly mode).
+Keep it so:
+
+* The lowering is a NIR-to-NIR pass in the driver's load path, after
+  fusion, applied to every yielding function (fusion's `yielding()`); it is
+  never optional where it applies and never applied where coroutines switch
+  stacks. Its refusal is `NATIVE BUG` (the facts it checks are the front
+  end's), never a program it cannot run: never add a restriction, a
+  coroutine annotation or a target-dependent rule to the language for it.
+* The frame ABI has no hand-off slot: a lowered function's hidden last
+  parameter is its frame (UNIT: fresh), and a suspension returns the frame
+  as the (first) result (`frisframe`: a pointer of KIND_FRAME, never a
+  program value). A frame has one owner at a time -- the running
+  activation's register, its caller frame's `callee`, the coroutine's
+  `frame` -- and taking it from a field clears the field. Never add a Vm
+  slot that carries a frame between activations.
+* What a suspension saves is the root planner's liveness at that point
+  (`live_at_many`), tagged registers to tagged slots, every unboxed kind to
+  raw slots; the collector traces `callee` and the first `ntagged` tagged
+  slots only, and `frrestore` marks a resumed frame untraced. Never trace a
+  raw slot, save a dead register or skip one live across the point.
+* An activation suspending again reuses its frame, and a yielding self tail
+  call passes its frame to the next iteration: steady-state suspension and
+  a recognizer's tail recursion allocate no frame per resume or symbol
+  (tests/resumable-coroutines.test's rc-frames-per-resume,
+  rc-dfa-tail-frames).
+* ShadowOnly: every function with a root slot reserves its frame on the
+  shadow stack, leaf or not, and pops it on every exit; nothing is
+  published anywhere else (the old leaf publication through one Vm pointer
+  lost roots when an operation re-entered Botlish code:
+  tests/resumable/leaf-reentry.bot). A function with no slot touches no
+  shadow state where the stack guard exists; the depth token exists only
+  without it. A full shadow array is the guard's terminal NATIVE LIMIT STACK
+  (`rt_shadow_overflow`) where the guard exists, in-band (and fallible in
+  call effects) otherwise. The segment checks that the shadow stack is
+  where it was (invariant I1).
+* Decisions read `RuntimeCapabilities` (nir::Program's `capabilities`, the
+  driver's `host_runtime()` today), never the runtime's constants directly,
+  so a target's code is generated for its runtime.
+
+If you change codegen/resumable.rs, runtime/resumable.rs, the frame ops or
+`frsave`/`frrestore` in nir.rs or codegen/clif.rs, codegen/roots.rs's
+ShadowOnly mode, runtime::capabilities, or how coroutine.rs's segments
+dispatch, build the `fallback-roots` driver (`cargo build --release
+--features fallback-roots --manifest-path native/Cargo.toml --target-dir
+native/target-fallback`) and run, with
+`BOTLISH_NATIVE_BIN=$PWD/native/target-fallback/release/botlish-native`:
+`tests/resumable-coroutines.test`, `tests/coroutines.test`,
+`tests/coroutine-fusion.test`, `tests/actor.test`, `tests/event-loop.test`,
+`tests/dfa.test` and `tests/resources.test`; the golden suites on
+cranelift and cranelift-generic with `BOTLISH_NATIVE_COROUTINE_FUSION=0`
+(`tests/local.tcl -parts golden -golden-backends cranelift,cranelift-generic`);
+the fallback build's Rust tests (`cargo test --release --features
+fallback-roots --target-dir native/target-fallback --lib --bins`, also under
+`BOTLISH_NATIVE_GC_STRESS=1`); `tests/resumable-coroutines.test` against the
+shipped driver too; and `audit/resumable-coroutines/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule). tests.yml's `resumable` job runs the fallback build's tests,
+its golden suites, the focused files, its GC-stress step and three of the
+mutants on every push to main. `bench/resumable-coroutines.tcl` is the
 performance report.
 
 ## The native stack guard

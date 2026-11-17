@@ -113,6 +113,26 @@
                     dispatches.push((Inst::Unit { dst: h }, None));
 >>>>
 
+@@ handoff-unsaved a call site's hand-off register is never saved across another suspension point: after a resume elsewhere its call passes an undefined frame (I5, I7)
+## native/src/codegen/resumable.rs
+<<<<
+            dsts.push(*args.last().expect("the hand-off argument"));
+====
+            dsts.extend(handoffs.iter().copied());
+>>>>
+
+@@ handoff-not-recycled a call site resets its hand-off register before every call: a yielding call made anew in a loop makes a frame per iteration (an event loop's yield_now per dispatch)
+## native/src/codegen/resumable.rs
+<<<<
+                    let l_cont = label();
+                    body.push(Inst::Label(l_back));
+====
+                    let l_cont = label();
+                    body.push(Inst::Unit { dst: h });
+                    origins.push(None);
+                    body.push(Inst::Label(l_back));
+>>>>
+
 @@ tail-frame-not-reused a yielding self tail call starts the next activation without the finished one's frame: one frame per iteration (a declared recognizer's per symbol)
 ## native/src/codegen/resumable.rs
 <<<<

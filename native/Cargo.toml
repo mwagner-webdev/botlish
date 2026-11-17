@@ -84,11 +84,13 @@ debug = 1
 # links and runs executables as any other. The driver's own tests need it.
 default = ["jit"]
 jit = ["dep:cranelift-jit"]
-# The GC root plan of a host without native-frame roots -- the shadow stack,
-# leaf frames published through Vm::native_roots_ptr, no frame walk
-# (runtime::framewalk's NATIVE_FRAME_ROOTS false), Windows' plan -- built on
-# a host that has them, to test that plan where the whole suite runs
-# (WINDOWS-X86-64-MILESTONE-1.md, section 3). A test build, never shipped.
+# The runtime of a host without native-frame roots or a stack switch -- the
+# ShadowOnly root plan (one shadow stack for every frame's roots, no frame
+# walk: runtime::framewalk's NATIVE_FRAME_ROOTS false) and coroutines as
+# resumable heap frames (runtime::resumable, codegen::resumable), the
+# runtime WebAssembly will have -- built on a host that has both, to test it
+# where the whole suite runs (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+# MILESTONE-1.md; tests.yml's `resumable` job). A test build, never shipped.
 fallback-roots = []
 
 # The host's native stack bounds and guards, and the runtime's overflow

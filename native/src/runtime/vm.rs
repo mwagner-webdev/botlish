@@ -290,10 +290,10 @@ pub struct Vm {
     /// program). `collect_with` walks the
     /// native call stack through it (runtime::framewalk) to discover every
     /// active `RootStorage::NativeFrame` function's roots on the x86-64
-    /// stack-map path -- a fifth root source, alongside the shadow stack,
-    /// `native_roots_ptr`/`_len` (the fallback path's own, narrower
-    /// mechanism), the pending error, and `temp_roots`; see `collect_with`'s
-    /// own doc for why these never double-trace the same logical root.
+    /// stack-map path -- a root source alongside the shadow stack (the
+    /// ShadowOnly plan's), the pending error, and `temp_roots`; see
+    /// `collect_with`'s own doc for why these never double-trace the same
+    /// logical root.
     /// Starts as an empty table (`ProgramMap::new()`), which simply finds no
     /// roots -- harmless for the brief window before a program is compiled.
     framemap: std::sync::Arc<ProgramMap>,
@@ -733,11 +733,9 @@ impl Vm {
         // covered by this walk never also stores a real Value into the
         // shadow array `stack` above (`codegen::clif::Translator::def`
         // stores to exactly one physical location per rooted register, and
-        // `RootPlan::storage` picks that location once, never both), and
-        // never also publishes to `native_roots_ptr`/`_len` (this module's
-        // own comment above) -- so this walk's roots, `stack`'s, and
-        // `native`'s are three disjoint sets of memory locations, never the
-        // same logical root scanned twice.
+        // `RootPlan::storage` picks that location once, never both) -- so
+        // this walk's roots and `stack`'s are disjoint sets of memory
+        // locations, never the same logical root scanned twice.
         let mut native_frame_roots = Vec::new();
         // The running stacks (COROUTINES.md): the current one from here, then
         // every resumer of the running coroutine chain from the point it

@@ -109,15 +109,15 @@ use super::value::*;
 use super::vm::Vm;
 use std::cell::RefCell;
 
-/// Whether native coroutines run here: the host has the stack switch they
+/// Whether coroutines switch stacks here: the host has the stack switch they
 /// run on (the hosts `CoStack::new` makes a stack for) and its collector
 /// finds roots in native frames (runtime::framewalk's NATIVE_FRAME_ROOTS: a
-/// suspended coroutine's frames are walked like the running stack's; the
-/// fallback plan's shadow stack cannot hold a suspended coroutine's roots,
-/// and is never made coroutine-aware). Elsewhere starting one is NATIVE
-/// UNSUPPORTED (`rt_co_start`). The coroutine fusion pass (codegen::fusion)
-/// runs only where it is true, so fusing a coroutine never makes a program
-/// run that the general runtime refuses.
+/// suspended coroutine's frames are walked like the running stack's; a
+/// shadow stack cannot hold a suspended stack's roots). Elsewhere coroutines
+/// run as resumable heap frames instead (runtime::resumable's RESUMABLE,
+/// codegen::resumable: WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+/// MILESTONE-1.md) -- exactly one of the two mechanisms runs every
+/// coroutine, and coroutine fusion (codegen::fusion) runs on either.
 pub const STACK_SWITCHING: bool = cfg!(any(
     any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")),
     all(target_os = "macos", target_arch = "aarch64"),
@@ -674,12 +674,6 @@ pub extern "C" fn rt_co_start(p: *mut Vm, handle: Value) -> Value {
             // A resumable coroutine (runtime/resumable.rs) holds no stack:
             // its suspended state is heap frames, paced like any allocation.
             return super::resumable::segment(p, co);
-        }
-        if !super::framewalk::NATIVE_FRAME_ROOTS {
-            return vm(p).fail(RtError::Unsupported(
-                "native coroutines need GC roots in native frames: the fallback root plan (a fallback-roots build) runs none (COROUTINES.md)"
-                    .to_string(),
-            ));
         }
         let stack = match CoStack::new() {
             Ok((stack, reused)) => {

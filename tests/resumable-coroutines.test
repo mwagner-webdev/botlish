@@ -123,7 +123,7 @@ proc rcFusedNir {name} {
 # thousands of objects: minutes on the reference interpreter, which agreed
 # when their `# expect:` lines were recorded).
 set ::rcEverywhere {interleaved nested escape errors cleanup-gc contexts deep scalars closures reclaim leaf-reentry coro}
-set ::rcNativeOnly {retention generator many precision}
+set ::rcNativeOnly {retention generator many precision loop-calls}
 
 # ---------------------------------------------------------------------------
 # Semantics, by the driver's own mechanism
@@ -138,7 +138,7 @@ test rc-corpus-agree-native {the large corpus files have their expected values n
     lmap name $::rcNativeOnly {
         rcAgrees $name {cranelift cranelift-unfused}
     }
-} -result {ok ok ok ok}
+} -result {ok ok ok ok ok}
 
 test rc-corpus-gc-stress {under GC stress (a collection at every allocation), every corpus file but the quadratic precision probe has its expected value natively, on the general mechanism and fused} -constraints nativeCoroutines -body {
     rcGcStress {
@@ -187,7 +187,7 @@ test rc-nir-lowered {the lowered NIR: no coyield left, a frame shape on every yi
     set lowered [lmap {- name params shape} $shapes {list $name $params $shape}]
     set check [native::Driver check $nir]
     list [regexp {op coyield} $nir] $lowered [regexp -all {\mfrsave\M} $nir] [regexp -all {\mfrrestore\M} $nir] $check
-} -cleanup {unset -nocomplain nir shapes lowered check} -result {0 {{leaf 2 {1 0}} {middle 2 {1 0}} {down 3 {1 0}} {driver 2 {2 2}} {{} 1 {0 0}} {{} 1 {0 0}}} 9 9 ok}
+} -cleanup {unset -nocomplain nir shapes lowered check} -result {0 {{leaf 2 {1 0}} {middle 2 {2 0}} {down 3 {1 0}} {driver 2 {2 2}} {{} 1 {0 0}} {{} 1 {0 0}}} 9 9 ok}
 
 test rc-lowering-report {the lowering's census of the corpus: yields, yielding calls, self tail calls reusing their frame, scalar results boxed} -constraints nativeResumableCoroutines -body {
     lmap name {nested deep scalars dfa-tail} {
@@ -203,6 +203,11 @@ test rc-frames-per-resume {a generator resumed 1,000,000 times reuses its activa
 
 test rc-dfa-tail-frames {a declared recognizer's yielding tail recursion reuses the finished activation's frame: a handful of frames for 1,000,000 symbols, never one per symbol} -constraints nativeResumableCoroutines -body {
     set frames [rcKind [rcReport dfa-tail] ResumeFrame allocations]
+    expr {$frames > 0 && $frames < 16 ? "few" : $frames}
+} -cleanup {unset -nocomplain frames} -result few
+
+test rc-loop-call-frames {a yielding call made anew in every iteration (100,000 activations of one callee, 600 more at two sites calling one function) reuses the frame of the activation that returned before it: a handful of frames, never one per call -- an event loop's yield_now per dispatch allocates nothing} -constraints nativeResumableCoroutines -body {
+    set frames [rcKind [rcReport loop-calls] ResumeFrame allocations]
     expr {$frames > 0 && $frames < 16 ? "few" : $frames}
 } -cleanup {unset -nocomplain frames} -result few
 

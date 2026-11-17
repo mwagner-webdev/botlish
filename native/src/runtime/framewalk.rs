@@ -95,11 +95,11 @@ use super::native_stack::NativeStack;
 use super::value::Value;
 
 /// Whether this host's collector finds `RootStorage::NativeFrame` roots by
-/// walking native frames: the one capability that stack-map emission
-/// (codegen::clif's `stack_maps`, and so codegen::roots's plan), root
-/// publication (the fallback plan's `Vm::native_roots_ptr`), the shadow
-/// stack (`Vm::new`), the root report (codegen::roots's `report`) and the
-/// walk itself (`walk`, `walk_from`) all read, so that they always agree.
+/// walking native frames: the one capability (runtime::capabilities's
+/// `frame_roots`) that stack-map emission (codegen::clif's `stack_maps`, and
+/// so codegen::roots's plan), the shadow stack (`Vm::new`), the root report
+/// (codegen::roots's `report`) and the walk itself (`walk`, `walk_from`) all
+/// read, so that they always agree.
 ///
 /// True on x86-64 and AArch64 Linux (glibc) and macOS, where every frame the
 /// walk climbs keeps the frame-pointer chain this module's header describes:
@@ -115,12 +115,11 @@ use super::value::Value;
 /// frames instead, from their `.pdata`; Botlish frames keep Cranelift's
 /// chain (WINDOWS-X86-64-MILESTONE-3.md).
 ///
-/// False everywhere else: there the fallback plan holds every root -- a
-/// function with a Botlish call keeps its roots on the shadow stack, one
-/// without publishes its own frame's through `Vm::native_roots_ptr` -- and no
-/// native frame is ever walked (WINDOWS-X86-64-MILESTONE-1.md, section 3).
-/// The `fallback-roots` feature turns it off on any host, to test that plan
-/// where the whole test suite runs (Cargo.toml).
+/// False everywhere else: there the ShadowOnly plan holds every root -- every
+/// function with a root slot keeps it on the one shadow stack, leaf or not
+/// (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md) -- and no native
+/// frame is ever walked. The `fallback-roots` feature turns it off on any
+/// host, to test that plan where the whole test suite runs (Cargo.toml).
 pub const NATIVE_FRAME_ROOTS: bool = cfg!(all(
     any(
         all(any(target_arch = "x86_64", target_arch = "aarch64"), any(all(target_os = "linux", target_env = "gnu"), target_os = "macos")),

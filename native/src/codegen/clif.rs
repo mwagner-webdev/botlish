@@ -2698,6 +2698,14 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             // runtime/resumable.rs: the frame's layout is stated there once,
             // as the FRAME_*_OFFSET constants every access below uses).
             FrEnsure => self.frame_ensure(a[0]),
+            // The hidden frame parameter is UNIT or a frame, by the frame
+            // ABI (runtime/resumable.rs): one compare tells them apart.
+            FrIsFrame if self.f.frame.is_some() && args[0] + 1 == self.f.params => {
+                let flag = self.b.ins().icmp_imm_s(IntCC::NotEqual, a[0], UNIT as i64);
+                let yes = self.iconst(TRUE);
+                let no = self.iconst(FALSE);
+                self.b.ins().select(flag, yes, no)
+            }
             FrIsFrame => self.is_frame(a[0]),
             FrPoint => {
                 let point = self.b.ins().uload32(MemFlagsData::trusted(), a[0], FRAME_POINT_OFFSET);
