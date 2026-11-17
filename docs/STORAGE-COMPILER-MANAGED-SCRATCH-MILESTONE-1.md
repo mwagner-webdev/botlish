@@ -1341,8 +1341,10 @@ runs cranelift-generic under GC stress (`generic`), and fails every program
 without the fix. The census plans and its heap and scratch counts are
 unchanged; the corpus's facts change only where the fix corrects them
 (section 5). After the fix: the two failing tests pass under GC stress on
-interp and compile; `tests/storage-lifetime.test` and
-`tests/scratch-storage.test` pass; the lifetime oracle's selftest, its
+interp and compile; `tests/storage-lifetime.test` 67 of 67,
+`tests/scratch-storage.test` 42 of 42 (also under GC stress); the 87 test
+files that read a native allocation report (`tests/local.tcl -parts tcl
+-backends interp`) 2,889 tests, 0 failures; the lifetime oracle's selftest, its
 fuzzer (200 programs, 0 unsound, every verdict precise), its C differential
 (0 violations), the persistence check (identical to its record) and the
 native reachability check (0 contradictions) pass.
