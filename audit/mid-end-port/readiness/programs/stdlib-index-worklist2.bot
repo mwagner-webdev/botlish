@@ -1,0 +1,25 @@
+# stdlib-index-worklist2.bot -- a worklist's head access with both bounds
+# guarded (`head >= 0` too: a parameter has no lower bound the analysis
+# knows), in the positive form inside a function that pushes, and as an
+# early return in one that only reads
+# (PORTABILITY-MID-END-PORT-READINESS-CENSUS-1.md, section 6). Expected
+# today: `peek` is proven; `drain` is
+# rejected at line 13 (an unhandled IndexNotFound), because it
+# pushes to the vector after the access (stdlib-index-push.bot reduces it).
+import std::mutable_vector
+
+fn drain(head: int, acc: int, place queue: MutableVector[int]) -> int:
+    if head >= 0 and head < queue.length():
+        item = queue.at(head)
+        if item > 0 and queue.length() < 100:
+            queue.push(item - 1)
+        return drain(head + 1, acc + item, queue)
+    acc
+
+fn peek(head: int, queue: MutableVector[int]) -> int:
+    if head < 0 or head >= queue.length():
+        return -1
+    queue.at(head)
+
+q = std::mutable_vector::from_list([3, 2])
+[drain(0, 0, q), peek(1, q)]

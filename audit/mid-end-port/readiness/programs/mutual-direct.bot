@@ -1,0 +1,13 @@
+# mutual-direct.bot -- the cycle of mutual.bot written directly: rejected
+# today (CORE SEMANTIC UNBOUND: `stmt` is declared later), since a binding is
+# visible only after it is established and `mutual:` is not implemented
+# (PORTABILITY-MID-END-PORT-READINESS-CENSUS-1.md, section 5).
+fn expr(e: int) -> int:
+    if e == 0:
+        return 0
+    stmt(e - 1)
+
+fn stmt(s: int) -> int:
+    expr(s) + 1
+
+expr(3)

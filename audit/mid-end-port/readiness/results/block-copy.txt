@@ -1,0 +1,5 @@
+  227 entries: 10.9 us per body
+  399 entries: 19.4 us per body
+  743 entries: 34.5 us per body
+ 1487 entries: 78.6 us per body
+ 2970 entries: 256.2 us per body

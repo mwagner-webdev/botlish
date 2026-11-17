@@ -1,0 +1,492 @@
+# checker.bot -- a compiler-shaped checker in Botlish, an audit-only probe
+# (PORTABILITY-MID-END-PORT-READINESS-CENSUS-1.md, section 8). Not a
+# compiler component: a bounded HIR-like language checked the way the
+# mid-end checks one, to see what writing that shape in Botlish takes.
+#
+# * The IR: payload-bearing `Expr` nodes in one MutableVector, children by
+#   integer id (the HIR's exprs table, with dense ids instead of `eN`
+#   keys); functions with declared parameter types.
+# * Name resolution through an explicit, scoped typing environment (a
+#   MutableMap[str, Type] place, a `let` undone after its body: in-place
+#   update with exact rollback, as semantic-instance walks do).
+# * Type inference over a small nominal lattice (`Type`: Unknown below
+#   Int, Bool and a recursive `Fun` form, Poison above), poison suppressing
+#   cascades as hir/types.tcl's does.
+# * Function result summaries computed by a FIFO worklist over the call
+#   graph's reverse edges until nothing changes.
+# * Diagnostics collected after convergence, sorted by function name
+#   (String order, written here: Botlish has no String comparison), node
+#   and code, rendered as text, and summarized by a checksum.
+#
+# checker.tcl in this directory is the Tcl reference: the same generator,
+# rules, worklist order and rendering. Both print
+# [nodes, rechecks, diagnostics, summary checksum, diagnostic checksum].
+# tools/checker.tcl rewrites the `main(...)` line for other sizes.
+import std::mutable_vector
+import std::mutable_array
+import std::mutable_map
+import std::str
+import std::int
+import std::char
+import std::list
+
+enum Expr:
+    IntLit {value: int},
+    BoolLit {value: bool},
+    Name {name: str},
+    Add {left: int, right: int},
+    Less {left: int, right: int},
+    Cond {condition: int, yes: int, no: int},
+    Call {target: int, args: List[int]},
+    Let {name: str, value: int, body: int},
+
+enum Type:
+    Unknown,
+    IntT,
+    BoolT,
+    Fun {param: Type, result: Type},
+    Poison,
+
+enum Code:
+    UnboundName,
+    TypeMismatch,
+    ConditionNotBool,
+    UnknownFunction,
+    ArityMismatch,
+
+struct Func:
+    name: str
+    params: List[str]
+    types: List[Type]
+    body: int
+
+struct Diagnostic:
+    function: str
+    node: int
+    code: Code
+    message: str
+
+struct Gen:
+    index: int
+    seed: int
+
+# ---------------------------------------------------------------------------
+# The type lattice: join, and a rendering for messages.
+
+# Types compare structurally (`==` on a payload enum reads its case and
+# payload, recursively).
+fn unknown?(t: Type) -> bool:
+    t == Type::Unknown
+
+fn poison?(t: Type) -> bool:
+    t == Type::Poison
+
+fn join(a: Type, b: Type) -> Type:
+    if unknown?(a):
+        return b
+    if unknown?(b):
+        return a
+    if a == b:
+        return a
+    Type::Poison
+
+fn show(t: Type) -> str:
+    match t:
+        case Type::Unknown:
+            "unknown"
+        case Type::IntT:
+            "int"
+        case Type::BoolT:
+            "bool"
+        case Type::Fun {param, result}:
+            "fn(".concat(show(param)).concat(") -> ").concat(show(result))
+        case Type::Poison:
+            "poison"
+
+fn code_number(c: Code) -> int:
+    match c:
+        case Code::UnboundName:
+            1
+        case Code::TypeMismatch:
+            2
+        case Code::ConditionNotBool:
+            3
+        case Code::UnknownFunction:
+            4
+        case Code::ArityMismatch:
+            5
+
+# ---------------------------------------------------------------------------
+# The generator: the same seeded LCG as checker.tcl.
+
+fn next(seed: int) -> int:
+    (seed * 1103515245 + 12345).mod(2147483648)
+
+fn param_name(j: int) -> str:
+    "p".concat(j.to_string())
+
+fn leaf(s: int, nparams: int) -> Expr:
+    pick = s.mod(10)
+    if pick < 4:
+        return Expr::IntLit {value: s.mod(50)}
+    if pick == 4:
+        return Expr::BoolLit {value: s.mod(2) == 0}
+    if pick < 9:
+        return Expr::Name {name: param_name(s.mod(nparams + 1))}
+    Expr::Name {name: "v"}
+
+fn gen(depth: int, seed: int, nparams: int, functions: int, place nodes: MutableVector[Expr]) -> Gen errors IndexNotFound:
+    s1 = next(seed)
+    r = s1.mod(100)
+    if depth == 0 or r < 20:
+        s2 = next(s1)
+        nodes.push(leaf(s2, nparams))
+        return Gen {index: nodes.length() - 1, seed: s2}
+    if r < 60:
+        a = gen(depth - 1, s1, nparams, functions, nodes)
+        b = gen(depth - 1, a.seed, nparams, functions, nodes)
+        if r < 45:
+            nodes.push(Expr::Add {left: a.index, right: b.index})
+        else:
+            nodes.push(Expr::Less {left: a.index, right: b.index})
+        return Gen {index: nodes.length() - 1, seed: b.seed}
+    if r < 75:
+        c = gen(depth - 1, s1, nparams, functions, nodes)
+        y = gen(depth - 1, c.seed, nparams, functions, nodes)
+        n = gen(depth - 1, y.seed, nparams, functions, nodes)
+        nodes.push(Expr::Cond {condition: c.index, yes: y.index, no: n.index})
+        return Gen {index: nodes.length() - 1, seed: n.seed}
+    if r < 90:
+        s2 = next(s1)
+        target = s2.mod(functions + 2)
+        count = next(s2).mod(3)
+        first = gen(depth - 1, next(s2), nparams, functions, nodes)
+        if count == 0:
+            nodes.push(Expr::Call {target: target, args: []})
+            return Gen {index: nodes.length() - 1, seed: first.seed}
+        if count == 1:
+            nodes.push(Expr::Call {target: target, args: [first.index]})
+            return Gen {index: nodes.length() - 1, seed: first.seed}
+        second = gen(depth - 1, first.seed, nparams, functions, nodes)
+        nodes.push(Expr::Call {target: target, args: [first.index, second.index]})
+        return Gen {index: nodes.length() - 1, seed: second.seed}
+    v = gen(depth - 1, s1, nparams, functions, nodes)
+    body = gen(depth - 1, v.seed, nparams, functions, nodes)
+    nodes.push(Expr::Let {name: "v", value: v.index, body: body.index})
+    Gen {index: nodes.length() - 1, seed: body.seed}
+
+fn param_type(i: int, j: int) -> Type:
+    if (i + j).mod(4) == 0:
+        return Type::BoolT
+    Type::IntT
+
+fn names_from(j: int, n: int) -> List[str]:
+    loop k from j to n:
+        param_name(k)
+
+fn types_from(i: int, n: int) -> List[Type]:
+    loop k from 0 to n:
+        param_type(i, k)
+
+fn build(i: int, functions: int, depth: int, seed: int, place funcs: MutableVector[Func], place nodes: MutableVector[Expr]) -> int errors IndexNotFound:
+    if i == functions:
+        return seed
+    nparams = i.mod(3)
+    g = gen(depth, seed, nparams, functions, nodes)
+    funcs.push(Func {name: "f".concat(i.to_string()), params: names_from(0, nparams), types: types_from(i, nparams), body: g.index})
+    build(i + 1, functions, depth, g.seed, funcs, nodes)
+
+# ---------------------------------------------------------------------------
+# The checker: one walk serves inference (report false) and the diagnosing
+# pass after convergence (report true).
+
+struct Checker:
+    caller: str
+    report: bool
+
+fn diagnose(ck: Checker, node: int, code: Code, message: str, place out: MutableVector[Diagnostic]) -> Type:
+    if ck.report:
+        out.push(Diagnostic {function: ck.caller, node: node, code: code, message: message})
+    Type::Poison
+
+# The operand rule of + and <: poison or unknown passes through silently;
+# both operands int give RESULT; anything else is a mismatch.
+fn operands(ck: Checker, e: int, a: Type, b: Type, result: Type, op: str, place out: MutableVector[Diagnostic]) -> Type:
+    if poison?(a) or poison?(b):
+        return Type::Poison
+    if unknown?(a) or unknown?(b):
+        return Type::Unknown
+    if a == Type::IntT and b == Type::IntT:
+        return result
+    diagnose(ck, e, Code::TypeMismatch, "operands of ".concat(op).concat(" have types ").concat(show(a)).concat(" and ").concat(show(b)), out)
+
+# The first argument whose type is not its parameter's: its index; -1 when
+# every argument fits, -2 when one is poison (no diagnostic: cascade).
+fn mismatch(arguments: List[Type], params: List[Type], i: int) -> int errors IndexNotFound:
+    if i == arguments.length():
+        return -1
+    a = arguments.at(i)
+    if poison?(a):
+        return -2
+    if unknown?(a) or a == params.at(i):
+        return mismatch(arguments, params, i + 1)
+    i
+
+fn check(ck: Checker, e: int, nodes: MutableVector[Expr], funcs: MutableVector[Func], summaries: MutableArray[Type], place env: std::mutable_map::MutableMap[str, Type], place out: MutableVector[Diagnostic]) -> Type errors IndexNotFound:
+    match nodes.at(e):
+        case Expr::IntLit:
+            Type::IntT
+        case Expr::BoolLit:
+            Type::BoolT
+        case Expr::Name {name}:
+            t = env.at(name):
+                on std::mutable_map::KeyNotFound:
+                    diagnose(ck, e, Code::UnboundName, "unbound name ".concat(name), out)
+            t
+        case Expr::Add {left, right}:
+            a = check(ck, left, nodes, funcs, summaries, env, out)
+            b = check(ck, right, nodes, funcs, summaries, env, out)
+            operands(ck, e, a, b, Type::IntT, "+", out)
+        case Expr::Less {left, right}:
+            a = check(ck, left, nodes, funcs, summaries, env, out)
+            b = check(ck, right, nodes, funcs, summaries, env, out)
+            operands(ck, e, a, b, Type::BoolT, "<", out)
+        case Expr::Cond {condition, yes, no}:
+            c = check(ck, condition, nodes, funcs, summaries, env, out)
+            y = check(ck, yes, nodes, funcs, summaries, env, out)
+            n = check(ck, no, nodes, funcs, summaries, env, out)
+            if poison?(c) or unknown?(c):
+                return c
+            if c != Type::BoolT:
+                return diagnose(ck, e, Code::ConditionNotBool, "condition has type ".concat(show(c)), out)
+            join(y, n)
+        case Expr::Call {target, args}:
+            arguments = loop a in args:
+                check(ck, a, nodes, funcs, summaries, env, out)
+            if target >= funcs.length():
+                return diagnose(ck, e, Code::UnknownFunction, "unknown function f".concat(target.to_string()), out)
+            callee = funcs.at(target)
+            if arguments.length() != callee.types.length():
+                return diagnose(ck, e, Code::ArityMismatch, callee.name.concat(" takes ").concat(callee.types.length().to_string()).concat(" arguments, got ").concat(arguments.length().to_string()), out)
+            bad = mismatch(arguments, callee.types, 0)
+            if bad == -2:
+                return Type::Poison
+            if bad >= 0:
+                return diagnose(ck, e, Code::TypeMismatch, "argument ".concat(bad.to_string()).concat(" of ").concat(callee.name).concat(" has type ").concat(show(arguments.at(bad))), out)
+            summaries.at(target)
+        case Expr::Let {name, value, body}:
+            t = check(ck, value, nodes, funcs, summaries, env, out)
+            saved = env.at(name):
+                on std::mutable_map::KeyNotFound:
+                    Type::Unknown
+            had = env.contains(name)
+            env.set(name, t)
+            result = check(ck, body, nodes, funcs, summaries, env, out)
+            if had:
+                env.set(name, saved)
+            else:
+                env.remove(name):
+                    on std::mutable_map::KeyNotFound:
+                        Type::Unknown
+            result
+
+fn check_function(f: int, report: bool, nodes: MutableVector[Expr], funcs: MutableVector[Func], summaries: MutableArray[Type], place out: MutableVector[Diagnostic]) -> Type errors IndexNotFound:
+    func = funcs.at(f)
+    env = std::mutable_map::create[str, Type]()
+    fold k from 0 to func.params.length() with intermediate n 0:
+        env.set(func.params.at(k), func.types.at(k))
+        n + 1
+    check(Checker {caller: func.name, report: report}, func.body, nodes, funcs, summaries, env, out)
+
+# ---------------------------------------------------------------------------
+# The call graph's reverse edges, as flat tables (CSR): the callers of
+# function f are callers[start[f] .. start[f + 1]).
+
+fn collect_calls(e: int, caller: int, functions: int, nodes: MutableVector[Expr], place from: MutableVector[int], place to: MutableVector[int]) -> unit errors IndexNotFound:
+    match nodes.at(e):
+        case Expr::IntLit:
+            unit
+        case Expr::BoolLit:
+            unit
+        case Expr::Name:
+            unit
+        case Expr::Add {left, right}:
+            collect_calls(left, caller, functions, nodes, from, to)
+            collect_calls(right, caller, functions, nodes, from, to)
+        case Expr::Less {left, right}:
+            collect_calls(left, caller, functions, nodes, from, to)
+            collect_calls(right, caller, functions, nodes, from, to)
+        case Expr::Cond {condition, yes, no}:
+            collect_calls(condition, caller, functions, nodes, from, to)
+            collect_calls(yes, caller, functions, nodes, from, to)
+            collect_calls(no, caller, functions, nodes, from, to)
+        case Expr::Call {target, args}:
+            fold k from 0 to args.length() with intermediate n 0:
+                collect_calls(args.at(k), caller, functions, nodes, from, to)
+                n + 1
+            if target < functions:
+                from.push(target)
+                to.push(caller)
+        case Expr::Let {name, value, body}:
+            collect_calls(value, caller, functions, nodes, from, to)
+            collect_calls(body, caller, functions, nodes, from, to)
+
+# ---------------------------------------------------------------------------
+# The worklist: FIFO over function indices, each queued at most once.
+
+fn propagate(head: int, functions: int, rechecks: int, nodes: MutableVector[Expr], funcs: MutableVector[Func], start: MutableArray[int], callers: MutableArray[int], place queue: MutableVector[int], place queued: MutableArray[bool], place summaries: MutableArray[Type], place out: MutableVector[Diagnostic]) -> int errors IndexNotFound:
+    if head == queue.length():
+        return rechecks
+    f = queue.at(head)
+    queued.set(f, false)
+    t = check_function(f, false, nodes, funcs, summaries, out)
+    old = summaries.at(f)
+    updated = join(old, t)
+    if updated != old:
+        summaries.set(f, updated)
+        fold k from start.at(f) to start.at(f + 1) with intermediate n 0:
+            c = callers.at(k)
+            if not queued.at(c):
+                queued.set(c, true)
+                queue.push(c)
+            n + 1
+    propagate(head + 1, functions, rechecks + 1, nodes, funcs, start, callers, queue, queued, summaries, out)
+
+# ---------------------------------------------------------------------------
+# Deterministic order: String comparison by scalar values, then a merge sort.
+
+fn str_less(a: str, b: str, i: int) -> bool errors IndexNotFound:
+    if i == b.length():
+        return false
+    if i == a.length():
+        return true
+    x = a.char_at(i).scalar_value()
+    y = b.char_at(i).scalar_value()
+    if x != y:
+        return x < y
+    str_less(a, b, i + 1)
+
+fn before(x: Diagnostic, y: Diagnostic) -> bool errors IndexNotFound:
+    if x.function != y.function:
+        return str_less(x.function, y.function, 0)
+    if x.node != y.node:
+        return x.node < y.node
+    code_number(x.code) < code_number(y.code)
+
+fn merge(lo: int, mid: int, hi: int, place xs: MutableVector[Diagnostic], place tmp: MutableVector[Diagnostic]) -> unit errors IndexNotFound:
+    tmp.clear()
+    fold k from lo to hi with intermediate state [lo, mid]:
+        i = state.at(0)
+        j = state.at(1)
+        take_left = if j >= hi:
+            true
+        else:
+            if i >= mid:
+                false
+            else:
+                not before(xs.at(j), xs.at(i))
+        if take_left:
+            tmp.push(xs.at(i))
+            [i + 1, j]
+        else:
+            tmp.push(xs.at(j))
+            [i, j + 1]
+    fold k from 0 to tmp.length() with intermediate n 0:
+        xs.swap(lo + k, tmp.at(k))
+        n + 1
+    unit
+
+fn sort_range(lo: int, hi: int, place xs: MutableVector[Diagnostic], place tmp: MutableVector[Diagnostic]) -> unit errors IndexNotFound:
+    if hi - lo < 2:
+        return unit
+    mid = lo + (hi - lo).shift_right(1)
+    sort_range(lo, mid, xs, tmp)
+    sort_range(mid, hi, xs, tmp)
+    merge(lo, mid, hi, xs, tmp)
+
+# ---------------------------------------------------------------------------
+# Checksums of the summaries and of the sorted diagnostics' text.
+
+fn type_number(t: Type) -> int:
+    match t:
+        case Type::Unknown:
+            0
+        case Type::IntT:
+            1
+        case Type::BoolT:
+            2
+        case Type::Fun:
+            3
+        case Type::Poison:
+            4
+
+fn text_sum(s: str, acc: int) -> int errors IndexNotFound:
+    fold i from 0 to s.length() with intermediate h acc:
+        (h * 131 + s.char_at(i).scalar_value()).mod(1000000007)
+
+fn render(d: Diagnostic) -> str:
+    d.function.concat(":").concat(d.node.to_string()).concat(": [").concat(code_number(d.code).to_string()).concat("] ").concat(d.message)
+
+# Typed empty vectors: `std::mutable_vector::from_list([])` alone is a
+# MutableVector[never]; a declared result fixes the element type.
+fn exprs() -> MutableVector[Expr]:
+    std::mutable_vector::from_list([])
+
+fn funcs_vector() -> MutableVector[Func]:
+    std::mutable_vector::from_list([])
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn diagnostics() -> MutableVector[Diagnostic]:
+    std::mutable_vector::from_list([])
+
+fn main(functions: int, depth: int) -> List[int] errors IndexNotFound:
+    nodes = exprs()
+    funcs = funcs_vector()
+    build(0, functions, depth, 7, funcs, nodes)
+    from = ints()
+    to = ints()
+    fold f from 0 to functions with intermediate n 0:
+        collect_calls(funcs.at(f).body, f, functions, nodes, from, to)
+        n + 1
+    counts = std::mutable_array::create(functions + 1, 0)
+    fold k from 0 to from.length() with intermediate n 0:
+        counts.set(from.at(k) + 1, counts.at(from.at(k) + 1) + 1)
+        n + 1
+    start = std::mutable_array::create(functions + 1, 0)
+    fold f from 0 to functions with intermediate acc 0:
+        start.set(f + 1, acc + counts.at(f + 1))
+        acc + counts.at(f + 1)
+    fill = std::mutable_array::create(functions + 1, 0)
+    fold f from 0 to functions + 1 with intermediate n 0:
+        fill.set(f, start.at(f))
+        n + 1
+    callers = std::mutable_array::create(from.length(), 0)
+    fold k from 0 to from.length() with intermediate n 0:
+        slot = fill.at(from.at(k))
+        callers.set(slot, to.at(k))
+        fill.set(from.at(k), slot + 1)
+        n + 1
+    queue = ints()
+    queued = std::mutable_array::create(functions, true)
+    fold f from 0 to functions with intermediate n 0:
+        queue.push(f)
+        n + 1
+    summaries = std::mutable_array::create(functions, Type::Unknown)
+    out = diagnostics()
+    rechecks = propagate(0, functions, 0, nodes, funcs, start, callers, queue, queued, summaries, out)
+    fold f from 0 to functions with intermediate n 0:
+        check_function(f, true, nodes, funcs, summaries, out)
+        n + 1
+    tmp = diagnostics()
+    sort_range(0, out.length(), out, tmp)
+    summary = fold f from 0 to functions with intermediate h 0:
+        (h * 7 + type_number(summaries.at(f))).mod(1000000007)
+    text = fold k from 0 to out.length() with intermediate h 0:
+        text_sum(render(out.at(k)), h)
+    [nodes.length(), rechecks, out.length(), summary, text]
+
+main(300, 6):
+    on IndexNotFound:
+        []

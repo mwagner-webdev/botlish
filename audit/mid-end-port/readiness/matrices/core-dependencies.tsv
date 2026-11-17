@@ -1,0 +1,17 @@
+# core-dependencies.tsv -- the mid-end's calls into core:: (PORTABILITY-MID-END-PORT-READINESS-CENSUS-1.md, section 14): static call sites in hir/*.tcl (grep of core::NS::NAME), distinct procedures named by the grep, dynamic calls over results/callgraph's corpus (20 front-end compilations, five native lowerings; 27.9 million in all) (both phases), and the proposed handling: 1 immutable metadata, 2 one portable Botlish statement, 3 a host service behind a context, 4 mid-end output (already in declarations), 5 Tcl-side for a first slice.
+namespace	staticSites	distinctProcs	dynamicCalls	purpose	handling
+core::type	164	32	9998637	builtin types, integer domains, admissibility, refinement evidence; registers source types	2 (5 for a first slice); registration 4
+core::native	164	26	6939652	native registry metadata (231 natives, 32 keys), ownership roles, namespaces; declares enums, errors, payloads	1; declarations 4
+core::value	118	23	6786296	kind, equality, show, accessors, identity/tree/opaque tests	2
+core::coroutines	37	8	1789393	coroutine native names	1
+core::contexts	4	3	791555	context natives	1
+core::ir	37	10	618195	core IR shapes (HIR text, lowering)	backend side, not mid-end
+core::linuxabi	11	5	399951	syscall transport table	1
+core::decimal	45	21	413939	exact binary64 simulation, decimal text	2
+core::bytestore	17	6	158998	byte-storage bridge types	1
+core::float	-	13	22137	Float64 rules	2
+core::strings	2	1	13826	String length for exact values	2
+core::cabi	65	26	3381	C target table, float narrowing, promotions	1 (data), 2 (Narrow)
+core::dfa	12	6	-	recognizer tables	1
+core::deep	217	3	394	depth-safe guard	none (Botlish recursion is depth-safe)
+core::semanticError, core::malformed, core::raiseDiagnostics	27, 23, 10	-	-	error construction	internal-failure convention

@@ -1,0 +1,20 @@
+# stdlib-nested-context.bot -- a MutableArray of MutableVectors owned by an
+# installed context, one bucket pushed through its element
+# (PORTABILITY-MID-END-PORT-READINESS-CENSUS-1.md, section 6). Expected
+# today: rejected (MUTABLE-PLACE-RECEIVER at the push: an element of a
+# context's collection is a place to observe, not one to mutate), so a
+# collection of collections is updated by taking an element out and
+# storing it back (stdlib.bot's nested), which copies it.
+import std::mutable_vector
+import std::mutable_array
+
+context struct Tables:
+    buckets: MutableArray[MutableVector[int]]
+
+fn add_to(k: int, i: int, context t: Tables) -> unit errors IndexNotFound:
+    t.buckets.element(k).push(i)
+
+with context Tables {buckets: std::mutable_array::create(16, std::mutable_vector::from_list([0]))}
+add_to(3, 7):
+    on IndexNotFound:
+        unit

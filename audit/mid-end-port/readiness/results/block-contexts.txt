@@ -1,0 +1,3 @@
+$S/h8/main.bot: 2940 bindings; 2742 block typings; creating context's types: mean 227, max 455 entries; entries copied in all (at most): 622560
+$S/h16/main.bot: 5188 bindings; 4806 block typings; creating context's types: mean 399, max 799 entries; entries copied in all (at most): 1917720
+$S/h32/main.bot: 9684 bindings; 8934 block typings; creating context's types: mean 743, max 1487 entries; entries copied in all (at most): 6638088

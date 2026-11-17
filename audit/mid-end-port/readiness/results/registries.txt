@@ -1,0 +1,5 @@
+natives registered after a warm compilation: 231 (std:: qualified: 139)
+distinct metadata keys: 32
+keys (natives carrying each): name 231 impl 231 arity 231 refinesTrue 231 refinesFalse 231 paramTypes 231 resultType 231 testsType 231 runtime 231 resultShape 231 resultRange 231 contextFree 231 errors 231 bounds 231 nomethod 231 completion 231 ownership 231 errorsFrom 231 resultLength 231 keepsLength 231 dropForm 231 layout 231 imprint 231 foreign 231 extern 231 mutationStable 231 fold 231 measures 231 hashing 231 elementPlace 231 elementKinds 231 sending 231
+core::type registered names: 2
+C targets: 8

@@ -1,0 +1,215 @@
+# mutual.bot -- the mid-end's mutually recursive walkers in today's Botlish,
+# an audit-only probe (PORTABILITY-MID-END-PORT-READINESS-CENSUS-1.md,
+# section 5). `mutual:` groups are designed (MUTUAL-RECURSION.md) and not
+# implemented, so a three-member cycle
+#
+#     expr(e)      -- an expression; a block expression walks its statements
+#     seq(items)   -- a statement list (hir::types::Sequence's shape: a List,
+#                     not a node)
+#     stmt(s)      -- a statement; walks its expression
+#
+# is written the ways concept.mutual-recursion recommends, on the same IR,
+# and all must compute the same value:
+#
+# * merged: one recursive function over a request enum (`Req`) whose cases
+#   are the members and carry each member's own arguments. Every member's
+#   result must be the one result type (here all are int; when they are
+#   not, the result becomes a sum every caller unpacks).
+# * passed: the hub (`expr`) is defined last and hands itself to the
+#   earlier members as a function value; `seq` wants a statement walker,
+#   which `expr` must build as a nested function (a closure capturing
+#   `expr`) at every block expression.
+# * flat: the same value without recursion through the cycle, by walking
+#   the table once bottom-up (possible here because children precede their
+#   parents in it, as in the HIR's exprs table).
+#
+# mutual-direct.bot is the cycle written directly (rejected: UNBOUND), and
+# mutual-context.bot the passed form with a context requirement (rejected:
+# a function that needs a context cannot be a value). tools/mutual.tcl
+# rewrites the `main(...)` line for other sizes and times each variant.
+import std::mutable_vector
+import std::mutable_array
+import std::list
+
+enum Node:
+    Lit {value: int},
+    Add {left: int, right: int},
+    BlockExpr {items: List[int]},
+    Let {value: int},
+    ExprStmt {expr: int},
+
+enum Mode:
+    ExprMode,
+    StmtMode,
+
+enum Req:
+    E {e: int},
+    S {s: int},
+    Q {items: List[int]},
+
+struct Gen:
+    index: int
+    seed: int
+
+prime = 1000000007
+
+fn next(seed: int) -> int:
+    (seed * 1103515245 + 12345).mod(2147483648)
+
+# The generator is the same cycle (an expression holds statements, a
+# statement an expression), so it is merged too: one function, a mode.
+fn gen(mode: Mode, depth: int, seed: int, place nodes: MutableVector[Node]) -> Gen errors IndexNotFound:
+    s = next(seed)
+    match mode:
+        case Mode::StmtMode:
+            e = gen(Mode::ExprMode, depth, s, nodes)
+            if s.mod(2) == 0:
+                nodes.push(Node::Let {value: e.index})
+            else:
+                nodes.push(Node::ExprStmt {expr: e.index})
+            Gen {index: nodes.length() - 1, seed: e.seed}
+        case Mode::ExprMode:
+            r = s.mod(100)
+            if depth == 0 or r < 30:
+                nodes.push(Node::Lit {value: s.mod(10)})
+                return Gen {index: nodes.length() - 1, seed: s}
+            if r < 70:
+                a = gen(Mode::ExprMode, depth - 1, s, nodes)
+                b = gen(Mode::ExprMode, depth - 1, a.seed, nodes)
+                nodes.push(Node::Add {left: a.index, right: b.index})
+                return Gen {index: nodes.length() - 1, seed: b.seed}
+            count = 1 + next(s).mod(3)
+            g1 = gen(Mode::StmtMode, depth - 1, next(s), nodes)
+            if count == 1:
+                nodes.push(Node::BlockExpr {items: [g1.index]})
+                return Gen {index: nodes.length() - 1, seed: g1.seed}
+            g2 = gen(Mode::StmtMode, depth - 1, g1.seed, nodes)
+            if count == 2:
+                nodes.push(Node::BlockExpr {items: [g1.index, g2.index]})
+                return Gen {index: nodes.length() - 1, seed: g2.seed}
+            g3 = gen(Mode::StmtMode, depth - 1, g2.seed, nodes)
+            nodes.push(Node::BlockExpr {items: [g1.index, g2.index, g3.index]})
+            Gen {index: nodes.length() - 1, seed: g3.seed}
+
+# ---------------------------------------------------------------------------
+# merged: the cycle as one function over requests.
+
+fn walk(req: Req, nodes: MutableVector[Node]) -> int errors IndexNotFound:
+    match req:
+        case Req::Q {items}:
+            fold i from 0 to items.length() with intermediate acc 0:
+                (acc * 31 + walk(Req::S {s: items.at(i)}, nodes)).mod(prime)
+        case Req::S {s}:
+            match nodes.at(s):
+                case Node::Let {value}:
+                    (walk(Req::E {e: value}, nodes) * 3).mod(prime)
+                case Node::ExprStmt {expr}:
+                    (walk(Req::E {e: expr}, nodes) + 1).mod(prime)
+                case Node::Lit:
+                    0
+                case Node::Add:
+                    0
+                case Node::BlockExpr:
+                    0
+        case Req::E {e}:
+            match nodes.at(e):
+                case Node::Lit {value}:
+                    value
+                case Node::Add {left, right}:
+                    (walk(Req::E {e: left}, nodes) + walk(Req::E {e: right}, nodes)).mod(prime)
+                case Node::BlockExpr {items}:
+                    walk(Req::Q {items: items}, nodes)
+                case Node::Let:
+                    0
+                case Node::ExprStmt:
+                    0
+
+# ---------------------------------------------------------------------------
+# passed: earlier members take the later ones as function values.
+
+fn seq_with(items: List[int], nodes: MutableVector[Node], stmt: Fn{args: [int, MutableVector[Node]], return: int, errors: [IndexNotFound]}) -> int errors IndexNotFound:
+    fold i from 0 to items.length() with intermediate acc 0:
+        (acc * 31 + stmt(items.at(i), nodes)).mod(prime)
+
+fn stmt_with(s: int, nodes: MutableVector[Node], expr: Fn{args: [int, MutableVector[Node]], return: int, errors: [IndexNotFound]}) -> int errors IndexNotFound:
+    match nodes.at(s):
+        case Node::Let {value}:
+            (expr(value, nodes) * 3).mod(prime)
+        case Node::ExprStmt {expr: x}:
+            (expr(x, nodes) + 1).mod(prime)
+        case Node::Lit:
+            0
+        case Node::Add:
+            0
+        case Node::BlockExpr:
+            0
+
+fn expr(e: int, nodes: MutableVector[Node]) -> int errors IndexNotFound:
+    match nodes.at(e):
+        case Node::Lit {value}:
+            value
+        case Node::Add {left, right}:
+            (expr(left, nodes) + expr(right, nodes)).mod(prime)
+        case Node::BlockExpr {items}:
+            fn stmt(s: int, ns: MutableVector[Node]) -> int errors IndexNotFound:
+                stmt_with(s, ns, expr)
+            seq_with(items, nodes, stmt)
+        case Node::Let:
+            0
+        case Node::ExprStmt:
+            0
+
+# ---------------------------------------------------------------------------
+# flat: one bottom-up pass over the table (children precede parents).
+
+fn flat(nodes: MutableVector[Node], place values: MutableArray[int]) -> unit errors IndexNotFound:
+    fold i from 0 to nodes.length() with intermediate n 0:
+        v = match nodes.at(i):
+            case Node::Lit {value}:
+                value
+            case Node::Add {left, right}:
+                (values.at(left) + values.at(right)).mod(prime)
+            case Node::BlockExpr {items}:
+                fold k from 0 to items.length() with intermediate acc 0:
+                    (acc * 31 + values.at(items.at(k))).mod(prime)
+            case Node::Let {value}:
+                (values.at(value) * 3).mod(prime)
+            case Node::ExprStmt {expr}:
+                (values.at(expr) + 1).mod(prime)
+        values.set(i, v)
+        n + 1
+    unit
+
+fn node_vector() -> MutableVector[Node]:
+    std::mutable_vector::from_list([])
+
+# VARIANT: 0 merged, 1 passed, 2 flat. Returns [nodes, checksum of every
+# tree's value].
+fn main(trees: int, depth: int, variant: int) -> List[int] errors IndexNotFound:
+    nodes = node_vector()
+    roots = std::mutable_array::create(trees, 0)
+    fold t from 0 to trees with intermediate seed 11:
+        g = gen(Mode::ExprMode, depth, seed, nodes)
+        roots.set(t, g.index)
+        g.seed
+    values = std::mutable_array::create(nodes.length(), 0)
+    if variant == 2:
+        flat(nodes, values)
+    check = fold t from 0 to trees with intermediate acc 0:
+        r = roots.at(t)
+        v = if variant == 0:
+            walk(Req::E {e: r}, nodes)
+        else:
+            if variant == 1:
+                expr(r, nodes)
+            else:
+                values.at(r)
+        (acc * 7 + v).mod(prime)
+    [nodes.length(), check]
+
+fn all(trees: int, depth: int) -> List[List[int]] errors IndexNotFound:
+    [main(trees, depth, 0), main(trees, depth, 1), main(trees, depth, 2)]
+
+all(200, 8):
+    on IndexNotFound:
+        []

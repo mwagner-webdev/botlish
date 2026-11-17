@@ -1,0 +1,34 @@
+# stdlib-index.bot -- a worklist index the program has checked: does the
+# completion analysis prove it, so that the function needs no `errors
+# IndexNotFound` (PORTABILITY-MID-END-PORT-READINESS-CENSUS-1.md, section
+# 6)? Each function is declared without the error; the program compiles
+# exactly when every access is proven.
+import std::mutable_vector
+import std::mutable_array
+import std::list
+
+# A guard on the vector's own length.
+fn guarded(v: MutableVector[int], i: int) -> int:
+    if i >= 0 and i < v.length():
+        return v.at(i)
+    -1
+
+# A counted loop over the vector's indices.
+fn total(v: MutableVector[int]) -> int:
+    fold i from 0 to v.length() with intermediate acc 0:
+        acc + v.at(i)
+
+# A counted loop over an array's indices.
+fn array_total(a: MutableArray[int]) -> int:
+    fold i from 0 to a.capacity() with intermediate acc 0:
+        acc + a.at(i)
+
+# A List index under a guard.
+fn list_at(xs: List[int], i: int) -> int:
+    if i >= 0 and i < xs.length():
+        return xs.at(i)
+    -1
+
+v = std::mutable_vector::from_list([1, 2, 3])
+a = std::mutable_array::create(4, 2)
+[guarded(v, 1), total(v), array_total(a), list_at([5, 6], 1)]

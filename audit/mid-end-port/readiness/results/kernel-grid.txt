@@ -1,0 +1,42 @@
+row 375 8 dict {value {108395 6 750764901} best 1.081 peakKb 121300}
+row 375 8 list {value {108395 6 750764901} best 0.760 peakKb 20816}
+row 375 8 tables {value {108395 6 750764901} best 0.552 peakKb 20816}
+row 375 8 structs {build 1.186 buildPeakKb 203080 value {108395 6 750764901} structAllocs 758759 allocs 758767 allocatedBytes 39898416 peakLiveBytes 29188344 gcCycles 4 gcUs 21636 maxPauseUs 17017 best 0.139 peakKb 52132}
+row 375 8 enums {build 1.045 buildPeakKb 203400 value {108395 6 750764901} structAllocs 736921 allocs 823486 allocatedBytes 39015208 peakLiveBytes 26539264 gcCycles 4 gcUs 24167 maxPauseUs 16319 best 0.159 peakKb 48848}
+row 375 8 tables-native {build 1.156 buildPeakKb 203472 value {108395 6 750764901} structAllocs 108395 allocs 108403 allocatedBytes 8680944 peakLiveBytes 9205144 gcCycles 3 gcUs 5571 maxPauseUs 3548 best 0.053 peakKb 16488}
+row 750 8 dict {value {219712 6 386176084} best 2.337 peakKb 242472}
+row 750 8 list {value {219712 6 386176084} best 1.365 peakKb 36176}
+row 750 8 tables {value {219712 6 386176084} best 1.176 peakKb 36180}
+row 750 8 structs {build 1.073 buildPeakKb 203108 value {219712 6 386176084} structAllocs 1537978 allocs 1537986 allocatedBytes 80872072 peakLiveBytes 59077424 gcCycles 5 gcUs 50761 maxPauseUs 33748 best 0.333 peakKb 102568}
+row 750 8 enums {build 1.019 buildPeakKb 203072 value {219712 6 386176084} structAllocs 1494345 allocs 1670432 allocatedBytes 79122000 peakLiveBytes 53827768 gcCycles 5 gcUs 60048 maxPauseUs 35411 best 0.311 peakKb 96100}
+row 750 8 tables-native {build 1.065 buildPeakKb 203536 value {219712 6 386176084} structAllocs 219712 allocs 219720 allocatedBytes 17595304 peakLiveBytes 18643840 gcCycles 3 gcUs 5696 maxPauseUs 3819 best 0.108 peakKb 30360}
+row 1500 8 dict {value {455468 6 275164515} best 4.952 peakKb 492076}
+row 1500 8 list {value {455468 6 275164515} best 2.696 peakKb 68560}
+row 1500 8 tables {value {455468 6 275164515} best 2.474 peakKb 68560}
+row 1500 8 structs {build 1.376 buildPeakKb 202904 value {455468 6 275164515} structAllocs 3188270 allocs 3188278 allocatedBytes 167648280 peakLiveBytes 122004336 gcCycles 6 gcUs 157938 maxPauseUs 75656 best 0.774 peakKb 209076}
+row 1500 8 enums {build 1.324 buildPeakKb 203528 value {455468 6 275164515} structAllocs 3097728 allocs 3462662 allocatedBytes 164014304 peakLiveBytes 111102392 gcCycles 6 gcUs 182910 maxPauseUs 83867 best 0.746 peakKb 195528}
+row 1500 8 tables-native {build 1.332 buildPeakKb 203552 value {455468 6 275164515} structAllocs 455468 allocs 455476 allocatedBytes 36473784 peakLiveBytes 40668048 gcCycles 4 gcUs 16652 maxPauseUs 10958 best 0.287 peakKb 59956}
+row 3000 8 dict {value {897687 6 351753979} best 9.618 peakKb 973032}
+row 3000 8 list {value {897687 6 351753979} best 5.389 peakKb 129612}
+row 3000 8 tables {value {897687 6 351753979} best 5.118 peakKb 129616}
+row 3000 8 structs {build 1.170 buildPeakKb 202940 value {897687 6 351753979} structAllocs 6283803 allocs 6283811 allocatedBytes 330420872 peakLiveBytes 240827664 gcCycles 6 gcUs 218331 maxPauseUs 158678 best 1.439 peakKb 409748}
+row 3000 8 enums {build 1.227 buildPeakKb 203156 value {897687 6 351753979} structAllocs 6105855 allocs 6825602 allocatedBytes 323288472 peakLiveBytes 219430576 gcCycles 6 gcUs 201948 maxPauseUs 128060 best 1.381 peakKb 382932}
+row 3000 8 tables-native {build 1.234 buildPeakKb 202888 value {897687 6 351753979} structAllocs 897687 allocs 897695 allocatedBytes 71887304 peakLiveBytes 76081568 gcCycles 4 gcUs 18802 maxPauseUs 12568 best 0.589 peakKb 115356}
+row 1500 6 dict {value {130074 7 382331453} best 1.433 peakKb 144724}
+row 1500 6 list {value {130074 7 382331453} best 1.050 peakKb 23888}
+row 1500 6 tables {value {130074 7 382331453} best 0.811 peakKb 23888}
+row 1500 6 structs {build 1.246 buildPeakKb 203024 value {130074 7 382331453} structAllocs 1040585 allocs 1040593 allocatedBytes 54146792 peakLiveBytes 34472576 gcCycles 5 gcUs 37222 maxPauseUs 17132 best 0.179 peakKb 61432}
+row 1500 6 enums {build 1.186 buildPeakKb 203504 value {130074 7 382331453} structAllocs 1014613 allocs 1118723 allocatedBytes 53096912 peakLiveBytes 31323080 gcCycles 5 gcUs 49109 maxPauseUs 20628 best 0.174 peakKb 57604}
+row 1500 6 tables-native {build 1.211 buildPeakKb 203224 value {130074 7 382331453} structAllocs 130074 allocs 130082 allocatedBytes 10442264 peakLiveBytes 11490800 gcCycles 3 gcUs 5446 maxPauseUs 3927 best 0.064 peakKb 20312}
+row 1500 7 dict {value {233338 7 334870372} best 3.106 peakKb 257068}
+row 1500 7 list {value {233338 7 334870372} best 1.742 peakKb 38096}
+row 1500 7 tables {value {233338 7 334870372} best 1.622 peakKb 38096}
+row 1500 7 structs {build 1.281 buildPeakKb 203472 value {233338 7 334870372} structAllocs 1866697 allocs 1866705 allocatedBytes 97104616 peakLiveBytes 62401520 gcCycles 5 gcUs 63949 maxPauseUs 38243 best 0.437 peakKb 108392}
+row 1500 7 enums {build 1.283 buildPeakKb 203248 value {233338 7 334870372} structAllocs 1820269 allocs 2007187 allocatedBytes 95236824 peakLiveBytes 56798272 gcCycles 5 gcUs 71477 maxPauseUs 42382 best 0.445 peakKb 101320}
+row 1500 7 tables-native {build 1.248 buildPeakKb 203340 value {233338 7 334870372} structAllocs 233338 allocs 233346 allocatedBytes 18703384 peakLiveBytes 19751920 gcCycles 3 gcUs 7063 maxPauseUs 4507 best 0.168 peakKb 32148}
+row 1500 9 dict {value {792717 6 25377470} best 8.694 peakKb 861936}
+row 1500 9 list {value {792717 6 25377470} best 5.001 peakKb 115152}
+row 1500 9 tables {value {792717 6 25377470} best 4.553 peakKb 115152}
+row 1500 9 structs {build 1.166 buildPeakKb 202944 value {792717 6 25377470} structAllocs 5549013 allocs 5549021 allocatedBytes 291755912 peakLiveBytes 215527008 gcCycles 6 gcUs 192830 maxPauseUs 125970 best 1.385 peakKb 365432}
+row 1500 9 enums {build 1.222 buildPeakKb 203536 value {792717 6 25377470} structAllocs 5392167 allocs 6028046 allocatedBytes 285481808 peakLiveBytes 196704696 gcCycles 6 gcUs 219493 maxPauseUs 131839 best 1.256 peakKb 341932}
+row 1500 9 tables-native {build 1.161 buildPeakKb 203184 value {792717 6 25377470} structAllocs 792717 allocs 792725 allocatedBytes 63453704 peakLiveBytes 67647968 gcCycles 4 gcUs 16871 maxPauseUs 11774 best 0.541 peakKb 101972}

@@ -1,0 +1,3 @@
+form merged value {450962 770438569} seconds 0.426 peakKb 134664 allocs 2456134 structs 1419990 blocks 7 lists 67106 gcCycles 6
+form passed value {450962 770438569} seconds 0.347 peakKb 98536 allocs 1490106 structs 901924 blocks 67111 lists 67106 gcCycles 6
+form flat value {450962 770438569} seconds 0.244 peakKb 92220 allocs 1420002 structs 901924 blocks 7 lists 67106 gcCycles 5
