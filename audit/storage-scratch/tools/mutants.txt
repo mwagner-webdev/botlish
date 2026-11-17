@@ -4,7 +4,8 @@
 # realization in native lowering (native/lower.tcl's "Scratch storage"), the
 # storage provider (native/src/runtime/scratch.rs), the collector's
 # treatment of scratch storage (heap.rs), the code generator's request and
-# destination (codegen/clif.rs), the NIR protocol (nir.rs), and the three
+# destination (codegen/clif.rs) and the root plan's view of a mark
+# (codegen/roots.rs), the NIR protocol (nir.rs), and the three
 # lifetime facts the integration fixed (hir/lifetime.tcl). Each must be
 # killed by a detector its `!!` line names: a test of
 # tests/scratch-storage.test (ss-...) or tests/storage-lifetime.test
@@ -69,14 +70,15 @@
         }
 >>>>
 
-@@ plan-recursive-destination a recursive unit takes a destination: every activation's leftovers would stay in the outermost region
+@@ plan-recursive-region a recursive unit gets regions (and may take a destination): every activation's frame holds a mark, which the recursion multiplies by its depth, and its leftovers would stay in the outermost region
 !! ss-plan-recursive
 ## hir/storageplan.tcl
 <<<<
-        if {[dict exists $blocked $id] || [dict get [hir::lifetime::unit $facts $id] block] eq "program"
-                || [dict exists $recursive $id]} {
+        } elseif {[dict exists $recursive $id]} {
+            dict set blocked $id "it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth"
+        }
 ====
-        if {[dict exists $blocked $id] || [dict get [hir::lifetime::unit $facts $id] block] eq "program"} {
+        }
 >>>>
 
 # ---------------------------------------------------------------------------
@@ -131,6 +133,17 @@
         set value one
 >>>>
 
+@@ lower-request-constant-at-entry the constant 1 a request passes is defined once per request at the function's entry, not right before the request: each is live across every call of the frame, a root slot of every activation
+!! ss-nir-frame-roots
+## native/lower.tcl
+<<<<
+                    set operand [NewReg fn]
+                    lappend out "    $operand = int 1"
+====
+                    set operand [NewReg fn]
+                    set out [linsert $out [llength $prologue] "    $operand = int 1"]
+>>>>
+
 # ---------------------------------------------------------------------------
 # The storage provider, the collector, the code generator, the protocol
 
@@ -152,6 +165,15 @@
         self.pos = at + size;
 ====
         self.pos = at;
+>>>>
+
+@@ roots-mark-rooted a region's mark and a destination flag are GC roots: live across every call of their region, each costs every activation of a framed function a root slot (a recursion the 8 MiB control held 100,000 deep no longer fit)
+!! ss-nir-frame-roots
+## native/src/codegen/roots.rs
+<<<<
+            Inst::ContextLoad { .. } | Inst::Op { op: OpCode::ScratchMark | OpCode::ScratchTake, .. }
+====
+            Inst::ContextLoad { .. }
 >>>>
 
 @@ rt-exit-ignores-dest a framed function's exit resets its region whether or not its caller gave it a destination: the String it returns into its caller's region is released as it returns

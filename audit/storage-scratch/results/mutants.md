@@ -1,6 +1,6 @@
 # Mutants of compiler-managed scratch storage
 
-The record run of `tools/mutate.tcl` (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md, section 19):
+The record run of `tools/mutate.tcl` (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md, section 19), then the reruns of the frame-cost fix (section 24): `plan-recursive-destination` became `plan-recursive-region` (a recursive unit gets no region, so the old mutant changed nothing), and `lower-request-constant-at-entry` and `roots-mark-rooted` are new. The mutants whose code or detectors the fix touched ran again.
 
 ```
 # tclsh9.0 audit/storage-scratch/tools/mutate.tcl
@@ -30,3 +30,21 @@ KILLED lifetime-reasons-grow -- by sl-recursive-reasons-converge
 22 mutants, 0 not killed
 exit 0
 ```
+
+```
+# tclsh9.0 audit/storage-scratch/tools/mutate.tcl -only plan-recursive-region,plan-suspending-unit,rt-exit-ignores-dest
+BASELINE: every detector passes on the unmutated copy
+KILLED plan-suspending-unit -- by ss-plan-p07b-suspension
+KILLED plan-recursive-region -- by ss-plan-recursive
+KILLED rt-exit-ignores-dest -- by ss-run-census, ss-run-nested, fuzz (child process exited abnormally)
+3 mutants, 0 not killed
+exit 0
+# tclsh9.0 audit/storage-scratch/tools/mutate.tcl -only lower-request-constant-at-entry,roots-mark-rooted
+BASELINE: every detector passes on the unmutated copy
+KILLED lower-request-constant-at-entry -- by ss-nir-frame-roots
+KILLED roots-mark-rooted -- by ss-nir-frame-roots
+2 mutants, 0 not killed
+exit 0
+```
+
+24 mutants in the catalog, each killed by its last run.

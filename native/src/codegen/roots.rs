@@ -57,7 +57,7 @@
 //! storing, unconditionally at every definition of a slotted register,
 //! exactly the simplest sound model the brief asks for).
 
-use crate::nir::{Function, Inst, Label, Program, Reg};
+use crate::nir::{Function, Inst, Label, OpCode, Program, Reg};
 use crate::runtime::ops::op_may_allocate;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write as _;
@@ -522,10 +522,18 @@ fn analyze(f: &Function, cfg: &Cfg) -> Liveness {
     // A register defined only by `contextload` (CONTEXTS.md) holds a context
     // leaf: a tagged immediate (small Int, Bool, Unit, UnicodeChar) that is
     // never a heap pointer, so -- like a raw register -- it is never a root.
+    // So does one defined only by `scratchmark` or `scratchtake`
+    // (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md): a scratch position
+    // or a destination flag, a small Int. A frame's mark is live across
+    // every call of its body; rooted, it cost each activation a root slot
+    // (a recursion 8 MiB held 100,000 deep no longer fit: section 24).
     let mut context_only = vec![false; regs];
     let mut other_def = vec![false; regs];
     for inst in &f.body {
-        let is_context = matches!(inst, Inst::ContextLoad { .. });
+        let is_context = matches!(
+            inst,
+            Inst::ContextLoad { .. } | Inst::Op { op: OpCode::ScratchMark | OpCode::ScratchTake, .. }
+        );
         for d in def_use(inst, f.params).0 {
             if is_context {
                 context_only[d as usize] = true;
@@ -1088,6 +1096,24 @@ mod tests {
         assert!(plan.slot_of[0].is_some());
         assert!(plan.slot_of[1].is_none(), "the fresh list itself is dead before any later safepoint");
         assert_eq!(plan.num_slots, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // A scratch region's mark (and a destination flag) is a small Int live
+    // across every call of its region: never a root, or every activation of
+    // a framed function pays a root slot for it
+    // (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md, section 24).
+
+    #[test]
+    fn scratch_mark_and_take_are_not_roots() {
+        let f = parse_with_one_arg(
+            "    %0 = int 1\n",
+            "func 1 \"f\" params=1 env=0 regs=6 pnames=\"i\" captures=0\n    %1 = op scratchtake\n    %2 = op scratchmark\n    %3 = op listnew\n    %4 = op scratchexit %2 %1\n    %5 = op scratchreset %2\n    ret %3\nend\n",
+        );
+        let plan = plan(&f, true);
+        assert_eq!(plan.safepoints, 1, "the list allocation");
+        assert_eq!(plan.root_candidates, 0, "the mark and the flag live across it, unrooted");
+        assert!(plan.slot_of.iter().all(Option::is_none));
     }
 
     // -----------------------------------------------------------------------

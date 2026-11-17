@@ -426,7 +426,7 @@ f(5)
     set result
 } -result {base {{selected confined iteration}} same returned {{rejected escapes {}}} same collection {{rejected escapes {}}} same closure {{rejected unknown {}}} same retained {{rejected escapes {}}} same yield {{rejected confined {}}} same coexist {{selected confined iteration} {selected confined iteration}} same unresolved {{rejected unknown {}}} same context {{rejected escapes {}}} same}
 
-test ss-plan-recursive {a recursive function takes no destination (its leftovers would pile up in the outermost region); its activation-confined temporaries still get its own region, released at each activation's exit} -body {
+test ss-plan-recursive {a recursive function gets no region and takes no destination: a region's mark is held for its whole activation, a word of every activation's frame, which the recursion multiplies by its depth; its temporaries stay on the heap} -body {
     set hir [ssHir {import std::int
 import std::str
 
@@ -440,8 +440,9 @@ fn build(n: int) -> str:
 std::str::length(build(5))
 }]
     set u [ssUnit [ssPlan $hir] build*]
-    list [dict get $u recursive] [dict get $u capable] [dict get $u activation]
-} -result {1 0 1}
+    list [dict get $u recursive] [dict get $u capable] [dict get $u activation] [dict get $u frame] \
+        [string match "it is recursive*" [dict get $u blocked]]
+} -result {1 0 0 0 1}
 
 test ss-plan-self-tail {a unit that makes a self tail call gets no frame: its frame is reused by the jump} -body {
     set hir [ssHir {import std::int
@@ -489,6 +490,25 @@ test ss-nir-frame {p01's label: take nothing (no destination), mark, request eac
     set off [native::nir $hir -scratch-opt 0]
     list $ops [regexp {scratch} $off]
 } -result {{scratchmark scratchreq scratchreq scratchreq scratchreq scratchreset scratchreset} 0}
+
+test ss-nir-frame-roots {a framed function's region costs it no root slot: its mark (and a taker's destination flag) is never a GC root, and the constant a request passes is defined right before it, so p01's label and p13's raw need exactly the root slots they need without scratch storage} -constraints ssNative -body {
+    set result {}
+    foreach {case name} {p01 label p13 raw} {
+        set hir [ssHir [list -case $case]]
+        set counts {}
+        foreach opt {0 1} {
+            set report [native::roots $hir -scratch-opt $opt]
+            if {![regexp "function \\d+ \"$name\"\n((?:  \[^\n\]*\n)*)" $report -> block]
+                    || ![regexp {max live roots: (\d+)} $block -> live]
+                    || ![regexp {shadow slots: (\d+)} $block -> slots]} {
+                error "no root report of $name"
+            }
+            lappend counts [list $live $slots]
+        }
+        lappend result $case [expr {[lindex $counts 0] eq [lindex $counts 1]}]
+    }
+    set result
+} -result {p01 1 p13 1}
 
 test ss-nir-dest {p13: handle passes a destination to each of raw, parse and respond, whose first instruction takes it} -constraints ssNative -body {
     set nir [native::nir [ssHir {-case p13}]]
@@ -728,7 +748,7 @@ fold k from 0 to 40 with intermediate total 0:
         [dict get $report total allocations] [ssClean $report]
 } -result {same 1 1 0 {stale 0 protocol 0}}
 
-test ss-run-nested {an outer String lives across calls of functions with their own regions, a destination chain and a recursion: each callee releases only its own storage, the outer String is intact, poisoned and under GC stress} -constraints ssNative -body {
+test ss-run-nested {an outer String lives across calls of functions with their own regions, a destination chain, a recursion (which gets no region: its Strings are the heap's) and a recursion through a function value (unseen by the direct call graph: its regions nest level by level): each callee releases only its own storage, the outer String is intact, poisoned and under GC stress} -constraints ssNative -body {
     set hir [surface::compile {import std::int
 import std::str
 
@@ -749,13 +769,29 @@ fn depth(n: int) -> int:
     else:
         depth(n - 1) + std::str::length(d)
 
+struct Box:
+    f: Fn{args: [int], return: int}
+
+fn via(f: Fn{args: [int], return: int}, n: int) -> int:
+    v = std::int::to_string(n).concat("v")
+    f(n) + std::str::length(v)
+
+fn hidden(n: int) -> int:
+    h = std::int::to_string(n * 7).concat("h")
+    if n == 0:
+        std::str::length(h)
+    else:
+        b = Box{f: hidden}
+        via(b.f, n - 1) + std::str::length(h)
+
 fn outer(i: int) -> int:
     kept = std::int::to_string(i).concat("-kept-")
     a = inner(i)
     p = pieces(i)
     b = depth(i.mod(6))
+    c = hidden(i.mod(5))
     q = std::str::length(p)
-    a + b + q + std::str::length(kept.concat(p))
+    a + b + c + q + std::str::length(kept.concat(p))
 
 fold i from 0 to 300 with intermediate acc 0:
     acc + outer(i)
@@ -767,8 +803,9 @@ fold i from 0 to 300 with intermediate acc 0:
     set report [ssAlloc $hir]
     list [lindex $agree 0] [expr {$poisoned eq [lindex $agree 1]}] [expr {$stressed eq [lindex $agree 1]}] \
         [dict get [ssUnit $plan piece*] capable] [dict get [ssUnit $plan pieces*] capable] [dict get [ssUnit $plan depth*] recursive] \
+        [dict get [ssUnit $plan depth*] frame] [dict get [ssUnit $plan hidden*] frame] [dict get [ssUnit $plan via*] frame] \
         [dict get $report byKind String allocations] [ssClean $report]
-} -result {same 1 1 1 1 1 0 {stale 0 protocol 0}}
+} -result {same 1 1 1 1 1 0 1 1 2100 {stale 0 protocol 0}}
 
 test ss-run-request-cleared {a request whose helper allocates nothing (an empty substring, the canonical empty String) is cleared right after its helper: the next String, which outlives every region, stays on the heap} -constraints ssNative -body {
     set hir [surface::compile {import std::int

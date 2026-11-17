@@ -596,10 +596,9 @@ proc native::lower::HoistDeferredUses {fnVar exprs e} {
 @@ write-back-copy-not-a-root the root plan never counts a write exposure's private copy as a managed register (like a context leaf): a write-back value's opened storage field is no GC root at a later safepoint
 ## native/src/codegen/roots.rs
 <<<<
-        let is_context = matches!(inst, Inst::ContextLoad { .. });
+            Inst::ContextLoad { .. } | Inst::Op { op: OpCode::ScratchMark | OpCode::ScratchTake, .. }
 ====
-        let is_context = matches!(inst, Inst::ContextLoad { .. })
-            || matches!(inst, Inst::Op { op: crate::nir::OpCode::MBytesClone, .. });
+            Inst::ContextLoad { .. } | Inst::Op { op: OpCode::ScratchMark | OpCode::ScratchTake | OpCode::MBytesClone, .. }
 >>>>
 
 # --- representation invariance (C-FFI-ERROR-CAPTURE-MILESTONE-2.md) ----------

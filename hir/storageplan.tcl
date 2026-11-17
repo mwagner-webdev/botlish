@@ -28,8 +28,14 @@
 #     keeps its ordinary allocation.
 #   * Does the policy choose it? The policy of this first plan: every safe,
 #     representable site is selected; units the backend cannot frame
-#     (-excluded, with its reason: a self tail call reuses its frame) and
-#     units that may suspend get no region at all.
+#     (-excluded, with its reason: a self tail call reuses its frame),
+#     units that may suspend and units in a recursive component of the
+#     direct call graph get no region at all. A region's mark is held for
+#     the whole activation (a callee-saved register or a spill slot), so
+#     every activation of a recursion would pay it: the stack a recursion
+#     needs grows with it (a recursion an 8 MiB stack held 100,000 deep
+#     held 87,000 with its frame). A recursion through a function value is
+#     not seen (no direct call), and keeps its regions.
 #
 # Destinations (cross-function placement). A unit's producer that escapes
 # its activation only through the unit's result (every reason `result`), at
@@ -40,8 +46,9 @@
 # escapes the caller only through the caller's own result, a unit that
 # itself received a destination passes its own on (`dest`). A unit takes a
 # destination (is `capable`) only when it never suspends, is not excluded,
-# is not the program, is in no recursive component of the call graph (a
-# recursion's leftovers would pile up in the outermost region) and some
+# is not the program, is in no recursive component of the call graph (it
+# has no region at all; a recursion's leftovers would also pile up in the
+# outermost region) and some
 # caller passes it one. Only a direct call can pass one (the backend checks
 # that its callee takes it); a call through a value never does, so a unit
 # entered any other way always allocates on the heap what it returns.
@@ -65,6 +72,7 @@ proc hir::storageplan::plan {hir facts spec args} {
     set natives [dict get $options -natives]
     set excluded [dict get $options -excluded]
     set units [hir::lifetime::units $facts]
+    set recursive [Recursive $spec $units]
     # Per unit: what keeps it from having regions at all.
     set blocked [dict create]
     foreach id $units {
@@ -73,9 +81,10 @@ proc hir::storageplan::plan {hir facts spec args} {
             dict set blocked $id [dict get $excluded $id]
         } elseif {[llength [dict get $u suspensions]]} {
             dict set blocked $id "it may suspend: a region is never live across a suspension"
+        } elseif {[dict exists $recursive $id]} {
+            dict set blocked $id "it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth"
         }
     }
-    set recursive [Recursive $spec $units]
     # Per site: the semantic and representability facts.
     set sites [dict create]
     foreach id $units {
@@ -88,8 +97,8 @@ proc hir::storageplan::plan {hir facts spec args} {
     # site it can place (a String producer, or a call of a candidate).
     set candidate [dict create]
     foreach id [CalleesFirst $spec $units] {
-        if {[dict exists $blocked $id] || [dict get [hir::lifetime::unit $facts $id] block] eq "program"
-                || [dict exists $recursive $id]} {
+        # (A recursive unit is blocked: it never takes one.)
+        if {[dict exists $blocked $id] || [dict get [hir::lifetime::unit $facts $id] block] eq "program"} {
             continue
         }
         dict for {site s} [dict getdef $sites $id {}] {

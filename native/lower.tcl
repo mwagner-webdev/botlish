@@ -3655,8 +3655,11 @@ proc native::lower::ScratchFrameFinish {fnVar id} {
         }]
         return
     }
-    # The frame's registers and exit label.
-    set regs [dict create one [NewReg fn] dest ""]
+    # The frame's registers and exit label. The constant 1 a request
+    # passes is defined right before it, never once at entry: a register
+    # held from entry is live across every call of the body, and so is a
+    # root slot of each activation (section 24).
+    set regs [dict create dest ""]
     if {[dict get $u capable]} {
         dict set regs dest [NewReg fn]
     }
@@ -3667,14 +3670,20 @@ proc native::lower::ScratchFrameFinish {fnVar id} {
     if {[dict get $regs dest] ne ""} {
         lappend prologue "    [dict get $regs dest] = op scratchtake"
     }
-    lappend prologue "    $mark = op scratchmark" "    [dict get $regs one] = int 1" "    pusherrorexit $label"
+    lappend prologue "    $mark = op scratchmark" "    pusherrorexit $label"
     set out $prologue
     set index 0
     foreach line $lines {
         if {[dict exists $before $index]} {
             foreach pair [dict get $before $index] {
                 lassign $pair op value
-                lappend out "    [NewReg fn] = op $op [dict get $regs $value]"
+                if {$value eq "one"} {
+                    set operand [NewReg fn]
+                    lappend out "    $operand = int 1"
+                } else {
+                    set operand [dict get $regs $value]
+                }
+                lappend out "    [NewReg fn] = op $op $operand"
             }
         }
         if {[regexp {^\s+ret\M} $line]} {

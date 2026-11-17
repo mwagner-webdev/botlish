@@ -12329,6 +12329,7 @@ tests/scratch-storage.test ss-plan-self-tail pass
 tests/scratch-storage.test ss-plan-deterministic pass
 tests/scratch-storage.test ss-plan-report pass
 tests/scratch-storage.test ss-nir-frame pass
+tests/scratch-storage.test ss-nir-frame-roots pass
 tests/scratch-storage.test ss-nir-dest pass
 tests/scratch-storage.test ss-nir-loop pass
 tests/scratch-storage.test ss-nir-validator pass

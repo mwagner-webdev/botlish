@@ -75,7 +75,7 @@ Acceptance criteria (brief section 25):
 | 14 | backing reservations measured apart from suballocations | met | sections 17, 23 |
 | 15 | value, error, ownership and context semantics unchanged | met: no front-end decision changes; outcomes equal | sections 14, 18, 19 |
 | 16 | interp, Tcl compiler, unoptimized and optimized native agree | met | sections 18, 19 |
-| 17 | independent tests and mutants detect unsafe reuse | met: 22 mutants killed, 240 fuzzed programs | section 19 |
+| 17 | independent tests and mutants detect unsafe reuse | met: 24 mutants killed, 240 fuzzed programs | section 19 |
 | 18 | compatible with strict bounded storage and execution owners | met by design: policy and placement are the provider's, regions are the plan's | sections 10, 26 |
 | 19 | no backend or language behavior weakened | met | sections 14, 24 |
 | 20 | regression and CI checks pass | «CI» | section 24 |
@@ -163,9 +163,9 @@ producer the three separate questions:
   call through a function value, a native the backend does not place) is
   representable "no", with the reason;
 * *policy* -- this milestone's policy selects every eligible,
-  representable site; it blocks units that may suspend and units the
-  backend excludes (a self tail call reuses its frame), and gives a
-  recursive unit no destination.
+  representable site; it blocks units that may suspend, units the backend
+  excludes (a self tail call reuses its frame) and recursive units (a
+  region's mark is a word of every activation's frame: section 15).
 
 `hir::storageplan::report` prints all three per site
 (section 15; `audit/storage-scratch/tools/plan.tcl` over the census).
@@ -270,11 +270,22 @@ iteration of an inner loop with its own region stays intact, poisoned and
 under GC stress; the mutant that resets an inner loop to its enclosing
 loop's mark gives a wrong value (section 19).
 
-**[inspection]** Recursion: a recursive unit's activation-confined
-temporaries are placed in its own frame, released at each activation's exit
-(`ss-plan-recursive`, `ss-run-nested`'s recursion); a recursive unit never
-takes a destination, since a recursion's leftovers would pile up in the
-outermost caller's region.
+**[inspection]** Recursion: a unit in a recursive component of the direct
+call graph (calls of exact function values included: the specialization
+analysis resolves them) gets no region and takes no destination; its
+temporaries keep their heap allocation (`ss-plan-recursive`). This is a
+policy of cost, not of soundness: a region's mark is held for the whole
+activation, so every activation of a recursion pays a callee-saved register,
+16 bytes of its frame once the frame is aligned, and the stack a recursion
+needs grows with it (**[measurement]** section 24: a recursion an 8 MiB
+stack held about 104,600 deep held about 87,100 with its frame). A
+recursion's leftovers would also pile up in the outermost caller's region,
+which is why it never took a destination. Regions still nest across a
+recursion the call graph does not see -- a call through a function value
+held in a struct field: `ss-run-nested`'s `hidden` and `via` frame each
+level, each releasing only its own storage, poisoned and under GC stress --
+and a non-recursive callee of a recursion opens and closes its region in
+each activation.
 
 **[inspection]** Coroutines: a unit that may suspend gets no region, so no
 region is open on a coroutine's stack when it yields; a non-suspending unit
@@ -577,29 +588,32 @@ it may suspend: a region is never live across a suspension`).
 requests, the reset before the `ret` and on the error exit:
 
 ```
-func 1 "label" params=1 env=0 regs=23 pnames="i" captures=0 instance="int" rawregs="5 7 8" @e81
-    %16 = op scratchmark
-    %15 = int 1
+func 1 "label" params=1 env=0 regs=26 pnames="i" captures=0 instance="int" rawregs="5 7 8" @e81
+    %15 = op scratchmark
     pusherrorexit L0
-    %17 = op scratchreq %15
+    %16 = int 1
+    %17 = op scratchreq %16
     %1 = op inttostr %0 @e85
     %2 = str "-a" @e88
-    %18 = op scratchreq %15
+    %18 = int 1
+    %19 = op scratchreq %18
     %3 = op strcat %1 %2 @e92
     %4 = op strlen %3 @e90
     ...
-    %19 = op scratchreq %15
+    %20 = int 1
+    %21 = op scratchreq %20
     %10 = op inttostr %9 @e96
     %11 = str "-b" @e102
-    %20 = op scratchreq %15
+    %22 = int 1
+    %23 = op scratchreq %22
     %12 = op strcat %10 %11 @e108
     %13 = op strlen %12 @e106
     %14 = op iadd %4 %13 @e103
-    %21 = op scratchreset %16
+    %24 = op scratchreset %15
     ret %14
   label L0
     poperrorexit
-    %22 = op scratchreset %16
+    %25 = op scratchreset %15
     reraise
 end
 ```
@@ -613,8 +627,7 @@ at the exit; the frame's error exit releases the loop's region when an
 error leaves the loop:
 
 ```
-    %24 = op scratchmark
-    %23 = int 1
+    %23 = op scratchmark
     pusherrorexit L5
     ...
     %8 = op scratchmark @e82
@@ -625,17 +638,18 @@ error leaves the loop:
     br %10 L1 L3 @e82
   label L1
     ...
-    %25 = op scratchreq %23
+    %24 = int 1
+    %25 = op scratchreq %24
     %17 = op inttostr %16 @e94
     %18 = op strlen %17 @e105
     ...
   label L4
     %22 = op scratchreset %8 @e82
-    %26 = op scratchreset %24
+    %26 = op scratchreset %23
     ret %4
   label L5
     poperrorexit
-    %27 = op scratchreset %24
+    %27 = op scratchreset %23
     reraise
 ```
 
@@ -644,43 +658,49 @@ exits with `scratchexit`; the early `return 0` of the BadRequest handler
 resets too:
 
 ```
-func 1 "raw" params=1 env=0 regs=12 pnames="i" captures=0 instance="int" @e81
-    %6 = op scratchtake
-    %7 = op scratchmark
-    %5 = int 1
+func 1 "raw" params=1 env=0 regs=11 pnames="i" captures=0 instance="int" @e81
+    %5 = op scratchtake
+    %6 = op scratchmark
     pusherrorexit L0
     %1 = str "GET /items/" @e86
-    %8 = op scratchreq %6
+    %7 = op scratchreq %5
     %2 = op inttostr %0 @e87
     %3 = str " HTTP/1.1" @e90
-    %9 = op scratchreq %6
+    %8 = op scratchreq %5
     %4 = construct str flat %1 %2 %3 @e82
-    %10 = op scratchexit %7 %6
+    %9 = op scratchexit %6 %5
     ret %4
   ...
-func 4 "handle" params=1 env=0 regs=17 pnames="i" captures=0 instance="int" rawregs="6" @e166
-    %10 = op scratchmark
-    %9 = int 1
+func 4 "handle" params=1 env=0 regs=19 pnames="i" captures=0 instance="int" rawregs="6" @e166
+    %9 = op scratchmark
     pusherrorexit L4
     pusherrorexit L0 @e168
-    %11 = op scratchdest %9
+    %10 = int 1
+    %11 = op scratchdest %10
     %2 = call 1 %0 @e171
-    %12 = op scratchdest %9
+    %12 = int 1
+    %13 = op scratchdest %12
     %3 = call 2 %2 %0 @e169
     ...
   label L2
     cleardeclarederror @e168
     %5 = int 0 @e176
     %6 = rawint 0
-    %13 = op scratchreset %10
+    %14 = op scratchreset %9
     ret %5 @e175
   ...
   label L1
-    %14 = op scratchdest %9
+    %15 = int 1
+    %16 = op scratchdest %15
     %7 = call 3 %1 @e179
     %8 = op strlen %7 @e177
-    %15 = op scratchreset %10
+    %17 = op scratchreset %9
     ret %8
+  label L4
+    poperrorexit
+    %18 = op scratchreset %9
+    reraise
+end
 ```
 
 **[inspection]** Machine code: `scratchreq` and `scratchdest` emit no
@@ -690,6 +710,16 @@ call, cleared after it), the destination a store before `Inst::Call` and one
 after. `scratchtake` is a load, a store of 0 and a tag. `scratchmark`,
 `scratchreset` and `scratchexit` are runtime calls (`rt_scratch_mark`,
 `rt_scratch_reset`, `rt_scratch_exit`).
+
+**[inspection]** Frame cost: a mark (and a destination flag) is live for its
+whole region, across every call in it; nothing else of the protocol is. The
+constant 1 a request passes is defined right before it, so it is dead before
+the next safepoint, and the root plan counts no register defined only by
+`scratchmark` or `scratchtake` as a root (`codegen::roots`: like a context
+leaf, a small Int that is never a heap pointer). So a framed function's
+activation pays one callee-saved register (or spill slot) for its mark, and
+no root slot. An earlier version defined the constant once at entry and
+rooted the mark: two root slots per activation, found by CI (section 24).
 
 ## 17. Positive-workload results
 
@@ -853,8 +883,9 @@ is now in every generated program.
 names -- a test of behavior, a GC-stress or poisoned run, an instrumented
 count, the fuzzer or a Rust test, never a comparison of generated text.
 **[test]** `tclsh9.0 audit/storage-scratch/tools/mutate.tcl` (`results/mutants.md`):
-the unmutated copy passes every detector, and all 22 mutants apply, build
-and are killed by a detector their line names:
+the unmutated copy passes every detector, and all 24 mutants apply, build
+and are killed by a detector their line names (the record run of 22, and
+the reruns of the mutants section 24's fix touched or added):
 
 | mutant | the broken rule | killed by |
 |---|---|---|
@@ -862,12 +893,13 @@ and are killed by a detector their line names:
 | plan-result-any-reason | any escape taken as an escape through the result | ss-run-context-escape |
 | plan-outermost-region | a site placed in its outermost loop's region | ss-run-nested-loops-steady |
 | plan-suspending-unit | a unit that may suspend gets regions | ss-plan-p07b-suspension |
-| plan-recursive-destination | a recursive unit takes a destination | ss-plan-recursive |
+| plan-recursive-region | a recursive unit gets regions (and may take a destination) | ss-plan-recursive |
 | lower-no-exit-reset | a frame's `ret` keeps its region | ss-nir-frame, ss-run-steady-state |
 | lower-no-error-exit-reset | a frame's error exit keeps its region | ss-run-error-steady |
 | lower-no-head-reset | a loop's head does not reset its region | ss-nir-loop, ss-run-steady-state, ss-run-nested-loops-steady |
 | lower-inner-reset-outer-mark | an inner loop resets to its enclosing loop's mark | ss-run-inner-region |
 | lower-dest-as-one | a result-only site always placed, destination or not | ss-run-dest-stale |
+| lower-request-constant-at-entry | a request's constant defined at the function's entry, live across every call | ss-nir-frame-roots |
 | rt-reset-ignored | a reset moves the position nowhere | ss-run-steady-state, six Rust tests |
 | rt-bump-no-advance | an allocation does not advance the position | ss-run-census, ss-run-heap-reduction, six Rust tests |
 | rt-exit-ignores-dest | a frame's exit resets even with a destination | ss-run-census, ss-run-nested, the fuzzer |
@@ -876,6 +908,7 @@ and are killed by a detector their line names:
 | rt-collector-reads-scratch | the collector marks scratch objects as heap ones | two Rust tests |
 | clif-request-not-cleared | a request outlives its helper | ss-run-request-cleared |
 | clif-dest-not-cleared | a destination outlives its call | ss-run-dest-stale |
+| roots-mark-rooted | a region's mark and a destination flag are GC roots | ss-nir-frame-roots |
 | nir-protocol-unchecked | the NIR validator accepts any request or destination | ss-nir-validator, a Rust test |
 | lifetime-error-let-through | an error a call lets through carries nothing out | sl-error-let-through, the fuzzer |
 | lifetime-fresh-holds-nothing | a callee's fresh result holds nothing it was given | sl-fresh-holds-parameter, the fuzzer |
@@ -1185,7 +1218,64 @@ tests of section 5, and `tests/scratch-storage.test` is new (40 tests).
   under `BOTLISH_NATIVE_LINKER=stub`, which links no C. Fixed in `00646ca2`
   (p16 runs only where `cLinker` holds, the rule of every executable test);
   the run was superseded before its other jobs finished.
-* At `00646ca2`, the tip whose code this report describes: «CIRUNS»
+* At `00646ca2`: every finished job of all four workflows succeeded --
+  tests.yml's canary, golden shards, Rust unit tests, method-call decision,
+  stub-linked and system-linked executables (also under GC stress);
+  tests-arm64.yml's canary, golden shards, Rust unit tests (also under GC
+  stress) and system-linked executables; macos-arm64.yml's smoke, its Linux
+  control, the six acceptance shards, the system linker and the
+  application's jobs; windows-x86_64.yml's canary, smoke, root plans,
+  system linker and its first acceptance shards -- except one: **macOS's
+  main-thread startup job failed** (run 43974508542). Its graphical census
+  (`audit/macos-graphical-main-thread/tools/census.py --strict`) runs the
+  recursion shapes of `programs/depth.bot` on an 8 MiB main-thread stack as
+  a control, and predicts that `keep` -- a String held across the
+  recursive call -- finishes 100,000 deep; it ended in NATIVE LIMIT STACK.
+  The jobs still running (the Tcl suites and the native coverage on both
+  Linux hosts, arm64's GC stress, two Windows acceptance shards) were
+  superseded by the fix below.
+
+**The frame-cost finding.** **[measurement]** `keep` was framed: its
+String is confined to its activation, so its function marked a region at
+entry and reset it at every exit. Two registers of the protocol were live
+across its recursive call: the mark, and the constant 1 the request passes,
+which the lowering defined once at entry. Both were small Ints, but the
+root plan counted them as managed registers, so each took a root slot
+(`native::roots`: 6 slots where the function without scratch storage has
+4). On x86-64 the frame grew from 80 to 112 bytes, and an 8 MiB stack held
+`keep` about 74,600 deep instead of about 104,600 (`depth.bot keep N` with
+`BOTLISH_NATIVE_STACK_BYTES=8388608`, the largest N that completes, to
+within 500). Three changes fix it:
+
+* the constant is defined right before each request, so it is dead before
+  the next safepoint (native/lower.tcl's `ScratchFrameFinish`);
+* the root plan counts no register defined only by `scratchmark` or
+  `scratchtake` as a root (`codegen::roots`, beside the context leaves);
+  with these two, `keep` needs its 4 root slots again, but its mark still
+  takes a callee-saved register, saved in the prologue: 96 bytes with
+  alignment, about 87,100 deep;
+* so a unit in a recursive component of the direct call graph gets no
+  region (hir/storageplan.tcl; section 15): every activation of a
+  recursion would pay for its mark, which a recursion multiplies by its
+  depth. `keep` is then compiled exactly as without scratch storage
+  (`depth.bot`'s NIR is byte-identical with and without), and holds about
+  104,600 deep again.
+
+No census program has a placed site in a recursive unit: the plans of
+`results/plans/` are unchanged, and so are the heap and scratch counts of
+sections 17, 21 and 23. The times of section 22 were measured before the
+fix; it removes root slots and their spills from framed functions and
+changes nothing else they run. New detectors: `ss-nir-frame-roots` (p01's
+`label` and p13's `raw` need the root slots they need without scratch
+storage), the Rust test `scratch_mark_and_take_are_not_roots`, and the
+mutants `lower-request-constant-at-entry` and `roots-mark-rooted`; the
+mutant of recursive units now targets their region
+(`plan-recursive-region`), and `ss-run-nested` adds a recursion through a
+function value held in a struct field, which the direct call graph does
+not see, so its frames nest level by level. After the fix, on this
+container: «AFTERFIX»
+
+**CI of the fix.** **[test]** At «FIXCOMMIT»: «CIRUNS»
 
 ## 25. Known limitations
 
@@ -1207,9 +1297,13 @@ tests of section 5, and `tests/scratch-storage.test` is new (40 tests).
   live across a suspension would need storage owned by the coroutine, not
   the Vm's stack of regions: the execution-owner milestones' subject.
   **[design]**
-* **Recursive units take no destination; units with a self tail call get
-  no frame.** A recursion's result-only Strings stay on the heap; a
-  self-tail-calling loop's temporaries too (`ss-plan-self-tail`).
+* **Recursive units and units with a self tail call get no region.** A
+  recursion's temporaries stay on the heap (`ss-plan-recursive`); a
+  self-tail-calling loop's too (`ss-plan-self-tail`). A region's mark lives
+  in the frame for the whole activation; storing marks in the provider
+  instead (a stack of its own, pushed at a region's entry and popped at
+  its exits) would make a region cost no frame space, and lift this
+  restriction (section 26). **[design]**
 * **Companion, region, `fields` and internal variants have no frame.** A
   String such a variant builds stays on the heap, and a call through a
   function value reaches the generic instance, which takes no destination.
@@ -1251,8 +1345,10 @@ programs, Strings in companion and internal variants. In that light:
 
 1. **STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-2** first: inline the
    mark and reset (the position as Vm words at fixed offsets, as the
-   request and destination already are), frame companion and internal
-   variants, place confined structs whose fields are Ints or placed
+   request and destination already are), keep marks in the provider (a
+   stack of its own, pushed at a region's entry and popped at its exits,
+   so that a region costs no frame space and recursive units can have
+   regions again: section 25), frame companion and internal variants, place confined structs whose fields are Ints or placed
    Strings (the collector already
    skips scratch addresses; a placed struct with a heap reference needs a
    trace of scratch objects, or the restriction that every reference it

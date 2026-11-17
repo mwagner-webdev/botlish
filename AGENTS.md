@@ -2038,7 +2038,15 @@ Vm's heap) supplies and reuses bytes. Keep it so:
   `unknown` or `escapes` into a placement. A site is placed only in its
   innermost region (its innermost loop's iteration, else its activation)
   and only where it is `confined` to it, in a unit that never suspends; a
-  unit with a self tail call, or that may suspend, gets no region.
+  unit with a self tail call, that may suspend or that is recursive (a
+  component of the direct call graph) gets no region.
+* A region costs its activation the mark and nothing else: the constant a
+  request passes is defined right before it, and no register defined only
+  by `scratchmark` or `scratchtake` is a GC root (`codegen::roots`). Never
+  hold another protocol register across a region, or root a mark: each
+  is a word of every activation's frame, and the census's 8 MiB control
+  (macos-arm64.yml's main-thread-startup job) holds a recursion only to
+  the depth its frames allow.
 * Destinations: a site that escapes its unit only through the unit's
   result (every reason `result`) follows the unit's destination, which a
   direct `call` passes (`scratchdest`) where the call's fresh result is
