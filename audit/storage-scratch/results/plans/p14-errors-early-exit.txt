@@ -1,0 +1,36 @@
+# p14-errors-early-exit (audit/storage-static-reuse/cases/p14-errors-early-exit.bot)
+
+unit <program>
+  call of check (payload) at p14-errors-early-exit.bot:24:9: rejected -- its callee takes no destination: nothing it returns can be placed in its caller's region
+    semantic: confined to iteration of the fold at p14-errors-early-exit.bot:23:1
+unit check<int> -- an activation region
+  call of std::int::to_string (str) at p14-errors-early-exit.bot:12:9: selected -- activation
+    semantic: confined to activation
+  call of std::str::concat (str) at p14-errors-early-exit.bot:12:9: selected -- activation
+    semantic: confined to activation
+  struct {limit} (struct) at p14-errors-early-exit.bot:14:21: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (error: the payload of TooBig (at p14-errors-early-exit.bot:14:9))
+    representable: no (a struct (only Strings are placed))
+unit early<int> -- an activation region
+  call of std::int::to_string (str) at p14-errors-early-exit.bot:18:9: selected -- activation
+    semantic: confined to activation
+  call of std::str::concat (str) at p14-errors-early-exit.bot:21:22: selected -- activation
+    semantic: confined to activation
+
+# What lowering emitted, and what ran
+  check<int>: call of std::int::to_string at p14-errors-early-exit.bot:12:9: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 1000 in scratch storage, 0 fell back to the heap, 0 on the heap
+  check<int>: call of std::str::concat at p14-errors-early-exit.bot:12:9: emitted (2 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 1000 in scratch storage, 0 fell back to the heap, 0 on the heap
+  early<int>: call of std::int::to_string at p14-errors-early-exit.bot:18:9: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 1000 in scratch storage, 0 fell back to the heap, 0 on the heap
+  early<int>: call of std::str::concat at p14-errors-early-exit.bot:21:22: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 666 in scratch storage, 0 fell back to the heap, 0 on the heap

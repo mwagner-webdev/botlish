@@ -1,0 +1,7 @@
+# tclsh9.0 audit/storage-scratch/tools/fuzz.tcl -seeds 1-40 -count 6
+# (modes plain, stress, growth, off and generic; every program keeps a String through label(b: Box) -> str: 1d26dc9b)
+programs 240, failures 0, invalid 0
+sites selected 4181, emitted 1403; Strings in scratch storage 30128; heap allocations 193510 without scratch storage, 163382 with it
+    not emitted, 1148: no instruction of its own (virtual, inlined or a companion call)
+    not lowered, 1630: the site's instance has no canonical function (it is lowered only as a companion, its struct result in registers, or as an internal variant, its captures parameters: neither is framed)
+exit 0

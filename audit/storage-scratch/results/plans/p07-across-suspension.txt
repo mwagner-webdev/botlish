@@ -1,0 +1,16 @@
+# p07-across-suspension (audit/storage-static-reuse/cases/p07-across-suspension.bot)
+
+unit <program>
+  call of coroutine#create (coroutine) at p07-across-suspension.bot:17:1: rejected -- not representable: the native coroutine#create
+    semantic: confined to activation
+    representable: no (the native coroutine#create)
+  Msg {n} (struct) at p07-across-suspension.bot:18:13: rejected -- not representable: a struct (only Strings are placed)
+    semantic: confined to activation
+    representable: no (a struct (only Strings are placed))
+  call of list (list) at p07-across-suspension.bot:19:1: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at the end))
+    representable: no (the native list)
+unit worker<int> -- no region: it may suspend: a region is never live across a suspension
+unit the coroutine of worker constructed at p07-across-suspension.bot:17:1 -- no region: it may suspend: a region is never live across a suspension
+
+# What lowering emitted, and what ran

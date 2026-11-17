@@ -1963,14 +1963,27 @@ each enclosing loop's iteration and its non-suspending segment; the
 liveness of every binding, pending operand, accumulator and loop position;
 and what every suspension point keeps. Keep it so:
 
-* Facts, not decisions: no backend, lowering or HIR field reads or holds
-  them today, and none may read them as a side channel; it is computed on
-  demand from the HIR and the specialization analysis, stored nowhere (no
-  registry, memo or process state). A consumer (a storage planner) asks for
+* Facts, not decisions: the one consumer is the storage-use plan
+  (hir/storageplan.tcl, next section), which native lowering reads; no
+  HIR field holds the facts and nothing reads them as a side channel. It
+  is computed on demand from the HIR and the specialization analysis,
+  stored nowhere (no registry, memo or process state). A consumer asks for
   it and decides placement, size and policy itself: never put a width,
   budget, size, profitability cutoff or backend representation into a
   verdict, and never let a fact depend on `hir/escape.tcl`, STRUCTOPTS or
   `hir/transport.tcl`.
+* A confined object is reused storage now: an unsound `confined` is a
+  native use of released memory, never only a wrong report. Four rules
+  STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md added keep it so: an
+  error a call lets out of the unit carries what the callee may fail with
+  out too (`perr`, an `error` sink); a callee's fresh result contains what
+  its result-reaching parameters reach, not only what it may be (the kind
+  filter is no containment); an object that contains itself (a call's or a
+  native's fresh part: every object it made, nested ones too) has a fixed
+  kind only as a String, so the String a callee put in the struct it
+  returns is a String the caller's code may be (`Solve`'s `nested`); a
+  recursive component's escape keeps the first reason found
+  (`KeepReasons`), so its summaries converge.
 * Unknown is an answer: a call through a function value, a C argument
   without a borrowing contract, a resume message a coroutine may keep stay
   `unknown`, never `confined`. No budget decides a fact; the solver's and
@@ -1986,7 +1999,8 @@ and what every suspension point keeps. Keep it so:
 * The representation contract is conservative on purpose: a native's
   result may be, or hold, any object its operands reach (plans and
   substring regions keep their operands), narrowed only by kind (a value
-  of one kind is never an object of another). A caller's, a context's and a
+  of one kind is never an object of another, unless that object stands
+  for nested ones too). A caller's, a context's and a
   message's objects stand for everything they hold (they contain
   themselves). Containment is flow-insensitive; the may-have-been-made
   filter only removes objects that cannot exist yet.
@@ -2006,8 +2020,92 @@ persist.tcl` over the census corpus, this audit's cases and the kiosk,
 `mutants.txt` must still apply and be killed by a detector its `!!` line
 names: update a mutant's text when you change the code it mutates, keeping
 it a mutant of the same rule), plus `tests/depth-safe-nesting.test` for a
-change to the guarded walks. `bench/storage-lifetime.tcl` regenerates the
+change to the guarded walks, and the scratch-storage checks of the next
+section (`tests/scratch-storage.test`, its fuzzer and its mutants: a fact
+is a native placement now). `bench/storage-lifetime.tcl` regenerates the
 costs; `audit/storage-lifetime/tools/report.tcl` the corpus's fact reports.
+
+## Compiler-managed scratch storage (hir/storageplan.tcl, runtime/scratch.rs)
+
+The native backend places confined temporary Strings in reusable scratch
+storage instead of the managed heap (STORAGE-COMPILER-MANAGED-SCRATCH-
+MILESTONE-1.md). Four parts, kept apart: the lifetime facts (above) say
+when an object may be observed; the storage-use plan
+(`hir::storageplan::plan`) selects the sites, their regions and why the
+others are not; native lowering (native/lower.tcl's "Scratch storage")
+emits frames, loop regions, requests and destinations for what it can
+represent; the storage provider (native/src/runtime/scratch.rs, in the
+Vm's heap) supplies and reuses bytes. Keep it so:
+
+* The compiler decides, the runtime only stores: the provider never
+  discovers a lifetime, decides a placement or resets anything on its own;
+  the plan never reads a backend representation; lowering never turns
+  `unknown` or `escapes` into a placement. A site is placed only in its
+  innermost region (its innermost loop's iteration, else its activation)
+  and only where it is `confined` to it, in a unit that never suspends; a
+  unit with a self tail call, that may suspend or that is recursive (a
+  component of the direct call graph) gets no region.
+* A region costs its activation the mark and nothing else: the constant a
+  request passes is defined right before it, and no register defined only
+  by `scratchmark` or `scratchtake` is a GC root (`codegen::roots`). Never
+  hold another protocol register across a region, or root a mark: each
+  is a word of every activation's frame, and the census's 8 MiB control
+  (macos-arm64.yml's main-thread-startup job) holds a recursion only to
+  the depth its frames allow.
+* Destinations: a site that escapes its unit only through the unit's
+  result (every reason `result`) follows the unit's destination, which a
+  direct `call` passes (`scratchdest`) where the call's fresh result is
+  confined to the caller's innermost region, or passes on the caller's own.
+  A recursive unit never takes one. Never pass one through a function
+  value, to a companion or any variant but the canonical function, or to a
+  callee whose first instruction is not `scratchtake`.
+* Regions nest strictly (a stack of marks): a framed function marks at
+  entry and resets on every exit -- each `ret` and its error exit (unless
+  its caller gave it a destination); a loop region marks after its
+  operands and resets at its head and its exit. Never reset elsewhere,
+  never on a suspension, never to a mark of another frame.
+* A request and a destination are one instruction's: generated code stores
+  the request immediately before its helper and clears it immediately
+  after, before the error check (`call_allocating`); `alloc_str` consumes
+  it with the first String; a callee's `scratchtake` reads and clears the
+  destination, and the caller clears it after the call. Only the
+  operations `nir::scratch_request_target` names honor a request (each
+  allocates at most one String, its result); nir.rs's `validate_scratch`
+  checks the protocol structurally.
+* The collector recognizes scratch storage by address (`Scratch::
+  contains`) before reading anything there: a scratch String is a leaf,
+  never marked, never swept; a root into released storage is counted
+  (`staleRoots`, must be 0). Chunks never move a live object; growth and
+  fallback (too large, the reservation limit) never change a value.
+* Measured apart: scratch placements, reservations and fallbacks are
+  `scratch` counters of the allocation report, never heap allocations.
+  `-scratch-opt 0` (BOTLISH_NATIVE_SCRATCH_OPT=0) is the oracle and the
+  baseline; a test of another optimization's heap evidence passes it.
+* No language surface: no allocator API, region type, reset operation,
+  storage context or actor-specific configuration. A strict bounded mode,
+  execution-owner configuration and other value kinds are later
+  milestones' (the report's section 26).
+
+If you change hir/storageplan.tcl, the "Scratch storage" section of
+native/lower.tcl (or the loop kinds' hooks, the String operations' lowering
+it matches), native/src/runtime/scratch.rs, `Vm::alloc_str`, the
+collector's scratch check, the scratch ops in nir.rs or codegen/clif.rs, or
+hir/lifetime.tcl, run `tests/scratch-storage.test` (also under
+`BOTLISH_NATIVE_GC_STRESS=1`), `tests/storage-lifetime.test`, `cargo test
+--release --manifest-path native/Cargo.toml --lib scratch`,
+`audit/storage-scratch/tools/fuzz.tcl` (several seeds: the interpreter
+against the Tcl compiler and native runs plain, under GC stress with
+released storage poisoned, with tiny chunks, without scratch storage, and
+cranelift-generic under GC stress, whose canonical functions return
+structs) and `audit/storage-scratch/tools/mutate.tcl` (every
+mutant in its `mutants.txt` must still apply and be killed by a detector
+its `!!` line names: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule).
+`audit/storage-scratch/tools/measure.tcl`, `costs.tcl` and
+`compile-cost.tcl` regenerate the measurements (time them on an otherwise
+idle machine), `plan.tcl` the corpus's plan reports, `sysalloc.tcl` every
+system allocation per unit (not only the managed heap's) and
+`memcheck.tcl` valgrind's view of the positive workloads.
 
 ## Coroutine fusion
 

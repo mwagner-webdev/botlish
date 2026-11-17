@@ -152,6 +152,19 @@ pub struct Vm {
     /// allocating helper. Only written by generated code in Sites mode
     /// (see metrics.rs); read and reset to 0 by `Vm::alloc`.
     pub alloc_site: u32,
+    /// A scratch request (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md):
+    /// 1 while a selected String operation's helper runs (generated code
+    /// stores it immediately before the helper call and clears it
+    /// immediately after, before any error check: codegen::clif's
+    /// `call_allocating`), else 0. `alloc_str` consumes it: the String it
+    /// allocates then goes to scratch storage (runtime/scratch.rs) unless
+    /// the provider's policy sends it to the heap.
+    pub scratch_request: u32,
+    /// A scratch destination: 1 from immediately before a planned call to
+    /// its callee's first instruction (`scratchtake`, which reads and clears
+    /// it), meaning "the pieces of your result may go to my region". 0
+    /// everywhere else, so a function entered any other way reads 0.
+    pub scratch_dest: u32,
     /// The currently active `RootStorage::NativeFrame` function's own root
     /// block (null when none is active): codegen::clif's prologue publishes
     /// its Cranelift stack slot's address and slot count here instead of
@@ -355,6 +368,8 @@ pub const VM_SS_TOP_OFFSET: i32 = offset_of!(Vm, ss_top) as i32;
 pub const VM_SS_LIMIT_OFFSET: i32 = offset_of!(Vm, ss_limit) as i32;
 pub const VM_CONSTS_OFFSET: i32 = offset_of!(Vm, consts) as i32;
 pub const VM_ALLOC_SITE_OFFSET: i32 = offset_of!(Vm, alloc_site) as i32;
+pub const VM_SCRATCH_REQUEST_OFFSET: i32 = offset_of!(Vm, scratch_request) as i32;
+pub const VM_SCRATCH_DEST_OFFSET: i32 = offset_of!(Vm, scratch_dest) as i32;
 pub const VM_NATIVE_ROOTS_PTR_OFFSET: i32 = offset_of!(Vm, native_roots_ptr) as i32;
 pub const VM_NATIVE_ROOTS_LEN_OFFSET: i32 = offset_of!(Vm, native_roots_len) as i32;
 pub const VM_STATICS_OFFSET: i32 = offset_of!(Vm, statics_ptr) as i32;
@@ -382,6 +397,8 @@ impl Vm {
             ss_limit: limit,
             consts: std::ptr::null(),
             alloc_site: 0,
+            scratch_request: 0,
+            scratch_dest: 0,
             native_roots_ptr: std::ptr::null_mut(),
             native_roots_len: 0,
             stack_limit: 0,
@@ -847,6 +864,10 @@ impl Vm {
         self.context_table.fill(0);
         self.metrics.reset();
         self.collect_with(GcReason::Explicit);
+        // Every region of the run is left: its scratch storage goes.
+        self.scratch_request = 0;
+        self.scratch_dest = 0;
+        self.heap.scratch.release_all();
     }
 
     // -----------------------------------------------------------------------
@@ -875,8 +896,18 @@ impl Vm {
     /// allocation happens between here and `StrInit::finish`, so no
     /// collection can observe the half-built object.
     fn alloc_str(&mut self, byte_len: usize, chars: usize, ascii: bool) -> Result<StrInit, Value> {
+        // A scratch request is the instruction's, for its result: consumed
+        // by the first String it allocates (STORAGE-COMPILER-MANAGED-
+        // SCRATCH-MILESTONE-1.md). The selected operations allocate at most
+        // one String, their result.
+        let scratch = std::mem::take(&mut self.scratch_request) != 0;
         if let Some(v) = self.reject_oversized_collection(chars) {
             return Err(v);
+        }
+        if scratch {
+            if let Some(init) = self.alloc_scratch_str(byte_len, chars, ascii) {
+                return Ok(init);
+            }
         }
         if self.heap.wants_collection() {
             self.collect();
@@ -889,6 +920,33 @@ impl Vm {
             self.metrics.record_alloc(KIND_STR, STR_HEADER_SIZE, byte_len, site);
         }
         Ok(init)
+    }
+
+    /// A String's block in scratch storage, or None when the provider's
+    /// policy sends it to the heap (counted as a fallback). Under GC stress
+    /// a collection runs first, as before every heap allocation, so stress
+    /// runs collect at every allocation point whatever the storage.
+    fn alloc_scratch_str(&mut self, byte_len: usize, chars: usize, ascii: bool) -> Option<StrInit> {
+        let size = super::strobj::str_layout(byte_len)?.size();
+        if self.heap.stress() {
+            self.collect();
+        }
+        let site = self.alloc_site;
+        match self.heap.scratch.alloc(size, &mut self.metrics.scratch) {
+            Some(block) => {
+                if site != 0 {
+                    self.alloc_site = 0;
+                    self.metrics.record_scratch_site(site, size);
+                }
+                // SAFETY: a fresh block of SIZE bytes, 8-aligned, which no
+                // other object uses until the region holding it is reset.
+                Some(unsafe { StrInit::in_block(block, byte_len, chars, ascii) })
+            }
+            None => {
+                self.metrics.record_scratch_fallback_site(site);
+                None
+            }
+        }
     }
 
     /// The canonical empty String, counted for the audit report.

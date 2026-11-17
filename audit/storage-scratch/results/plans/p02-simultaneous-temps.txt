@@ -1,0 +1,30 @@
+# p02-simultaneous-temps (audit/storage-static-reuse/cases/p02-simultaneous-temps.bot)
+
+unit <program>
+unit label<int> -- an activation region
+  call of std::int::to_string (str) at p02-simultaneous-temps.bot:7:9: selected -- activation
+    semantic: confined to activation
+  call of std::str::concat (str) at p02-simultaneous-temps.bot:7:9: selected -- activation
+    semantic: confined to activation
+  call of std::int::to_string (str) at p02-simultaneous-temps.bot:8:9: selected -- activation
+    semantic: confined to activation
+  call of std::str::concat (str) at p02-simultaneous-temps.bot:8:9: selected -- activation
+    semantic: confined to activation
+  call of std::str::concat (str) at p02-simultaneous-temps.bot:9:22: selected -- activation
+    semantic: confined to activation
+
+# What lowering emitted, and what ran
+  label<int>: call of std::int::to_string at p02-simultaneous-temps.bot:7:9: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 1000 in scratch storage, 0 fell back to the heap, 0 on the heap
+  label<int>: call of std::str::concat at p02-simultaneous-temps.bot:7:9: not emitted -- no instruction of its own (virtual, inlined or a companion call)
+  label<int>: call of std::int::to_string at p02-simultaneous-temps.bot:8:9: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 1000 in scratch storage, 0 fell back to the heap, 0 on the heap
+  label<int>: call of std::str::concat at p02-simultaneous-temps.bot:8:9: not emitted -- no instruction of its own (virtual, inlined or a companion call)
+  label<int>: call of std::str::concat at p02-simultaneous-temps.bot:9:22: emitted (1 instruction(s))
+    released by: its function's exits: the reset before every ret, and on the error exit
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 1000 in scratch storage, 0 fell back to the heap, 0 on the heap

@@ -1,0 +1,18 @@
+# p16-foreign-noescape (audit/storage-static-reuse/cases/p16-foreign-noescape.bot)
+
+unit <program>
+  call of std::str::encode_utf8 (list) at p16-foreign-noescape.bot:12:35: rejected -- not representable: the native std::str::encode_utf8
+    semantic: confined to activation
+    representable: no (the native std::str::encode_utf8)
+  call of std::abi::bytes::from_list (struct) at p16-foreign-noescape.bot:12:8: rejected -- its callee takes no destination: nothing it returns can be placed in its caller's region
+    semantic: confined to activation
+unit std::abi::bytes::from_list<List[int]>
+  call of std::byte_store::from_list (value) at bytes.bot:113:21: rejected -- not representable: the native std::byte_store::from_list
+    semantic: escapes to activation (result: the unit's value (at bytes.bot:112:13))
+    representable: no (the native std::byte_store::from_list)
+  std::abi::bytes::Bytes {storage} (struct) at bytes.bot:113:5: rejected -- not representable: a struct (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at bytes.bot:112:13))
+    representable: no (a struct (only Strings are placed))
+
+# What lowering emitted, and what ran
+  (the program did not run natively: a program that calls C runs as a linked executable: batch timing and per-site allocation reports (--alloc sites) measure in-process JIT runs only (--alloc summary reports a linked run's counters))

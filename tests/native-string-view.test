@@ -27,8 +27,11 @@ proc sourceHir {text} {
     return [surface::compile $text t.bot -strict 0]
 }
 
+# (Scratch storage off: these Strings' storage is the heap's evidence of this
+# milestone; STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md places confined
+# temporaries in scratch storage, measured by tests/scratch-storage.test.)
 proc strAllocs {text opt} {
-    return [dict get [native::allocationReport [sourceHir $text] summary 1 -string-region-opt $opt -short-string-opt 0] byKind String allocations]
+    return [dict get [native::allocationReport [sourceHir $text] summary 1 -string-region-opt $opt -short-string-opt 0 -scratch-opt 0] byKind String allocations]
 }
 
 proc assertParity {text} {

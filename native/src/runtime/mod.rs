@@ -27,6 +27,7 @@ pub mod nview;
 pub mod platform;
 pub mod ops;
 pub mod program;
+pub mod scratch;
 pub mod show;
 pub mod strobj;
 pub mod syscall;

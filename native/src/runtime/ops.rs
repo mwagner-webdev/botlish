@@ -114,6 +114,7 @@ use super::vm::{Identity, NativeInfo, ProgramInfo, Vm};
 use crate::nir::OpCode;
 use super::decimal::{rt_decimal_cmp, rt_decimal_round, rt_decimal_to_f64, rt_decimal_to_str};
 use super::inttext::{rt_int_to_str, rt_str_to_int};
+use super::scratch::{rt_scratch_exit, rt_scratch_mark, rt_scratch_reset};
 use num_bigint::BigInt;
 use num_traits::Signed;
 use std::cmp::Ordering;
@@ -4402,7 +4403,10 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         // ordinary-looking native of the test fixture, never a value.
         | NativeStore | NativeStorePtr | MBytesWrite | MBytesWritePtr | CPtrFixtureBytes
         // A fixed array's rows likewise (FIXED-LAYOUT-ARRAYS.md).
-        | BinLoadArray | NativeLoadArray | BinStoreArray | NativeStoreArray | BinStorePtr => {
+        | BinLoadArray | NativeLoadArray | BinStoreArray | NativeStoreArray | BinStorePtr
+        // Scratch storage's region boundaries and requests
+        // (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md).
+        | ScratchTake | ScratchMark | ScratchReset | ScratchExit | ScratchReq | ScratchDest => {
             // Raw (untagged) representation ops, StringRegion ops and String
             // traversal ops never implement a dynamic native: native/lower.tcl
             // emits them only directly, as `op` instructions inline in a
@@ -4432,6 +4436,9 @@ macro_rules! runtime_helpers {
 
 runtime_helpers! {
     (rt_type_error, 4),
+    (rt_scratch_mark, 1),
+    (rt_scratch_reset, 2),
+    (rt_scratch_exit, 3),
     (rt_ffi_open, 1),
     (rt_ffi_close, 2),
     (rt_callback_call, 5),

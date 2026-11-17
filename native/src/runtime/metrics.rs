@@ -151,6 +151,47 @@ pub struct StaticKindStats {
 pub struct SiteStats {
     pub allocations: u64,
     pub allocated_bytes: u64,
+    /// Strings this site placed in scratch storage (STORAGE-COMPILER-
+    /// MANAGED-SCRATCH-MILESTONE-1.md): not heap allocations, not in
+    /// `allocations` above.
+    pub scratch_allocations: u64,
+    pub scratch_bytes: u64,
+    /// Requests of this site the provider sent to the heap (counted in
+    /// `allocations` too: the fallback is an ordinary heap allocation).
+    pub scratch_fallbacks: u64,
+}
+
+/// Compiler-managed scratch storage (runtime/scratch.rs;
+/// STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md), counted in every mode:
+/// suballocations within reserved chunks are never heap allocations, and
+/// reservations are never suballocations, so each is reported apart.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ScratchStats {
+    /// Regions entered (`scratchmark`: a framed function's entry or a loop's).
+    pub regions: u64,
+    /// Resets (a loop head or exit, a function exit that restores).
+    pub resets: u64,
+    /// Strings placed in scratch storage, and their bytes (padded size).
+    pub allocations: u64,
+    pub bytes: u64,
+    /// Of those, the ones placed entirely in bytes an earlier object used.
+    pub reused: u64,
+    /// Chunks reserved from the system allocator, and how many of those
+    /// were beyond the first (growth); chunks given back to replace them.
+    pub reservations: u64,
+    pub growths: u64,
+    pub released_reservations: u64,
+    /// The most bytes reserved and in use at once.
+    pub peak_reserved: u64,
+    pub peak_occupancy: u64,
+    /// Requests sent to the heap: an object over the size limit, or a
+    /// reservation that would pass the total limit.
+    pub fallback_large: u64,
+    pub fallback_capacity: u64,
+    /// Roots a collection found pointing into released scratch storage (a
+    /// premature reset: must be 0), and resets to an invalid mark (must be 0).
+    pub stale_roots: u64,
+    pub protocol_errors: u64,
 }
 
 /// Why a collection ran (Heap::trigger_reason, Vm::reset).
@@ -274,6 +315,8 @@ pub struct Metrics {
     /// MutableArray copy-on-write (MUTABLE-ARRAY.md): logical copies and
     /// detaches (and the element words they copied), as for a vector.
     pub mutarray: MutArrayStats,
+    /// Scratch storage (runtime/scratch.rs).
+    pub scratch: ScratchStats,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -335,6 +378,23 @@ impl Metrics {
             resources: ResourceStats::default(),
             mutvec: MutVecStats::default(),
             mutarray: MutArrayStats::default(),
+            scratch: ScratchStats::default(),
+        }
+    }
+
+    /// A String placed in scratch storage by site SITE (0: unattributed).
+    pub fn record_scratch_site(&mut self, site: u32, bytes: usize) {
+        if site != 0 && self.enabled() {
+            let s = self.sites.entry(site).or_default();
+            s.scratch_allocations += 1;
+            s.scratch_bytes += bytes as u64;
+        }
+    }
+
+    /// A scratch request of site SITE the provider sent to the heap.
+    pub fn record_scratch_fallback_site(&mut self, site: u32) {
+        if site != 0 && self.enabled() {
+            self.sites.entry(site).or_default().scratch_fallbacks += 1;
         }
     }
 
@@ -691,6 +751,30 @@ impl Metrics {
                     ("detachElements", n(mv.detach_elements)),
                     ("growths", n(mv.growths)),
                     ("growthBytes", n(mv.growth_bytes)),
+                ]),
+            ));
+        }
+        // Scratch storage: only a program that entered a region or placed a
+        // String there, so every other program's report is unchanged.
+        let sc = &self.scratch;
+        if sc.regions > 0 || sc.allocations > 0 || sc.fallback_large > 0 || sc.fallback_capacity > 0 {
+            sections.push((
+                "scratch",
+                dict(&[
+                    ("regions", n(sc.regions)),
+                    ("resets", n(sc.resets)),
+                    ("allocations", n(sc.allocations)),
+                    ("bytes", n(sc.bytes)),
+                    ("reused", n(sc.reused)),
+                    ("reservations", n(sc.reservations)),
+                    ("growths", n(sc.growths)),
+                    ("releasedReservations", n(sc.released_reservations)),
+                    ("peakReserved", n(sc.peak_reserved)),
+                    ("peakOccupancy", n(sc.peak_occupancy)),
+                    ("fallbackLarge", n(sc.fallback_large)),
+                    ("fallbackCapacity", n(sc.fallback_capacity)),
+                    ("staleRoots", n(sc.stale_roots)),
+                    ("protocolErrors", n(sc.protocol_errors)),
                 ]),
             ));
         }

@@ -1,0 +1,20 @@
+# p11-context-state (audit/storage-static-reuse/cases/p11-context-state.bot)
+
+unit <program>
+  call of list (list) at p11-context-state.bot:21:63: rejected -- not representable: the native list
+    semantic: escapes to activation (context: kept by context#install (at p11-context-state.bot:21:1))
+    representable: no (the native list)
+  call of std::mutable_vector::from_list (mutvec) at p11-context-state.bot:21:32: rejected -- not representable: the native std::mutable_vector::from_list
+    semantic: escapes to activation (context: kept by context#install (at p11-context-state.bot:21:1))
+    representable: no (the native std::mutable_vector::from_list)
+  Journal {entries} (struct) at p11-context-state.bot:21:14: rejected -- not representable: a struct (only Strings are placed)
+    semantic: confined to activation
+    representable: no (a struct (only Strings are placed))
+  call of mutable_vector#share (struct) at p11-context-state.bot:21:1: rejected -- not representable: the native mutable_vector#share
+    semantic: escapes to activation (context: kept by context#install (at p11-context-state.bot:21:1))
+    representable: no (the native mutable_vector#share)
+unit note<int>
+unit count<generic>
+unit record<int>
+
+# What lowering emitted, and what ran

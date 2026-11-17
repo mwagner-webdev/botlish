@@ -65,6 +65,11 @@ pub struct Heap {
     /// (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md, "GC isolation"). Always 0
     /// without the check.
     pub foreign_pointers: u64,
+    /// Compiler-managed scratch storage (runtime/scratch.rs): String objects
+    /// in chunks of their own, never registered in `objects`, never marked
+    /// or swept. The collector skips every pointer into it before reading
+    /// the object (a scratch String holds no reference).
+    pub scratch: super::scratch::Scratch,
 }
 
 impl Heap {
@@ -86,7 +91,16 @@ impl Heap {
             poison: false,
             ownership: None,
             foreign_pointers: 0,
+            scratch: super::scratch::Scratch::new(stress),
         }
+    }
+
+    /// Whether every allocation collects first (BOTLISH_NATIVE_GC_STRESS=1,
+    /// `set_stress_for_test`): a scratch placement collects first too, so
+    /// GC-stress runs collect at every allocation point whatever the
+    /// storage.
+    pub fn stress(&self) -> bool {
+        self.stress
     }
 
     /// Test hook: collect before every allocation, exactly as
@@ -175,6 +189,17 @@ impl Heap {
         let mut foreign = 0u64;
         while let Some(v) = stack.pop() {
             if !is_pointer(v) {
+                continue;
+            }
+            // A scratch String (runtime/scratch.rs): a leaf this collector
+            // neither marks nor sweeps, recognized by its address alone --
+            // never by reading it, so a pointer into released scratch storage
+            // (which would be a premature reset: counted, must be 0) is never
+            // misread as a header.
+            if self.scratch.contains(v) {
+                if self.scratch.is_released(v) {
+                    metrics.scratch.stale_roots += 1;
+                }
                 continue;
             }
             if owned.as_ref().is_some_and(|owned| !owned.contains(&(v as usize))) {

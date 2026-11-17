@@ -1,0 +1,29 @@
+# p08-two-coroutines (audit/storage-static-reuse/cases/p08-two-coroutines.bot)
+
+unit <program>
+  call of coroutine#create (coroutine) at p08-two-coroutines.bot:15:1: rejected -- not representable: the native coroutine#create
+    semantic: confined to activation
+    representable: no (the native coroutine#create)
+  call of coroutine#create (coroutine) at p08-two-coroutines.bot:16:1: rejected -- not representable: the native coroutine#create
+    semantic: confined to activation
+    representable: no (the native coroutine#create)
+  Tick {by} (struct) at p08-two-coroutines.bot:17:8: rejected -- not representable: a struct (only Strings are placed)
+    semantic: confined to activation
+    representable: no (a struct (only Strings are placed))
+  Tick {by} (struct) at p08-two-coroutines.bot:18:8: rejected -- not representable: a struct (only Strings are placed)
+    semantic: confined to activation
+    representable: no (a struct (only Strings are placed))
+  Tick {by} (struct) at p08-two-coroutines.bot:19:8: rejected -- not representable: a struct (only Strings are placed)
+    semantic: confined to activation
+    representable: no (a struct (only Strings are placed))
+  Tick {by} (struct) at p08-two-coroutines.bot:20:8: rejected -- not representable: a struct (only Strings are placed)
+    semantic: confined to activation
+    representable: no (a struct (only Strings are placed))
+  call of list (list) at p08-two-coroutines.bot:21:1: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at the end))
+    representable: no (the native list)
+unit counter<int> -- no region: it may suspend: a region is never live across a suspension
+unit the coroutine of counter constructed at p08-two-coroutines.bot:15:1 -- no region: it may suspend: a region is never live across a suspension
+unit the coroutine of counter constructed at p08-two-coroutines.bot:16:1 -- no region: it may suspend: a region is never live across a suspension
+
+# What lowering emitted, and what ran

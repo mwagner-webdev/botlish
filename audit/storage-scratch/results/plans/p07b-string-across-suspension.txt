@@ -1,0 +1,28 @@
+# p07b-string-across-suspension (audit/storage-static-reuse/cases/p07b-string-across-suspension.bot)
+
+unit <program>
+unit worker<int> -- no region: it may suspend: a region is never live across a suspension
+  call of std::int::to_string (str) at p07b-string-across-suspension.bot:10:12: rejected -- it may suspend: a region is never live across a suspension
+    semantic: confined to activation
+  call of std::str::concat (str) at p07b-string-across-suspension.bot:10:12: rejected -- it may suspend: a region is never live across a suspension
+    semantic: confined to activation
+  call of std::int::to_string (str) at p07b-string-across-suspension.bot:11:12: rejected -- it may suspend: a region is never live across a suspension
+    semantic: confined to activation
+  call of std::str::concat (str) at p07b-string-across-suspension.bot:11:12: rejected -- it may suspend: a region is never live across a suspension
+    semantic: confined to activation
+unit drive<int> -- a region per iteration of the fold at p07b-string-across-suspension.bot:16:5
+  closure (closure) at p07b-string-across-suspension.bot:17:9: rejected -- not representable: a closure (only Strings are placed)
+    semantic: confined to iteration of the fold at p07b-string-across-suspension.bot:16:5
+    representable: no (a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at p07b-string-across-suspension.bot:17:9: rejected -- not representable: the native coroutine#create
+    semantic: confined to iteration of the fold at p07b-string-across-suspension.bot:16:5
+    representable: no (the native coroutine#create)
+  call of std::int::to_string (str) at p07b-string-across-suspension.bot:18:17: selected -- iteration of the fold at p07b-string-across-suspension.bot:16:5
+    semantic: confined to iteration of the fold at p07b-string-across-suspension.bot:16:5
+unit the coroutine of worker constructed at p07b-string-across-suspension.bot:17:9 -- no region: it may suspend: a region is never live across a suspension
+
+# What lowering emitted, and what ran
+  drive<int>: call of std::int::to_string at p07b-string-across-suspension.bot:18:17: emitted (1 instruction(s))
+    released by: its loop's reset at the head and at the exit (and its function's error exit when an error leaves the loop)
+    size: dynamic (the object's own size at run time); may still use the general allocator: yes, the fallback (above the object limit, 64 KiB, or past the reservation limit, 64 MiB per Vm)
+    ran: 1000 in scratch storage, 0 fell back to the heap, 0 on the heap

@@ -69,7 +69,7 @@ use crate::runtime::ops::helpers;
 use crate::runtime::value::*;
 use crate::runtime::vm::{
     VM_ALLOC_SITE_OFFSET, VM_CONSTS_OFFSET, VM_NATIVE_ROOTS_LEN_OFFSET, VM_NATIVE_ROOTS_PTR_OFFSET,
-    VM_CONTEXT_OFFSET, VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STACK_LIMIT_OFFSET, VM_STATICS_OFFSET,
+    VM_CONTEXT_OFFSET, VM_SCRATCH_DEST_OFFSET, VM_SCRATCH_REQUEST_OFFSET, VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STACK_LIMIT_OFFSET, VM_STATICS_OFFSET,
 };
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
@@ -935,6 +935,16 @@ struct Translator<'a, 'b, M: Module> {
     /// inline -- the target's, never the host's (a driver on Linux x86-64
     /// emits an Android library's object with Android's).
     address_word: AddressWord,
+    /// Scratch storage (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md): a
+    /// `scratchreq`/`scratchdest` instruction's operand, waiting for the
+    /// next instruction (`_next`) or attached to the one being translated:
+    /// `call_allocating` stores the request around its helper call, a
+    /// `call` stores the destination before itself (nir.rs's
+    /// `validate_scratch` guarantees which instruction comes next).
+    scratch_req_next: Option<ir::Value>,
+    scratch_req: Option<ir::Value>,
+    scratch_dest_next: Option<ir::Value>,
+    scratch_dest: Option<ir::Value>,
 }
 
 impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
@@ -1007,6 +1017,10 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             mutarray_access: mutarray_inline && !count_accesses,
             root_init_opt,
             address_word,
+            scratch_req_next: None,
+            scratch_req: None,
+            scratch_dest_next: None,
+            scratch_dest: None,
         }
     }
 
@@ -1077,6 +1091,8 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         self.terminated = false;
         for (index, inst) in f.body.iter().enumerate() {
             self.current_index = index;
+            self.scratch_req = self.scratch_req_next.take();
+            self.scratch_dest = self.scratch_dest_next.take();
             self.inst(inst)?;
         }
         if !self.terminated {
@@ -1782,12 +1798,45 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     /// unrelated allocation instead of just attributing nothing.
     fn call_allocating(&mut self, name: &str, args: &[ir::Value], operation: &'static str, object_kind: u8) -> ir::Value {
         self.mark_site(operation, object_kind);
+        // A scratch request (`scratchreq` before this instruction): stored
+        // immediately before the helper call and cleared immediately after
+        // it, before the caller's error check, so a helper that fails or
+        // allocates nothing never leaves it set for another allocation.
+        let request = self.scratch_req.take();
+        if let Some(req) = request {
+            let raw = self.b.ins().ushr_imm_s(req, 1);
+            let word = self.b.ins().ireduce(types::I32, raw);
+            self.b.ins().store(MemFlagsData::trusted(), word, self.vm, VM_SCRATCH_REQUEST_OFFSET);
+        }
         let r = self.call_helper(name, args);
+        if request.is_some() {
+            let zero = self.b.ins().iconst(types::I32, 0);
+            self.b.ins().store(MemFlagsData::trusted(), zero, self.vm, VM_SCRATCH_REQUEST_OFFSET);
+        }
         if self.instrument_sites {
             let zero = self.iconst(0);
             self.b.ins().store(MemFlagsData::trusted(), zero, self.vm, VM_ALLOC_SITE_OFFSET);
         }
         r
+    }
+
+    /// Stores the attached scratch destination (`scratchdest` before this
+    /// `call`) into the Vm's destination word: the callee's first
+    /// instruction, `scratchtake`, reads and clears it.
+    fn store_scratch_dest(&mut self) -> bool {
+        let Some(dest) = self.scratch_dest.take() else { return false };
+        let raw = self.b.ins().ushr_imm_s(dest, 1);
+        let word = self.b.ins().ireduce(types::I32, raw);
+        self.b.ins().store(MemFlagsData::trusted(), word, self.vm, VM_SCRATCH_DEST_OFFSET);
+        true
+    }
+
+    /// Clears the Vm's destination word after a call that set it (the
+    /// callee's `scratchtake` already did; this keeps it so whatever the
+    /// callee became).
+    fn clear_scratch_dest(&mut self) {
+        let zero = self.b.ins().iconst(types::I32, 0);
+        self.b.ins().store(MemFlagsData::trusted(), zero, self.vm, VM_SCRATCH_DEST_OFFSET);
     }
 
     /// Returns F.RESULTS copies of the tagged 0 sentinel ("an error is
@@ -2369,8 +2418,12 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let mut values = vec![self.vm];
                 values.extend(args.iter().map(|r| self.get(*r)));
                 let r = self.func_ref(self.symbols.direct[*func as usize]);
+                let dest = self.store_scratch_dest();
                 let call = self.b.ins().call(r, &values);
                 if *may_gc { self.mark_safepoint(call); }
+                if dest {
+                    self.clear_scratch_dest();
+                }
                 self.finish_call(*dst, *func, call, *may_error);
             }
             Inst::CallEnv { dst, func, closure, args, may_error, may_gc } => {
@@ -2550,6 +2603,30 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         use OpCode::*;
         let a: Vec<ir::Value> = args.iter().map(|r| self.get(*r)).collect();
         match op {
+            // Scratch storage (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md,
+            // runtime/scratch.rs): the destination word read and cleared
+            // inline, the region boundaries as helper calls, and the request
+            // and destination held for the next instruction (see
+            // `scratch_req`).
+            ScratchTake => {
+                let word = self.b.ins().load(types::I32, MemFlagsData::trusted(), self.vm, VM_SCRATCH_DEST_OFFSET);
+                let zero = self.b.ins().iconst(types::I32, 0);
+                self.b.ins().store(MemFlagsData::trusted(), zero, self.vm, VM_SCRATCH_DEST_OFFSET);
+                let wide = self.b.ins().uextend(I64, word);
+                let shifted = self.b.ins().ishl_imm_s(wide, 1);
+                self.b.ins().bor_imm_s(shifted, 1)
+            }
+            ScratchMark => self.call_helper("rt_scratch_mark", &[self.vm]),
+            ScratchReset => self.call_helper("rt_scratch_reset", &[self.vm, a[0]]),
+            ScratchExit => self.call_helper("rt_scratch_exit", &[self.vm, a[0], a[1]]),
+            ScratchReq => {
+                self.scratch_req_next = Some(a[0]);
+                self.iconst(UNIT)
+            }
+            ScratchDest => {
+                self.scratch_dest_next = Some(a[0]);
+                self.iconst(UNIT)
+            }
             IAdd | ISub | IMul => self.int_arith(op, a[0], a[1]),
             IMod => self.int_mod(a[0], a[1]),
             IAnd | IOr | IXor => self.int_bitop(op, a[0], a[1]),

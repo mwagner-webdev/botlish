@@ -1,0 +1,13 @@
+# tclsh9.0 audit/storage-scratch/tools/memcheck.tcl
+# valgrind-3.22.0
+p01-sequential-temps gc-stress=0 status=0 memcheck errors=0
+p01-sequential-temps gc-stress=1 status=0 memcheck errors=0
+p04-loop-reuse gc-stress=0 status=0 memcheck errors=0
+p04-loop-reuse gc-stress=1 status=0 memcheck errors=0
+p05-escape-result gc-stress=0 status=0 memcheck errors=0
+p05-escape-result gc-stress=1 status=0 memcheck errors=0
+p13-request-handler gc-stress=0 status=0 memcheck errors=0
+p13-request-handler gc-stress=1 status=0 memcheck errors=0
+p14-errors-early-exit gc-stress=0 status=0 memcheck errors=0
+p14-errors-early-exit gc-stress=1 status=0 memcheck errors=0
+exit 0

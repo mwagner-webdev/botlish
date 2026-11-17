@@ -50,8 +50,11 @@ proc parity {text} {
     return $reference
 }
 
+# (Scratch storage off: these Strings' storage is the heap's evidence of this
+# milestone; STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md places confined
+# temporaries in scratch storage, measured by tests/scratch-storage.test.)
 proc vcReport {text opt} {
-    return [native::allocationReport [sourceHir $text] summary 1 -virtual-construction-opt $opt -short-string-opt 0]
+    return [native::allocationReport [sourceHir $text] summary 1 -virtual-construction-opt $opt -short-string-opt 0 -scratch-opt 0]
 }
 
 proc allocs {report kind} {

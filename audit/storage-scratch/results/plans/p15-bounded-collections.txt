@@ -1,0 +1,27 @@
+# p15-bounded-collections (audit/storage-static-reuse/cases/p15-bounded-collections.bot)
+
+unit <program>
+  call of fixed (list) at p15-bounded-collections.bot:24:29: rejected -- its callee takes no destination: nothing it returns can be placed in its caller's region
+    semantic: confined to iteration of the fold at p15-bounded-collections.bot:23:9
+  call of dynamic (list) at p15-bounded-collections.bot:24:59: rejected -- its callee takes no destination: nothing it returns can be placed in its caller's region
+    semantic: confined to iteration of the fold at p15-bounded-collections.bot:23:9
+  call of list (list) at p15-bounded-collections.bot:25:1: rejected -- not representable: the native list
+    semantic: escapes to activation (result: the unit's value (at the end))
+    representable: no (the native list)
+unit fixed<int>
+  loop (list) at p15-bounded-collections.bot:10:5: rejected -- not representable: a list (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at p15-bounded-collections.bot:9:9))
+    representable: no (a list (only Strings are placed))
+unit dynamic<int>
+  loop (list) at p15-bounded-collections.bot:14:5: rejected -- not representable: a list (only Strings are placed)
+    semantic: escapes to activation (result: the unit's value (at p15-bounded-collections.bot:13:11))
+    representable: no (a list (only Strings are placed))
+unit grow<int>
+  call of list (list) at p15-bounded-collections.bot:18:40: rejected -- not representable: the native list
+    semantic: confined to activation
+    representable: no (the native list)
+  call of std::mutable_vector::from_list (mutvec) at p15-bounded-collections.bot:18:9: rejected -- not representable: the native std::mutable_vector::from_list
+    semantic: confined to activation
+    representable: no (the native std::mutable_vector::from_list)
+
+# What lowering emitted, and what ran

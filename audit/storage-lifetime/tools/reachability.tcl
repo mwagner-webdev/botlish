@@ -233,7 +233,11 @@ proc Peak {source n} {
     set hir [surface::compile [string map [list N $n] $source] -warnings off]
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
-        set report [native::allocationReport $hir summary]
+        # Scratch storage off: placed Strings are no heap objects
+        # (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md), and with them
+        # placed every confined claim would hold trivially. This checks the
+        # facts against the heap's own reachability.
+        set report [native::allocationReport $hir summary 1 -scratch-opt 0]
     } finally {
         unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
     }
