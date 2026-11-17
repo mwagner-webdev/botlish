@@ -2684,7 +2684,21 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.b.ins().bor_imm_s(shifted, 1)
             }
             ScratchMark => self.call_helper("rt_scratch_mark", &[self.vm]),
-            ScratchReset => self.call_helper("rt_scratch_reset", &[self.vm, a[0]]),
+            ScratchReset => {
+                let v = self.call_helper("rt_scratch_reset", &[self.vm, a[0]]);
+                // ShadowOnly: the region's Strings may still sit in dead
+                // slots of this frame, which the collector scans whole
+                // (RootPlan::scratch_reset_dead).
+                if self.shadow_frame {
+                    if let Some(dead) = self.plan.scratch_reset_dead.get(&self.current_index).cloned() {
+                        let zero = self.b.ins().iconst(I64, 0);
+                        for slot in dead {
+                            self.b.ins().store(MemFlagsData::trusted(), zero, self.base, (slot * 8) as i32);
+                        }
+                    }
+                }
+                v
+            }
             ScratchExit => self.call_helper("rt_scratch_exit", &[self.vm, a[0], a[1]]),
             ScratchReq => {
                 self.scratch_req_next = Some(a[0]);

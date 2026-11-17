@@ -172,7 +172,7 @@ test rc-leaf-reentry-shadow-frames {on the ShadowOnly plan every function with a
         lappend rows [list $name $storage [expr {$slots > 0}]]
     }
     set rows
-} -cleanup {unset -nocomplain report rows block name slots storage} -result {{<program> {shadow stack} 1} {label {shadow stack} 1} {outer {shadow stack} 1}}
+} -cleanup {unset -nocomplain report rows block name slots storage} -result {{<program> {runtime stack} 1} {label {runtime stack} 1} {outer {runtime stack} 1}}
 
 # ---------------------------------------------------------------------------
 # The resumable mechanism's own evidence

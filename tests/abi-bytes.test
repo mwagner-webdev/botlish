@@ -947,7 +947,7 @@ test abi-bytes-machine-code-write-function {the machine code of std::linux::sys:
     set id [nirFunctionId [native::nir [bytesHir $text]] std::linux::sys::write]
     set calls [machineCalls $exe botlish_fn_$id]
     set targets [lmap c $calls {lindex $c 0}]
-    set helpers [lsearch -all -inline -regexp $targets {^rt_}]
+    set helpers [withoutShadowOverflow [lsearch -all -inline -regexp $targets {^rt_}]]
     list $helpers [llength [lsearch -all -regexp $targets {^(write|send|sendto|syscall|pwrite)(@plt)?$}]]
 } -result {{rt_bytes_addr rt_linux_x86_64_syscall} 0}
 

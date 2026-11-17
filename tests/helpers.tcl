@@ -166,14 +166,17 @@ testConstraint nativeFrameRoots [native::hostSupports frameRoots]
 # `fallback-roots` driver runs on a host the native backend supports.
 testConstraint nativeShadowOnlyRoots [expr {[native::hostSupports jit] && ![native::hostSupports frameRoots]}]
 
-# A depth check bounds Botlish recursion (runtime::native_stack::depth_checked):
-# unless native frames hold the roots and the stack guard reports an exhausted
-# stack -- on the fallback plan, where the shadow stack's end is the bound
-# (on Windows until WINDOWS-X86-64-MILESTONE-4.md, also a check of the stack
-# pointer). Every function with a Botlish call then fails with NATIVE LIMIT
-# STACK from its prologue, which nir's call effects record as may_error: a
-# test of a call's effects expects it by this.
-testConstraint nativeDepthChecked [expr {!([testConstraint nativeFrameRoots] && [testConstraint nativeStackGuard])}]
+# A depth check bounds Botlish recursion (runtime::capabilities's
+# `prologue_may_fail`): only where no stack guard reports an exhausted stack,
+# so that the shadow stack's end is the only bound (on Windows until
+# WINDOWS-X86-64-MILESTONE-4.md, also a check of the stack pointer). Every
+# function with a Botlish call then fails with NATIVE LIMIT STACK from its
+# prologue, which nir's call effects record as may_error: a test of a call's
+# effects expects it by this. Where the guard exists the fallback plan
+# (ShadowOnly) has no depth check either: a full shadow array is reported the
+# guard's way (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md,
+# section 6.3).
+testConstraint nativeDepthChecked [expr {![testConstraint nativeStackGuard]}]
 
 # Standalone executables (native::executable, native/src/codegen/aot.rs): the
 # native backend links them on Linux x86-64 and AArch64 (ELF), on macOS
@@ -735,6 +738,20 @@ proc coroutineCounters {counters} {
         set keys [concat {stacksMapped stacksReused} $keys]
     }
     return [dict filter $counters script {k v} {expr {$k in $keys}}]
+}
+
+# CALLS (the runtime helpers a function's machine code calls, in order)
+# without the ShadowOnly root plan's prologue report: where native frames do
+# not hold roots, every function with a root slot reserves them in the
+# shadow stack, leaf or not, and a full shadow array is a cold call of
+# rt_shadow_overflow in its prologue (codegen::roots's ShadowOnly mode,
+# WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md, section 6) -- not
+# part of what the function does. Unchanged where native frames hold roots.
+proc withoutShadowOverflow {calls} {
+    if {[testConstraint nativeFrameRoots]} {
+        return $calls
+    }
+    return [lsearch -all -inline -not -exact $calls rt_shadow_overflow]
 }
 
 # What coroutineCounters should be: STACKS ({stacksMapped N stacksReused

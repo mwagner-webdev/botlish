@@ -717,12 +717,14 @@ test scc-affine-payload {a contract admitting an affine-payload error: an edge f
     list [sccErrorEdges $sccAffinePayload live] [sccEffective $sccAffinePayload h] [sourceAgree $sccAffinePayload]
 } -result {Carry {handle Carry call {}} {value {[-2, 11, 7, -1, 108]}}}
 
-test scc-affine-payload-native {natively: every coroutine released, none swept} -constraints {
+test scc-affine-payload-native {natively: every coroutine released, none swept -- as many releases as coroutines made, and, where coroutines switch stacks, as stacks mapped or reused (nativeStackfulCoroutines)} -constraints {
     nativeCoroutines
 } -body {
-    set c [dict get [native::allocationReport [surface::compile $sccAffinePayload -warnings off] summary] coroutines]
-    list [expr {[dict get $c released] == [dict get $c stacksMapped] + [dict get $c stacksReused]}] [dict get $c sweptSuspended]
-} -result {1 0}
+    set report [native::allocationReport [surface::compile $sccAffinePayload -warnings off] summary]
+    set c [dict get $report coroutines]
+    list [expr {[dict get $c released] == [dict get $report byKind Coroutine allocations]}] [dict get $c sweptSuspended] \
+        [expr {![testConstraint nativeStackfulCoroutines] || [dict get $c released] == [dict get $c stacksMapped] + [dict get $c stacksReused]}]
+} -cleanup {unset -nocomplain report c} -result {1 0 1}
 
 # ---------------------------------------------------------------------------
 # Coroutines: an error-bearing coroutine given to an untyped function no longer

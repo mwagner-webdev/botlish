@@ -161,6 +161,16 @@ pub struct RootPlan {
     /// for any index) whenever `storage` is not `NativeFrame` on this path,
     /// or (the fallback path) when native stack maps are not in use at all.
     pub safepoint_slots: BTreeMap<usize, Vec<u32>>,
+    /// `RootStorage::RuntimeStack` only: for each `scratchreset` (by its
+    /// index into `f.body`), the slots no register live after it occupies.
+    /// The collector scans a shadow-stack frame whole, dead slots included,
+    /// so a dead slot still holding a String of the region just released
+    /// would be a root into released scratch storage (runtime/scratch.rs's
+    /// `stale_roots`, which must stay 0): codegen::clif zeroes these slots
+    /// right after the reset. A slot is only ever a root, never read back
+    /// for a value, so zeroing a dead one changes nothing else. Empty on
+    /// native frames, whose stack maps are precise per safepoint.
+    pub scratch_reset_dead: BTreeMap<usize, Vec<u32>>,
 }
 
 impl RootPlan {
@@ -862,6 +872,22 @@ pub fn plan_with_stack_check(f: &Function, mode: RootMode, stack_check: bool) ->
             safepoint_slots.insert(idx, slots);
         }
     }
+    let mut scratch_reset_dead = BTreeMap::new();
+    if storage == RootStorage::RuntimeStack && num_slots > 0 {
+        let resets: Vec<usize> = (0..f.body.len()).filter(|&j| matches!(f.body[j], Inst::Op { op: OpCode::ScratchReset, .. })).collect();
+        for (&j, (_, out)) in resets.iter().zip(live_at_many(f, &resets)) {
+            let mut used = vec![false; num_slots as usize];
+            for (r, live) in out.iter().enumerate() {
+                if let (true, Some(slot)) = (*live, slot_of[r]) {
+                    used[slot as usize] = true;
+                }
+            }
+            let dead: Vec<u32> = (0..num_slots).filter(|&s| !used[s as usize]).collect();
+            if !dead.is_empty() {
+                scratch_reset_dead.insert(j, dead);
+            }
+        }
+    }
     // Only the shadow stack bounds recursion in a prologue: native-frame
     // storage leaves it to the stack guard (codegen::clif reserves nothing
     // for it).
@@ -877,6 +903,7 @@ pub fn plan_with_stack_check(f: &Function, mode: RootMode, stack_check: bool) ->
         depth_reservation,
         stack_check,
         safepoint_slots,
+        scratch_reset_dead,
         entry_zero,
     }
 }
@@ -916,7 +943,7 @@ pub fn report(program: &Program) -> String {
             "  storage: {}",
             match plan.storage {
                 RootStorage::NativeFrame => "native frame",
-                RootStorage::RuntimeStack => "shadow stack",
+                RootStorage::RuntimeStack => "runtime stack",
             }
         )
         .unwrap();
@@ -954,6 +981,37 @@ mod tests {
             "nir 1 call-effects=0\n\nfunc 0 \"<program>\" params=0 env=0 regs={regs} pnames=\"\" captures=0 rawregs=\"{rawregs}\"\n{body}end\n"
         );
         parse_one(&text)
+    }
+
+    /// ShadowOnly: after a `scratchreset`, a slot no live register occupies
+    /// is listed for zeroing -- here the slot of `%1`, a String of the region
+    /// the reset releases, live across the first `listnew` and dead after the
+    /// reset; the String still live after it keeps its slot. Native frames
+    /// list nothing (their stack maps are precise per safepoint).
+    #[test]
+    fn a_scratch_reset_clears_dead_shadow_slots() {
+        let f = program_of(
+            8,
+            "",
+            concat!(
+                "    %0 = op scratchmark\n",
+                "    %1 = str \"a\"\n",
+                "    %2 = str \"b\"\n",
+                "    %4 = op listnew\n",
+                "    %3 = op strlen %1\n",
+                "    %5 = op scratchreset %0\n",
+                "    %6 = op listnew\n",
+                "    %7 = op streq %2 %2\n",
+                "    ret %7\n",
+            ),
+        );
+        let shadow = plan(&f, SHADOW);
+        let reset = f.body.iter().position(|i| matches!(i, Inst::Op { op: OpCode::ScratchReset, .. })).unwrap();
+        let s1 = shadow.slot_of[1].expect("%1 is live across a safepoint");
+        let s2 = shadow.slot_of[2].expect("%2 is live across both");
+        assert_ne!(s1, s2);
+        assert_eq!(shadow.scratch_reset_dead.get(&reset), Some(&vec![s1]));
+        assert!(plan(&f, RootMode::NativeFrame).scratch_reset_dead.is_empty());
     }
 
     /// A two-function program: function 0 is the required no-argument

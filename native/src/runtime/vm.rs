@@ -35,8 +35,23 @@ use std::rc::Rc;
 /// (core::process::defaultArgv), never the launching process's own.
 pub const DEFAULT_ARGV: &[&str] = &["botlish-runner"];
 
-/// Fallback shadow stack capacity in Value slots.
+/// The shadow stack's least capacity in Value slots (32 MiB).
 const SHADOW_STACK_SLOTS: usize = 1 << 22;
+
+/// The ShadowOnly plan's shadow array for a Vm whose code runs on STACK
+/// (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md, section 6.3): as
+/// many bytes as that stack has, and never fewer than SHADOW_STACK_SLOTS
+/// slots. Where native frames hold roots, each root slot takes 8 bytes of
+/// its function's native frame, so a recursion's roots never outgrow its
+/// thread's stack, which the guard bounds; a shadow array as large as the
+/// stack therefore admits every recursion the native-frame plan admits and
+/// is full no sooner than the stack would be (`rt_shadow_overflow` reports
+/// it the guard's way). The array is a zeroed allocation: reserved, not
+/// touched, so only the slots a run reaches become resident.
+fn shadow_slots(stack: Option<&NativeStack>) -> usize {
+    let stack_slots = stack.map_or(0, |s| (s.high_bound - s.low_bound) / std::mem::size_of::<Value>());
+    stack_slots.max(SHADOW_STACK_SLOTS)
+}
 
 pub struct FunctionInfo {
     pub arity: usize,
@@ -366,7 +381,6 @@ impl Vm {
         // recursion (codegen::roots's `depth_reservation`): not needed where
         // native frames hold the roots, whose recursion the stack guard
         // bounds (runtime::platform).
-        let mut shadow = if super::framewalk::NATIVE_FRAME_ROOTS { Vec::new() } else { vec![0u64; SHADOW_STACK_SLOTS] };
         // Typed: on a host outside the list the block is a bare `None`.
         let native_stack: Option<NativeStack> = {
             #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
@@ -374,8 +388,9 @@ impl Vm {
             #[cfg(not(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
             { None }
         };
+        let mut shadow = if super::framewalk::NATIVE_FRAME_ROOTS { Vec::new() } else { vec![0u64; shadow_slots(native_stack.as_ref())] };
         let base = if shadow.is_empty() { std::ptr::null_mut() } else { shadow.as_mut_ptr() };
-        let limit = if shadow.is_empty() { base } else { unsafe { base.add(SHADOW_STACK_SLOTS) } };
+        let limit = if shadow.is_empty() { base } else { unsafe { base.add(shadow.len()) } };
         Box::new(Vm {
             ss_top: base,
             ss_limit: limit,
