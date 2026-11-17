@@ -250,6 +250,7 @@ proc corpusDetector {driver scratch corpus reference timeout} {
         generator {ResumeFrame allocations} {== 2}
         dfa-tail {ResumeFrame allocations} {< 16}
         loop-calls {ResumeFrame allocations} {< 16}
+        tail-calls {ResumeFrame allocations} {< 16}
         many {ResumeFrame allocations} {== 20000}
         reclaim {ResumeFrame currentLiveObjects} {== 0}
         precision {String currentLiveObjects} {< 50000}

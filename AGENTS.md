@@ -2205,11 +2205,15 @@ Keep it so:
   raw slots; the collector traces `callee` and the first `ntagged` tagged
   slots only, and `frrestore` marks a resumed frame untraced. Never trace a
   raw slot, save a dead register or skip one live across the point.
-* An activation suspending again reuses its frame, and a yielding self tail
-  call passes its frame to the next iteration: steady-state suspension and
-  a recognizer's tail recursion allocate no frame per resume or symbol
-  (tests/resumable-coroutines.test's rc-frames-per-resume,
-  rc-dfa-tail-frames).
+* An activation suspending again reuses its frame; a call site hands its
+  next call the frame of the callee activation that returned; a yielding
+  self tail call is the next iteration of the same activation (parameters
+  rebound, a jump back past the hand-off registers' UNIT), keeping its
+  frame and its call sites' recycled ones. Steady-state suspension, a
+  yielding call per loop iteration and yielding tail recursion allocate no
+  frame per resume, call or iteration (tests/resumable-coroutines.test's
+  rc-frames-per-resume, rc-loop-call-frames, rc-dfa-tail-frames,
+  rc-tail-call-frames).
 * ShadowOnly: every function with a root slot reserves its frame on the
   shadow stack, leaf or not, and pops it on every exit; nothing is
   published anywhere else (the old leaf publication through one Vm pointer

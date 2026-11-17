@@ -1,0 +1,46 @@
+# The baseline of WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md
+# (section 2), 2026-11-17, one run each on the session's 4-core container
+# (times indicative only). Three drivers:
+#   prototype   c5b22364 + audit/wasm-architecture/patches/resumable-and-wasm-prototype.patch,
+#               built --features fallback-roots (its NIR from c5b22364's own front end)
+#   main        db473ee0 (current main when the milestone started), --features fallback-roots
+#   production  this milestone's driver, --features fallback-roots (resumable, ShadowOnly)
+# Allocations by kind: audit/wasm-architecture/tools/allocsum.py. The
+# prototype's frames have no kind of their own: they are total minus the
+# named kinds. Production's are ResumeFrame.
+#
+# Reproduce (prototype): git worktree add /tmp/proto c5b22364; cd /tmp/proto;
+#   patch -s -p1 < audit/wasm-architecture/patches/resumable-and-wasm-prototype.patch
+#   (cd native && cargo build --release --features fallback-roots)
+#   tclsh9.0 main.tcl -backend cranelift -emit-nir CORPUS.bot | sed -n '/^nir /,/^   value/p' | grep -v '^   value' > X.nir
+#   python3 -I audit/wasm-architecture/tools/allocsum.py - native/target/release/botlish-native run --alloc summary X.nir
+
+== dfa-tail (audit/wasm-architecture/corpus/dfa-tail.bot: a yielding self tail call per symbol, 1,000,000 symbols)
+prototype            value {list {{int 1} {int 0}}}  wall 0.339s  gc 122
+                     allocs total=2000014/128001008B Struct=1000003/40000120B Coroutine=2/208B ...
+                     => 1,000,007 frames, 88,000,584 bytes (one 88-byte frame per symbol)
+production fusion=0  value {list {{int 1} {int 0}}}  wall 0.157s  gc 38
+                     allocs total=1000013/40000632B Struct=1000003/40000120B Coroutine=2/208B ResumeFrame=6/208B
+                     => 6 frames, 208 bytes (the self tail call reuses its frame)
+production fusion=1  value {list {{int 1} {int 0}}}  wall 0.039s  gc 0
+                     allocs total=2/96B List=1/40B MutableArray=1/56B (fused: no coroutine, no Struct per symbol)
+
+== c6a-generator (one generator resumed 1,000,000 times)
+prototype            value {int 499999499999}  allocs total=4/344B Block=1/48B Coroutine=1/104B => 2 frames, 192 bytes
+production fusion=0  value {int 499999499999}  allocs total=4/248B Block=1/48B Coroutine=1/104B ResumeFrame=2/96B
+production fusion=1  value {int 499999499999}  allocs 0 (fused)
+
+== c6b-many (10,000 coroutines suspended at once; not fusible: the handles escape into a list)
+prototype            value {int 50025000}  allocs total=50005/3840160B ... Coroutine=10000/1040000B => 20,000 frames, 1,760,000 bytes (88 each)
+production fusion=0  value {int 50025000}  allocs total=50005/2880160B ... Coroutine=10000/1040000B ResumeFrame=20000/800000B (40 each)
+production fusion=1  identical to fusion=0
+
+== leaf-reentry (audit/wasm-architecture/corpus/leaf-reentry.bot, correct value 340; ten runs per row)
+main fallback-roots  roots: <program> runtime stack, label native frame, outer native frame
+   gc-stress=0       10 value {int 340}
+   gc-stress=1        6 value {int 50}, 4 Segmentation fault (exit 139)
+stock (stack maps)   gc-stress=0: 5 value {int 340}; gc-stress=1: 5 value {int 340}
+prototype            gc-stress=0: 3 value {int 340}; gc-stress=1: 3 value {int 340}
+production           roots: <program>, label, outer all shadow stack
+   gc-stress=0       5 value {int 340}
+   gc-stress=1       5 value {int 340}

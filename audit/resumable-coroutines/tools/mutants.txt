@@ -97,12 +97,12 @@
 # ---------------------------------------------------------------------------
 # I2, I7: frame hand-off and unique ownership
 
-@@ caller-frame-handed-down a fresh yielding call hands the callee its caller's own frame instead of UNIT: the callee reuses a frame another live activation owns (I7)
+@@ caller-frame-handed-down an activation's yielding call sites start with the activation's own incoming frame instead of UNIT: after a self tail call reuses that frame, or on any later fresh call, a callee starts in a frame its caller owns (I7)
 ## native/src/codegen/resumable.rs
 <<<<
-                    body.push(Inst::Unit { dst: h });
+        f.body.insert(0, Inst::Unit { dst: *h });
 ====
-                    body.push(Inst::Move { dst: h, src: fr });
+        f.body.insert(0, Inst::Move { dst: *h, src: fp });
 >>>>
 
 @@ callee-frame-dropped a resumed call re-enters its callee without the callee's frame: the callee starts afresh instead of continuing (I2)
@@ -133,7 +133,13 @@
                     body.push(Inst::Label(l_back));
 >>>>
 
-@@ tail-frame-not-reused a yielding self tail call starts the next activation without the finished one's frame: one frame per iteration (a declared recognizer's per symbol)
+@@ tail-frame-not-reused a yielding self tail call starts the next activation without the finished one's frame (no loop in the activation, and the tail call passes the incoming frame argument, UNIT for a fresh activation): one frame per iteration (a declared recognizer's per symbol)
+## native/src/codegen/resumable.rs
+<<<<
+            Inst::Tail { args } if !args.iter().enumerate().any(|(j, a)| f.plan_regs[*a as usize] || f.plan_regs[j]) => args.clone(),
+====
+            Inst::Tail { args } if false && !args.iter().enumerate().any(|(j, a)| f.plan_regs[*a as usize] || f.plan_regs[j]) => args.clone(),
+>>>>
 ## native/src/codegen/resumable.rs
 <<<<
             Inst::Tail { mut args } => {
@@ -143,6 +149,14 @@
             Inst::Tail { mut args } => {
                 report.tail_sites += 1;
                 args.push(fp);
+>>>>
+
+@@ tail-handoffs-reset a yielding self tail call's loop goes back before the call sites' hand-off registers are set to UNIT: every iteration drops the callee frames its call sites recycle, one callee frame per iteration of a tail-recursive loop calling a yielding function
+## native/src/codegen/resumable.rs
+<<<<
+        f.body.insert(handoffs, Inst::Label(l_loop));
+====
+        f.body.insert(0, Inst::Label(l_loop));
 >>>>
 
 # ---------------------------------------------------------------------------

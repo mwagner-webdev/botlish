@@ -61,11 +61,17 @@
 //!   finished activation, which nothing else owns: the site's next call
 //!   hands it down again, and the callee (its point 0) starts afresh in it
 //!   -- a yielding call in a loop makes one frame, not one per iteration.
-//! * **A self tail call** passes `%fr` as the new activation's frame: the
-//!   finished activation's frame is reused (its point is 0 while it runs,
-//!   so the entry dispatch starts the body afresh), and a loop written as
-//!   yielding tail recursion -- a declared recognizer's `NAME#run` --
-//!   allocates one frame, not one per iteration.
+//! * **A self tail call** (`tail`) becomes the next iteration of the same
+//!   activation (`loop_self_tail_calls`): the parameters are rebound and
+//!   control jumps back to the body's start, past the hand-off registers'
+//!   UNIT, so the activation keeps its frame and every call site the
+//!   callee frame it recycles. A loop written as yielding tail recursion --
+//!   a declared recognizer's `NAME#run`, or a loop calling a yielding
+//!   function per iteration -- allocates its frames once, not once per
+//!   iteration. A `tailenv` (or a `tail` moving a construction plan)
+//!   passes `%fr` as the new activation's frame instead: the same frame
+//!   (its point is 0 while it runs, so the entry dispatch starts the body
+//!   afresh).
 //!
 //! LIVE_k is the root planner's own liveness (codegen::roots's
 //! `live_at_many`) on the function before the rewrite: the registers live
@@ -151,6 +157,70 @@ fn new_reg(f: &mut Function, kind: RegKind) -> Reg {
     f.u64_regs.push(kind == RegKind::U64);
     f.scalar_regs.push(kind != RegKind::Tagged);
     r
+}
+
+/// Rewrites F's self tail calls (`tail`) as the next iteration of the same
+/// activation: the parameters are rebound by a parallel move and control
+/// jumps back to the body's start, past its first HANDOFFS instructions (the
+/// call sites' hand-off registers set to UNIT). The activation keeps its
+/// frame (`%fr`, which the entry protocol defines once, before the body) and
+/// every call site keeps the finished callee frame it recycles, so a loop
+/// written as yielding tail recursion allocates no frame per iteration,
+/// whether it yields itself (a declared recognizer's `NAME#run`) or calls a
+/// yielding function each time. Run before liveness, so every suspension
+/// point sees the loop as it runs: what a later iteration reads is live
+/// across it.
+///
+/// Reuse is valid because a tail call is the activation's last act: nothing
+/// of the finished iteration is read after it but the arguments (moved into
+/// the parameters first); no handler or release pad spans a `tail` (it has
+/// no error edge, and native/lower.tcl emits one only in tail position);
+/// the frame is the same function's, so its shape is the same; and while an
+/// activation runs its frame's point is 0, its traced count 0 and its
+/// callee UNIT (`frrestore`, `frcallee`), so the next iteration starts from
+/// exactly a fresh activation's state but for the frames it already owns.
+///
+/// A `tailenv` (its closure is rebound as well) or a `tail` moving a
+/// construction plan keeps the instruction: the main rewrite passes `%fr`
+/// as its hidden frame argument, and the entry protocol (point 0) starts
+/// the body afresh in the same frame -- only the recycled callee frames are
+/// dropped.
+fn loop_self_tail_calls(f: &mut Function, handoffs: usize, report: &mut Report) {
+    let l_loop: Label = max_label(f).map_or(0, |l| l + 1);
+    let mut looped = false;
+    let mut i = 0;
+    while i < f.body.len() {
+        let args = match &f.body[i] {
+            Inst::Tail { args } if !args.iter().enumerate().any(|(j, a)| f.plan_regs[*a as usize] || f.plan_regs[j]) => args.clone(),
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        let origin = f.origins[i];
+        let moved: Vec<usize> = (0..args.len()).filter(|&j| args[j] != j as Reg).collect();
+        let temps: Vec<Reg> = moved
+            .iter()
+            .map(|&j| {
+                let kind = f.kind_of(j as Reg);
+                new_reg(f, kind)
+            })
+            .collect();
+        let mut seq: Vec<Inst> = Vec::new();
+        seq.extend(temps.iter().zip(&moved).map(|(t, &j)| Inst::Move { dst: *t, src: args[j] }));
+        seq.extend(temps.iter().zip(&moved).map(|(t, &j)| Inst::Move { dst: j as Reg, src: *t }));
+        seq.push(Inst::Jump(l_loop));
+        let n = seq.len();
+        f.body.splice(i..=i, seq);
+        f.origins.splice(i..=i, std::iter::repeat_n(origin, n));
+        report.tail_sites += 1;
+        looped = true;
+        i += n;
+    }
+    if looped {
+        f.body.insert(handoffs, Inst::Label(l_loop));
+        f.origins.insert(handoffs, None);
+    }
 }
 
 /// A defined value of KIND that nothing reads: an argument the re-entered
@@ -334,6 +404,7 @@ fn lower_function(original: &Function, y: &[bool], unboxing: &[Option<OpCode>], 
         f.body.insert(0, Inst::Unit { dst: *h });
         f.origins.insert(0, None);
     }
+    loop_self_tail_calls(&mut f, handoffs.len(), report);
     // The suspension points, and what each saves: the root planner's own
     // liveness, on the body before the protocol is inserted.
     let mut sites: Vec<(usize, Site)> = Vec::new();
@@ -544,7 +615,8 @@ fn lower_function(original: &Function, y: &[bool], unboxing: &[Option<OpCode>], 
             continue;
         }
         match inst {
-            // A self tail call: the new activation continues with this
+            // A self tail call loop_self_tail_calls left (it moves a plan),
+            // or a `tailenv`: the new activation continues with this
             // activation's frame (reused, never a second one).
             Inst::Tail { mut args } => {
                 report.tail_sites += 1;
@@ -674,29 +746,50 @@ mod tests {
         assert_eq!(back.functions[2].frame, program.functions[2].frame);
     }
 
-    /// A yielding self tail call passes the activation's frame on: the new
-    /// activation reuses it (its point is 0 while it runs).
+    /// A yielding self tail call becomes the next iteration of the same
+    /// activation: the parameters are rebound (a parallel move: `n` and `k`
+    /// swap) and control jumps back past the hand-off register's UNIT --
+    /// never through the entry protocol -- so the activation keeps its frame
+    /// and the call site the callee frame it recycles: the hand-off register
+    /// is live around the loop, saved at the loop's other suspension point.
     #[test]
-    fn a_yielding_tail_call_passes_its_frame() {
+    fn a_yielding_tail_call_loops_in_its_activation() {
         let text = concat!(
             "nir 1 call-effects=1\n\n",
             "func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0\n",
-            "    %0 = fnvalue 2\n    %1 = op cocreate %0\n    %2 = op costart %1\n    ret %2\nend\n",
-            "func 1 \"spin\" params=1 env=0 regs=3 pnames=\"n\" captures=0\n",
-            "    %1 = op coyield %0\n    %2 = int 1\n    %0 = op isub %0 %2\n    tail %0\nend\n",
-            "func 2 \"\" params=0 env=0 regs=2 pnames=\"\" captures=0\n",
-            "    %0 = int 3\n    %1 = call 1 %0\n    ret %1\nend\n",
+            "    %0 = fnvalue 3\n    %1 = op cocreate %0\n    %2 = op costart %1\n    ret %2\nend\n",
+            "func 1 \"step\" params=1 env=0 regs=2 pnames=\"n\" captures=0\n",
+            "    %1 = op coyield %0\n    ret %1\nend\n",
+            "func 2 \"spin\" params=2 env=0 regs=4 pnames=\"n k\" captures=0\n",
+            "    %2 = call 1 %0\n    %3 = op coyield %1\n    tail %1 %0\nend\n",
+            "func 3 \"\" params=0 env=0 regs=3 pnames=\"\" captures=0\n",
+            "    %0 = int 3\n    %1 = int 4\n    %2 = call 2 %0 %1\n    ret %2\nend\n",
         );
         let mut program = nir::parse(text).unwrap();
         let report = lower(&mut program).unwrap();
+        nir::validate(&program).unwrap();
         assert_eq!(report.tail_sites, 1);
-        let spin = &program.functions[1];
-        let fr = match &spin.body[0] {
-            Inst::Move { dst, src } if *src + 1 == spin.params => *dst,
-            other => panic!("the entry takes the hidden frame: {other:?}"),
-        };
-        let tail = spin.body.iter().find_map(|i| if let Inst::Tail { args } = i { Some(args.clone()) } else { None }).unwrap();
-        assert_eq!(tail.last(), Some(&fr), "the tail call hands the activation's frame to the next one");
+        let spin = &program.functions[2];
+        assert!(!spin.body.iter().any(|i| matches!(i, Inst::Tail { .. } | Inst::TailEnv { .. })), "no tail call is left");
+        // The loop's head: right after the hand-off register's UNIT, which
+        // follows the entry protocol; the jump back goes there.
+        let h = spin.body.iter().find_map(|i| if let Inst::Call { args, .. } = i { args.last().copied() } else { None }).unwrap();
+        let unit = spin.body.iter().position(|i| matches!(i, Inst::Unit { dst } if *dst == h)).unwrap();
+        assert!(spin.body[..unit].iter().any(|i| matches!(i, Inst::Op { op: OpCode::FrIsFrame, .. })));
+        let Inst::Label(head) = spin.body[unit + 1] else { panic!("the loop's head: {:?}", spin.body[unit + 1]) };
+        assert!(spin.body[unit + 1..].iter().any(|i| matches!(i, Inst::Jump(l) if *l == head)), "the jump back");
+        // The parallel move: both parameters through temporaries.
+        let moves: Vec<(Reg, Reg)> = spin.body.iter().filter_map(|i| if let Inst::Move { dst, src } = i { Some((*dst, *src)) } else { None }).collect();
+        assert!(moves.windows(4).any(|w| w[0].1 == 1 && w[1].1 == 0 && w[2] == (0, w[0].0) && w[3] == (1, w[1].0)), "{moves:?}");
+        // The call's point keeps both parameters (its own hand-off register
+        // its resume redefines); the yield's keeps them and the hand-off
+        // register, which the next iteration's call reads.
+        let saves: Vec<(u32, Vec<Reg>)> = spin.body.iter().filter_map(|i| if let Inst::FrameSave { point, tagged, .. } = i { Some((*point, tagged.clone())) } else { None }).collect();
+        assert_eq!(saves.len(), 2);
+        assert_eq!(saves[0].1.len(), 2);
+        assert!(!saves[0].1.contains(&h));
+        assert_eq!(saves[1].1.len(), 3);
+        assert!(saves[1].1.contains(&h), "the recycled callee frame survives the yield: {saves:?}");
     }
 
     /// The boundaries the lowering relies on: a yielding C callback or

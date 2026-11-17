@@ -569,15 +569,7 @@
             }
 >>>>
 
-@@ fallback-runs-coroutines the fallback root plan starts native coroutines: its shadow stack would hold a suspended coroutine's roots out of order
-## native/src/runtime/coroutine.rs
-<<<<
-        if !super::framewalk::NATIVE_FRAME_ROOTS {
-            return vm(p).fail(RtError::Unsupported(
-====
-        if !super::framewalk::NATIVE_FRAME_ROOTS && false {
-            return vm(p).fail(RtError::Unsupported(
->>>>
+@@ fallback-runs-coroutines the fallback root plan runs coroutines on stacks of their own (stack switching) instead of resumable frames: its one LIFO shadow stack would hold a suspended coroutine's roots out of order
 ## native/src/runtime/coroutine.rs
 <<<<
 )) && super::framewalk::NATIVE_FRAME_ROOTS;
