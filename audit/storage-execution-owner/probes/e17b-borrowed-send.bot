@@ -1,0 +1,16 @@
+# E17b -- lending Botlish byte storage to an operation that completes
+# after the call returns: a C parameter that may keep the pointer
+# (`captures`) refuses Botlish storage (FOREIGN-BORROW). "Borrow until
+# completion" is not expressible, so no compiler-managed buffer can be
+# reused while an external operation still reads it (the census's p16b,
+# audit/storage-static-reuse/cases/p16b-foreign-captures.bot).
+direct module
+import std::abi::bytes
+import std::ffi::c
+import std::str
+import std::byte
+
+extern c fn c_submit named "write"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] captures, n: std::ffi::c::ULong) -> std::ffi::c::Long
+
+data = std::abi::bytes::from_list(std::str::encode_utf8("probe e17b\n"))
+c_submit(1, data, 11)

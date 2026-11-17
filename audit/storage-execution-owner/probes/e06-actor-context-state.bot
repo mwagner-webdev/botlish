@@ -1,0 +1,69 @@
+# E06 -- an actor with context state: how does storage ownership differ
+# from injected capability ownership? The `Journal` context is installed
+# once by the entry program and owns its vector for the program's life;
+# the counting actor is constructed under `inject context Journal:`, so its
+# code may push into the journal (authority), while its own locals --
+# including a String it keeps across every `receive` -- live in its
+# coroutine. Two storage owners, one authority grant.
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::list
+import std::mutable_vector
+import std::str
+
+context struct Journal:
+    entries: MutableVector[int]
+
+fn note(x: int, context j: Journal):
+    j.entries.push(x)
+
+fn counter(count: int, inbox: std::actor::Inbox[int], context j: Journal) -> std::actor::Exit:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    banner = std::int::to_string(7).concat(" banner")
+    n = fold i from 0 to count with intermediate k 0:
+        v = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        note(v)
+        k + v
+    std::actor::exit(n + std::str::length(banner))
+
+fn feeder(n: int, to: std::actor::Address[int]) -> std::actor::Exit errors std::event_loop::SchedulerFault:
+    fold i from 0 to n with intermediate acc 0:
+        to.deliver(i)
+        acc + 1
+    std::actor::exit(n)
+
+fn main(n: int, context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, j: Journal) -> List[int] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to: box, inbox: box_in} = std::actor::open[int](4)
+    c = inject context Journal:
+        coroutine {step, first} = counter(n, box_in)
+        std::actor::spawned(step, first)
+    std::actor::start(c)
+    f = inject no context:
+        coroutine {step, first} = feeder(n, box)
+        std::actor::spawned(step, first)
+    std::actor::start(f)
+    std::event_loop::run()
+    std::event_loop::shutdown(4)
+    std::actor::reap()
+    outcomes = std::event_loop::take_outcomes()
+    got = loop o in outcomes:
+        o.value
+    got.append(std::mutable_vector::length(j.entries))
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+with context Journal {entries: std::mutable_vector::from_list([0])}
+main(200):
+    on std::event_loop::SchedulerFault:
+        [-1]
+    on std::event_loop::DriverFault:
+        [-2]
+    on std::event_loop::LoopReentered:
+        [-3]

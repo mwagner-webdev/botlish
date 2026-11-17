@@ -1,0 +1,43 @@
+# e07-http-worker (audit/storage-execution-owner/probes/e07-http-worker.bot)
+
+value: interp value 38283754; native value 38283754
+
+unit <program>
+unit parse<str, int>
+  call of std::str::substring (str) at e07-http-worker.bot:27:12: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+  call of std::str::substring (str) at e07-http-worker.bot:32:12: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+  Request {verb, path, id} (struct) at e07-http-worker.bot:37:5: result; plan: rejected (not representable: a struct (only Strings are placed))
+unit respond<Request, str>
+  call of std::str::concat (str) at e07-http-worker.bot:40:12: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+  call of std::str::concat (str) at e07-http-worker.bot:40:12: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+  call of std::str::concat (str) at e07-http-worker.bot:40:12: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+  call of std::str::concat (str) at e07-http-worker.bot:40:12: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+  call of std::int::to_string (str) at e07-http-worker.bot:41:50: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+    operand range [0, 4611686018427387903]: at most 19 characters (ASCII) -- a native String block of at most 48 bytes (no sign) [inference]
+  call of std::str::concat (str) at e07-http-worker.bot:41:5: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+  call of std::str::concat (str) at e07-http-worker.bot:41:5: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+  call of std::str::concat (str) at e07-http-worker.bot:41:5: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+unit worker<int> -- may suspend
+  suspension call of coroutine#yield at e07-http-worker.bot:45:16: live bindings 2, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at e07-http-worker.bot:49:16: live bindings 2, pending operands 0, objects kept 1
+  call of parse (struct) at e07-http-worker.bot:46:13: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of respond (str) at e07-http-worker.bot:50:35: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+unit raw<int>
+  call of std::int::to_string (str) at e07-http-worker.bot:53:26: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+    operand range [0, 999]: at most 3 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e07-http-worker.bot:53:5: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+  call of std::str::concat (str) at e07-http-worker.bot:53:5: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+unit drive<int>
+  call of coroutine#create (coroutine) at e07-http-worker.bot:56:5: transient; plan: rejected (not representable: the native coroutine#create)
+  call of raw (str) at e07-http-worker.bot:58:27: escapes (carried); plan: rejected (not confined to its innermost region)
+  Input {line, body} (struct) at e07-http-worker.bot:58:14: escapes (carried); plan: rejected (not representable: a struct (only Strings are placed))
+  call of std::int::to_string (str) at e07-http-worker.bot:59:43: escapes (carried); plan: rejected (not confined to its innermost region)
+    operand range [0, 6993]: at most 4 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  Input {line, body} (struct) at e07-http-worker.bot:59:20: escapes (carried); plan: rejected (not representable: a struct (only Strings are placed))
+unit the coroutine of worker constructed at e07-http-worker.bot:56:5 -- may suspend
+  suspension call of worker at e07-http-worker.bot:56:31: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 1, segment 1, persistent 1, result 14, escapes 4, unknown 0
+native, scratch storage on: heap allocations 9000, heap bytes 414970, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 9000, heap bytes 414970, collections 0
+String sites lowering emitted a placement for: 0

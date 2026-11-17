@@ -1,0 +1,24 @@
+# E13b -- nested owners in the C backend's subset (Ints only): a parent
+# coroutine constructs a child and keeps it across its own suspensions.
+# The child's storage is a field of the parent's frame struct (the
+# constructing function yields, so the construction is persistent storage
+# of its frame), and the handle the parent holds points into that same
+# frame: the frame refers to itself, so it cannot be moved by copying
+# once constructed.
+import std::coroutine
+
+fn child(seed: int) -> int:
+    yield seed
+    yield seed + 1
+    seed * 2
+
+fn parent(seed: int) -> int:
+    coroutine {step, first} = child(seed * 10)
+    yield first
+    second = step()
+    yield second
+    third = step()
+    seed + third + step()
+
+coroutine {step, first} = parent(1)
+first + step() + step() + step()

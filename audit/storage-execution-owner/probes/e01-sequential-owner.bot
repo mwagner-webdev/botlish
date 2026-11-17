@@ -1,0 +1,30 @@
+# E01 -- sequential owner operations: one execution owner (a coroutine
+# instance) processes many jobs, one after another. Per job it builds a
+# temporary dead before its next suspension (`scratch`) and a label it
+# keeps across one suspension and reads after it (`label`). Can one owner
+# reuse the same storage for every job? The facts say whether each object
+# is confined to the job's iteration and whether it survives a suspension.
+import std::coroutine
+import std::int
+import std::str
+
+struct Job:
+    id: int
+
+fn worker(first: int, resume Job) -> int:
+    total = fold n from 0 to 1000000 with intermediate acc first:
+        job = yield acc
+        scratch = std::int::to_string(job.id).concat(" scratch")
+        label = std::int::to_string(job.id).concat(" label")
+        ack = yield std::str::length(scratch)
+        acc + ack.id + std::str::length(label)
+    total
+
+fn drive(n: int) -> int:
+    coroutine {step, first} = worker(0)
+    fold i from 0 to n with intermediate acc first:
+        a = step(Job {id: i})
+        b = step(Job {id: 1})
+        acc + a + b
+
+drive(1000)

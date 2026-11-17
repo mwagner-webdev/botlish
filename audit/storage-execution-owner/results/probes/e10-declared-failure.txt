@@ -1,0 +1,30 @@
+# e10-declared-failure (audit/storage-execution-owner/probes/e10-declared-failure.bot)
+
+value: interp value 20070; native value 20070
+
+unit <program>
+unit check<int>
+  call of std::int::to_string (str) at e10-declared-failure.bot:19:9: escapes (error); plan: rejected (not confined to its innermost region)
+    operand range [0, 999]: at most 3 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e10-declared-failure.bot:19:9: escapes (error); plan: rejected (not confined to its innermost region)
+  struct {reason} (struct) at e10-declared-failure.bot:21:23: escapes (error); plan: rejected (not representable: a struct (only Strings are placed))
+  struct {limit} (struct) at e10-declared-failure.bot:23:22: escapes (error); plan: rejected (not representable: a struct (only Strings are placed))
+unit job<int> -- may suspend
+  suspension call of coroutine#yield at e10-declared-failure.bot:28:5: live bindings 2, pending operands 0, objects kept 2
+  call of std::int::to_string (str) at e10-declared-failure.bot:27:9: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 999]: at most 3 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e10-declared-failure.bot:27:9: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  struct {limit} (struct) at e10-declared-failure.bot:30:22: escapes (error); plan: rejected (it may suspend: a region is never live across a suspension)
+unit drive<int>
+  call of check (payload) at e10-declared-failure.bot:35:13: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  closure (closure) at e10-declared-failure.bot:40:9: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e10-declared-failure.bot:40:9: transient; plan: rejected (not representable: the native coroutine#create)
+unit the coroutine of job constructed at e10-declared-failure.bot:40:9 -- may suspend
+  suspension call of job at e10-declared-failure.bot:40:35: live bindings 0, pending operands 0, objects kept 0
+  call of job (fresh) at e10-declared-failure.bot:40:35: escapes (error); plan: rejected (it may suspend: a region is never live across a suspension)
+
+owner classes: transient 3, segment 0, persistent 2, result 0, escapes 6, unknown 0
+native, scratch storage on: heap allocations 4334, heap bytes 155624, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 4334, heap bytes 155624, collections 0
+coroutines: stacksMapped 0, stacksReused 0, released 0, releasedSuspended 0, sweptSuspended 0
+String sites lowering emitted a placement for: 0

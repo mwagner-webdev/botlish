@@ -1,0 +1,16 @@
+# e12-unbounded-string (audit/storage-execution-owner/probes/e12-unbounded-string.bot)
+
+value: interp value 2930; native value 2930
+
+unit <program>
+  call of argv (list) at e12-unbounded-string.bot:15:8: transient; plan: rejected (not representable: the native argv)
+  call of list (list) at e12-unbounded-string.bot:17:9: transient; plan: rejected (not representable: the native list)
+unit grow<int>
+  call of std::int::to_string (str) at e12-unbounded-string.bot:12:20: escapes (carried); plan: rejected (not confined to its innermost region)
+    operand range [0, 4611686018427387903009]: at most 22 characters (ASCII) -- a native String block of at most 48 bytes (no sign) [inference]
+  call of std::str::concat (str) at e12-unbounded-string.bot:12:9: escapes (carried); plan: rejected (not confined to its innermost region)
+
+owner classes: transient 2, segment 0, persistent 0, result 0, escapes 2, unknown 0
+native, scratch storage on: heap allocations 1014, heap bytes 31302, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 1014, heap bytes 31302, collections 0
+String sites lowering emitted a placement for: 0

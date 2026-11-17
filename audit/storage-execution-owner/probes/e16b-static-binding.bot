@@ -1,0 +1,16 @@
+# E16b -- the counterpart of E16: `rate` is a top-level value a function
+# reads, which the C backend keeps in a writable object of static storage
+# duration (StaticBindings): two concurrent runs of this program would
+# share it.
+import std::coroutine
+
+rate = 3
+
+fn tick(start: int) -> int:
+    total = fold i from 0 to 4 with intermediate acc start:
+        yield acc
+        acc + rate
+    total
+
+coroutine {step, first} = tick(1)
+first + step() + step() + step() + step()

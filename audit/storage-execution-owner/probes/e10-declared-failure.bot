@@ -1,0 +1,48 @@
+# E10 -- declared failure: what storage, and what runtime allocation,
+# remain on the failure path? `check` fails with a payload holding a String
+# it built (the String escapes through the error: `error` reason) and with
+# one holding only an Int computed from a String (that String dies at the
+# `fail`). `job` is a coroutine that fails after a suspension: its failure
+# is cached in the coroutine and raised again by every later resume, so
+# what the failure holds lives as long as the handle.
+import std::coroutine
+import std::int
+import std::str
+
+error Rejected:
+    reason: str
+
+error TooLong:
+    limit: int
+
+fn check(i: int) -> int errors Rejected, TooLong:
+    s = std::int::to_string(i).concat(" checked")
+    if i.mod(7) == 0:
+        fail Rejected {reason: s}
+    if i.mod(5) == 0:
+        fail TooLong {limit: std::str::length(s)}
+    std::str::length(s)
+
+fn job(i: int) -> int errors TooLong:
+    t = std::int::to_string(i).concat(" job")
+    yield std::str::length(t)
+    if i.mod(3) == 0:
+        fail TooLong {limit: std::str::length(t)}
+    std::str::length(t)
+
+fn drive(n: int) -> int errors TooLong:
+    fold i from 0 to n with intermediate acc 0:
+        a = check(i):
+            on Rejected {reason}:
+                std::str::length(reason)
+            on TooLong {limit}:
+                limit
+        coroutine {step, first} = job(i)
+        b = step():
+            on TooLong {limit}:
+                0 - limit
+        acc + a + first + b
+
+drive(1000):
+    on TooLong:
+        -1

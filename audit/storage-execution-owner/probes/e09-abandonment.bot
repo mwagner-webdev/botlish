@@ -1,0 +1,25 @@
+# E09 -- early abandonment: when may a suspended execution's storage be
+# reclaimed? `worker` keeps a String across its first suspension; `drive`
+# resumes it once and then stops using it while it is still suspended. The
+# handle's last use releases it there (hir::affine::Releases): natively the
+# coroutine's stack goes back to the pool at once, its frames discarded (no
+# Botlish code runs). The String it kept is a heap object the collector
+# reclaims later; an owner region would be released at the release.
+import std::coroutine
+import std::int
+import std::str
+
+fn worker(seed: int) -> int:
+    kept = std::int::to_string(seed).concat(" kept")
+    yield std::str::length(kept)
+    more = kept.concat(" more")
+    yield std::str::length(more)
+    std::str::length(more) + std::str::length(kept)
+
+fn drive(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        coroutine {step, first} = worker(i)
+        second = step()
+        acc + first + second
+
+drive(1000)

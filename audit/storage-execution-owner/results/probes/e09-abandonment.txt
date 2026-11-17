@@ -1,0 +1,22 @@
+# e09-abandonment (audit/storage-execution-owner/probes/e09-abandonment.bot)
+
+value: interp value 20780; native value 20780
+
+unit <program>
+unit worker<int> -- may suspend
+  suspension call of coroutine#yield at e09-abandonment.bot:14:5: live bindings 1, pending operands 0, objects kept 2
+  suspension call of coroutine#yield at e09-abandonment.bot:16:5: live bindings 2, pending operands 0, objects kept 3
+  call of std::int::to_string (str) at e09-abandonment.bot:13:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 999]: at most 3 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e09-abandonment.bot:13:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at e09-abandonment.bot:15:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+unit drive<int>
+  closure (closure) at e09-abandonment.bot:21:9: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e09-abandonment.bot:21:9: transient; plan: rejected (not representable: the native coroutine#create)
+unit the coroutine of worker constructed at e09-abandonment.bot:21:9 -- may suspend
+  suspension call of worker at e09-abandonment.bot:21:35: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 2, segment 0, persistent 3, result 0, escapes 0, unknown 0
+native, scratch storage on: heap allocations 3000, heap bytes 98670, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 3000, heap bytes 98670, collections 0
+String sites lowering emitted a placement for: 0

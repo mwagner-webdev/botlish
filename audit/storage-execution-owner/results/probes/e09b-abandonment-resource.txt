@@ -1,0 +1,24 @@
+# e09b-abandonment-resource (audit/storage-execution-owner/probes/e09b-abandonment-resource.bot)
+
+value: interp value 8890; native value 8890
+
+unit <program>
+unit worker<int> -- may suspend
+  suspension call of coroutine#yield at e09b-abandonment-resource.bot:16:5: live bindings 2, pending operands 0, objects kept 3
+  suspension call of coroutine#yield at e09b-abandonment-resource.bot:17:5: live bindings 2, pending operands 0, objects kept 3
+  call of e09_lease::take (struct) at e09b-abandonment-resource.bot:14:13: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at e09b-abandonment-resource.bot:15:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 999]: at most 3 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e09b-abandonment-resource.bot:15:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+unit drive<int>
+  closure (closure) at e09b-abandonment-resource.bot:23:9: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e09b-abandonment-resource.bot:23:9: transient; plan: rejected (not representable: the native coroutine#create)
+unit the coroutine of worker constructed at e09b-abandonment-resource.bot:23:9 -- may suspend
+  suspension call of worker at e09b-abandonment-resource.bot:23:35: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 2, segment 0, persistent 3, result 0, escapes 0, unknown 0
+native, scratch storage on: heap allocations 5000, heap bytes 244780, collections 15; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 5000, heap bytes 244780, collections 15
+coroutines: stacksMapped 1, stacksReused 999, released 1000, releasedSuspended 0, sweptSuspended 0
+resources: cleanups 1000, abandoned 1000
+String sites lowering emitted a placement for: 0

@@ -1,0 +1,76 @@
+# E05 -- actor message processing: what owns retained messages and actor
+# state today? A server actor receives requests, builds a reply body (sent:
+# it is retained by the client's mailbox), and keeps a per-message note
+# across the send (a suspension: `send` is a request yielded to the host)
+# and reads it after. The client keeps a per-request String across its
+# `deliver` and `receive`.
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::str
+
+struct Req:
+    id: int
+    text: str
+    reply: std::actor::Address[Resp]
+
+struct Resp:
+    id: int
+    body: str
+
+fn server(inbox: std::actor::Inbox[Req]) -> std::actor::Exit:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    n = fold with intermediate k 0:
+        r = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        note = std::int::to_string(r.id).concat(" note")
+        body = r.text.concat(" -> ").concat(std::int::to_string(r.id * 2))
+        r.reply.send(Resp {id: r.id, body: body})
+        k + std::str::length(note)
+    std::actor::exit(n)
+
+fn client(n: int, to: std::actor::Address[Req], mine: std::actor::Inbox[Resp], me: std::actor::Address[Resp]) -> std::actor::Exit errors std::event_loop::SchedulerFault:
+    rx = std::actor::listen(mine):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    total = fold i from 0 to n with intermediate acc 0:
+        mark = std::int::to_string(i).concat(" waiting")
+        to.deliver(Req {id: i, text: "request", reply: me})
+        r = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        acc + std::str::length(r.body) + std::str::length(mark)
+    std::actor::exit(total)
+
+fn main(n: int, context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors) -> List[int] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to: srv, inbox: srv_in} = std::actor::open[Req](4)
+    {to: cli, inbox: cli_in} = std::actor::open[Resp](4)
+    s = inject no context:
+        coroutine {step, first} = server(srv_in)
+        std::actor::spawned(step, first)
+    std::actor::start(s)
+    c = inject no context:
+        coroutine {step, first} = client(n, srv, cli_in, cli)
+        std::actor::spawned(step, first)
+    std::actor::start(c)
+    std::event_loop::run()
+    std::event_loop::shutdown(4)
+    std::actor::reap()
+    outcomes = std::event_loop::take_outcomes()
+    loop o in outcomes:
+        o.value
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main(200):
+    on std::event_loop::SchedulerFault:
+        [-1]
+    on std::event_loop::DriverFault:
+        [-2]
+    on std::event_loop::LoopReentered:
+        [-3]

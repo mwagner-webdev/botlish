@@ -1,0 +1,23 @@
+# E04 -- coroutine resumption: which temporary storage becomes reusable
+# after a segment? `scan` keeps one String for its whole life (`name`) and
+# builds, in every segment, temporaries dead before the segment's yield
+# (`piece`). Segment storage could be reused segment after segment; `name`
+# must persist.
+import std::coroutine
+import std::int
+import std::str
+
+fn scan(seed: int) -> int:
+    name = std::int::to_string(seed).concat(" name")
+    total = fold k from 0 to 4 with intermediate acc 0:
+        piece = std::int::to_string(seed + k).concat(" piece")
+        yield std::str::length(piece)
+        acc + k
+    total + std::str::length(name)
+
+fn drive(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        coroutine {step, first} = scan(i)
+        acc + first + step() + step() + step() + step()
+
+drive(1000)

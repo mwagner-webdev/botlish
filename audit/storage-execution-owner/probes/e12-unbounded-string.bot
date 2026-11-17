@@ -1,0 +1,18 @@
+# E12 -- an unbounded String: what fact prevents a strict storage
+# guarantee? The text grows with a count read from the program's arguments
+# at run time (std::argv: unknown to the compiler), so neither the loop
+# bound nor the String's length has a static bound; a strict bounded owner
+# would have to reject it or take the bound from configuration.
+import std::int
+import std::list
+import std::str
+
+fn grow(n: int) -> int:
+    text = fold k from 0 to n with intermediate acc "":
+        acc.concat(std::int::to_string(k))
+    std::str::length(text)
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+grow(std::list::length(args) * 1000 + 10)

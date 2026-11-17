@@ -1,0 +1,139 @@
+# export (examples/dfa/csv/export.bot)
+
+unit <program>
+  call of std::linux::io::create (struct) at export.bot:83:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of std::linux::fs::create (struct) at export.bot:84:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of argv (list) at export.bot:107:8: transient; plan: rejected (not representable: the native argv)
+  call of list (list) at export.bot:109:9: transient; plan: rejected (not representable: the native list)
+  call of std::int::to_string (str) at export.bot:116:28: transient; plan: selected
+    operand range [0, +∞]: no finite bound on the text
+  call of std::str::concat (str) at export.bot:116:12: transient; plan: selected
+  call of std::str::concat (str) at export.bot:116:12: transient; plan: selected
+  call of std::str::concat (str) at export.bot:116:12: transient; plan: selected
+unit csv_utf8::quoted_char#run<int, int>
+  struct {recognizer, state} (struct) at csv_utf8.bot:119:5: escapes (error); plan: rejected (not representable: a struct (only Strings are placed))
+  struct {recognizer, state, symbol} (struct) at csv_utf8.bot:119:5: escapes (error); plan: rejected (not representable: a struct (only Strings are placed))
+unit csv_utf8::quoted_char<int>
+  call of csv_utf8::quoted_char#run (fresh) at csv_utf8.bot:119:5: escapes (error); plan: rejected (not confined to its innermost region)
+unit row<str, str, str>
+  csv_common::Row {a, b, c} (struct) at export.bot:38:5: result; plan: rejected (not representable: a struct (only Strings are placed))
+unit table<generic>
+  call of row (struct) at export.bot:41:6: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of row (struct) at export.bot:42:6: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of row (struct) at export.bot:43:6: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of row (struct) at export.bot:44:6: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of row (struct) at export.bot:45:6: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of row (struct) at export.bot:46:6: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of row (struct) at export.bot:47:6: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of row (struct) at export.bot:48:6: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of row (struct) at export.bot:49:6: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of list (list) at export.bot:41:5: result; plan: rejected (not representable: the native list)
+unit flush<std::linux::fs::NativePath, MutableVector[int]>
+  call of mutable_vector#to_list (list) at export.bot:53:22: transient; plan: rejected (not representable: the native mutable_vector#to_list)
+  loop (list) at export.bot:53:12: transient; plan: rejected (not representable: a list (only Strings are placed))
+  call of std::linux::fs::open (struct) at export.bot:55:12: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::abi::bytes::from_list (struct) at export.bot:56:30: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  call of std::linux::fs::write_all (struct) at export.bot:56:15: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::linux::fs::close (fresh) at export.bot:57:5: escapes (error); plan: rejected (not confined to its innermost region)
+unit export<std::linux::fs::NativePath, csv_common::Row, List[csv_common::Row]>
+  call of std::linux::fs::open (struct) at export.bot:62:13: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::linux::fs::close (fresh) at export.bot:63:5: escapes (error); plan: rejected (not confined to its innermost region)
+  closure (closure) at export.bot:64:5: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at export.bot:64:5: transient; plan: rejected (not representable: the native coroutine#create)
+  call of std::str::encode_utf8 (list) at export.bot:65:44: transient; plan: rejected (not representable: the native std::str::encode_utf8)
+  call of std::mutable_vector::from_list (mutvec) at export.bot:65:13: transient; plan: rejected (not representable: the native std::mutable_vector::from_list)
+  call of std::mutable_array::create (mutarray) at export.bot:66:9: transient; plan: rejected (not representable: the native std::mutable_array::create)
+  struct {reason, code} (struct) at export.bot:75:41: escapes (inherited); plan: rejected (not representable: a struct (only Strings are placed))
+  call of flush (fresh) at export.bot:78:13: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of flush (fresh) at export.bot:80:5: escapes (error); plan: rejected (not confined to its innermost region)
+unit the coroutine of sources::bytes_document_source constructed at export.bot:64:5 -- may suspend
+  suspension call of sources::bytes_document_source at export.bot:64:31: live bindings 0, pending operands 0, objects kept 0
+  call of sources::bytes_document_source (fresh) at export.bot:64:31: escapes (error); plan: rejected (it may suspend: a region is never live across a suspension)
+unit report<std::io::IO=std::linux::io::LinuxIO><str>
+unit run<std::io::IO=std::linux::io::LinuxIO><str>
+  call of std::linux::fs::from_text (struct) at export.bot:95:12: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  call of std::str::concat (str) at export.bot:97:20: transient; plan: selected
+  call of std::str::concat (str) at export.bot:97:20: transient; plan: selected
+  call of row (struct) at export.bot:99:18: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  call of table (list) at export.bot:99:48: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  call of export (payload) at export.bot:99:5: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  call of std::int::to_string (str) at export.bot:101:58: transient; plan: selected
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at export.bot:101:20: transient; plan: selected
+  call of std::str::concat (str) at export.bot:101:20: transient; plan: selected
+  call of std::int::to_string (str) at export.bot:101:114: transient; plan: selected
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at export.bot:101:20: transient; plan: selected
+  call of std::str::concat (str) at export.bot:101:20: transient; plan: selected
+  call of std::int::to_string (str) at export.bot:104:51: transient; plan: selected
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at export.bot:104:20: transient; plan: selected
+unit sources::bytes_document_source<csv_common::Row, List[csv_common::Row]> -- may suspend
+  suspension call of utf8_emit::document_bytes at sources.bot:52:5: live bindings 1, pending operands 0, objects kept 0
+  call of utf8_emit::document_bytes (fresh) at sources.bot:52:5: escapes (error); plan: rejected (it may suspend: a region is never live across a suspension)
+unit utf8_emit::utf8<int> -- may suspend
+  suspension call of coroutine#yield at utf8_emit.bot:92:9: live bindings 0, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:95:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:96:9: live bindings 0, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:98:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:99:9: live bindings 0, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:102:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:103:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:104:9: live bindings 0, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:106:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:107:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:108:9: live bindings 0, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:111:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:112:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:113:9: live bindings 0, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:115:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:116:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:117:9: live bindings 0, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:120:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:121:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:122:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:123:9: live bindings 0, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:125:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:126:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:127:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:128:9: live bindings 0, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:131:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:132:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:133:9: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:134:9: live bindings 0, pending operands 0, objects kept 0
+unit utf8_emit::quoted_field_bytes<str> -- may suspend
+  suspension call of coroutine#yield at utf8_emit.bot:138:5: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:142:13: live bindings 1, pending operands 1, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:143:13: live bindings 1, pending operands 1, objects kept 0
+  suspension call of utf8_emit::utf8 at utf8_emit.bot:150:13: live bindings 1, pending operands 1, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:152:5: live bindings 0, pending operands 0, objects kept 0
+  call of csv_utf8::quoted_char (payload) at utf8_emit.bot:145:13: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+  struct {at, value} (struct) at utf8_emit.bot:147:62: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  struct {at, value} (struct) at utf8_emit.bot:149:62: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+unit utf8_emit::record3_bytes<str, str, str> -- may suspend
+  suspension call of utf8_emit::quoted_field_bytes at utf8_emit.bot:156:5: live bindings 2, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:157:5: live bindings 2, pending operands 0, objects kept 0
+  suspension call of utf8_emit::quoted_field_bytes at utf8_emit.bot:158:5: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:159:5: live bindings 1, pending operands 0, objects kept 0
+  suspension call of utf8_emit::quoted_field_bytes at utf8_emit.bot:160:5: live bindings 0, pending operands 0, objects kept 0
+  call of utf8_emit::quoted_field_bytes (fresh) at utf8_emit.bot:156:5: escapes (error); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of utf8_emit::quoted_field_bytes (fresh) at utf8_emit.bot:158:5: escapes (error); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of utf8_emit::quoted_field_bytes (fresh) at utf8_emit.bot:160:5: escapes (error); plan: rejected (it may suspend: a region is never live across a suspension)
+unit utf8_emit::line3_bytes<str, str, str> -- may suspend
+  suspension call of utf8_emit::record3_bytes at utf8_emit.bot:164:5: live bindings 0, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:165:5: live bindings 0, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at utf8_emit.bot:166:5: live bindings 0, pending operands 0, objects kept 0
+  call of utf8_emit::record3_bytes (fresh) at utf8_emit.bot:164:5: escapes (error); plan: rejected (it may suspend: a region is never live across a suspension)
+unit utf8_emit::row_line_bytes<csv_common::Row> -- may suspend
+  suspension call of utf8_emit::line3_bytes at utf8_emit.bot:170:5: live bindings 0, pending operands 0, objects kept 0
+  call of utf8_emit::line3_bytes (fresh) at utf8_emit.bot:170:5: escapes (error); plan: rejected (it may suspend: a region is never live across a suspension)
+unit utf8_emit::stream_bytes<List[csv_common::Row]> -- may suspend
+  suspension call of utf8_emit::row_line_bytes at utf8_emit.bot:177:9: live bindings 1, pending operands 0, objects kept 0
+  call of utf8_emit::row_line_bytes (fresh) at utf8_emit.bot:177:9: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+unit utf8_emit::document_bytes<csv_common::Row, List[csv_common::Row]> -- may suspend
+  suspension call of utf8_emit::row_line_bytes at utf8_emit.bot:194:5: live bindings 1, pending operands 0, objects kept 0
+  suspension call of utf8_emit::stream_bytes at utf8_emit.bot:195:5: live bindings 0, pending operands 0, objects kept 0
+  call of utf8_emit::row_line_bytes (fresh) at utf8_emit.bot:194:5: escapes (error); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of utf8_emit::stream_bytes (fresh) at utf8_emit.bot:195:5: escapes (error); plan: rejected (it may suspend: a region is never live across a suspension)
+
+owner classes: transient 28, segment 1, persistent 0, result 11, escapes 25, unknown 0

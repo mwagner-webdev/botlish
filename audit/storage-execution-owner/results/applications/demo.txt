@@ -1,0 +1,174 @@
+# demo (examples/games/2048/demo.bot)
+
+unit <program>
+  call of std::linux::io::create (struct) at demo.bot:19:14: escapes (context); plan: rejected (not confined to its innermost region)
+  closure (closure) at demo_play.bot:157:8: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  closure (closure) at demo_play.bot:167:8: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  call of demo_play::main<std::io::IO=std::linux::io::LinuxIO> (payload) at demo.bot:21:1: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+unit demo_play::digit<int>
+  call of std::str::substring (str) at demo_play.bot:26:12: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+unit demo_play::fits<int, int> -- recursive
+unit demo_play::digits<int, int> -- recursive
+  call of demo_play::digit (str) at demo_play.bot:45:9: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of demo_play::digits (str) at demo_play.bot:47:9: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of demo_play::digit (str) at demo_play.bot:47:31: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of std::str::concat (str) at demo_play.bot:47:9: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+unit demo_play::decimal<int>
+  call of demo_play::digits (str) at demo_play.bot:51:5: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+unit demo_play::field<str>
+  call of std::str::substring (str) at demo_play.bot:58:15: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+  call of std::str::concat (str) at demo_play.bot:63:5: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+unit demo_play::cell_text<int>
+  call of demo_play::decimal (str) at demo_play.bot:69:15: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+  call of demo_play::field (str) at demo_play.bot:69:9: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+unit demo_play::joined<List[str]>
+  closure (closure) at demo_play.bot:72:12: result; plan: rejected (not representable: a closure (only Strings are placed))
+  call of from (str) at demo_play.bot:76:5: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+unit from<int> -- recursive
+  call of from (str) at demo_play.bot:75:33: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of std::str::concat (str) at demo_play.bot:75:9: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+unit from<generic>
+  call of from (str) at demo_play.bot:75:33: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+  call of std::str::concat (str) at demo_play.bot:75:9: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+unit demo_play::board_lines<game2048::Board>
+  loop (list) at demo_play.bot:79:5: result; plan: rejected (not representable: a list (only Strings are placed))
+  loop (list) at demo_play.bot:80:17: escapes (inherited); plan: rejected (not representable: a list (only Strings are placed))
+  call of demo_play::cell_text (str) at demo_play.bot:81:13: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of demo_play::joined (str) at demo_play.bot:82:9: escapes (inherited); plan: rejected (not confined to its innermost region)
+unit demo_play::direction_name<enum>
+unit demo_play::preferences<generic>
+  call of list (list) at demo_play.bot:98:5: result; plan: rejected (not representable: the native list)
+unit demo_play::choose<game2048::Game>
+  call of demo_play::preferences (list) at demo_play.bot:107:23: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of game2048::move (struct) at demo_play.bot:108:13: escapes (inherited); plan: rejected (not confined to its innermost region)
+  demo_play::Choice {move, direction} (struct) at demo_play.bot:110:20: escapes (inherited); plan: rejected (not representable: a struct (only Strings are placed))
+  call of game2048::move (struct) at demo_play.bot:111:19: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  demo_play::Choice {move, direction} (struct) at demo_play.bot:111:5: result; plan: rejected (not representable: a struct (only Strings are placed))
+unit demo_play::next_seed<int>
+unit demo_play::spawned<game2048::Game, int, int>
+  call of game2048::empty_positions (list) at demo_play.bot:126:15: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  demo_play::Turn {game, seed, moves} (struct) at demo_play.bot:129:16: result; plan: rejected (not representable: a struct (only Strings are placed))
+  game2048::Position {row, column} (struct) at demo_play.bot:130:39: transient; plan: rejected (not representable: a struct (only Strings are placed))
+  call of game2048::spawn (struct) at demo_play.bot:135:14: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  demo_play::Turn {game, seed, moves} (struct) at demo_play.bot:138:5: result; plan: rejected (not representable: a struct (only Strings are placed))
+unit demo_play::largest<game2048::Board>
+  call of list (list) at demo_play.bot:142:19: transient; plan: rejected (not representable: the native list)
+unit demo_play::show<std::io::IO=std::linux::io::LinuxIO><game2048::Board, str>
+  call of demo_play::board_lines (list) at demo_play.bot:152:18: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  loop (list) at demo_play.bot:152:5: result; plan: rejected (not representable: a list (only Strings are placed))
+unit demo_play::play<std::io::IO=std::linux::io::LinuxIO><demo_play::Turn, int> -- recursive
+  call of demo_play::choose (struct) at demo_play.bot:160:14: escapes (error result); plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of demo_play::decimal (str) at demo_play.bot:163:32: transient; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of std::str::concat (str) at demo_play.bot:163:17: transient; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of std::str::concat (str) at demo_play.bot:163:17: transient; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of std::str::concat (str) at demo_play.bot:163:17: transient; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of std::str::concat (str) at demo_play.bot:163:17: transient; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of demo_play::decimal (str) at demo_play.bot:163:123: transient; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of std::str::concat (str) at demo_play.bot:163:17: transient; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of demo_play::show<std::io::IO=std::linux::io::LinuxIO> (list) at demo_play.bot:164:9: escapes (error); plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of demo_play::spawned (struct) at demo_play.bot:165:5: escapes (error result); plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of demo_play::play<std::io::IO=std::linux::io::LinuxIO> (struct) at demo_play.bot:165:5: escapes (error result); plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+unit demo_play::main<std::io::IO=std::linux::io::LinuxIO><generic>
+  call of game2048::new_game (struct) at demo_play.bot:168:13: escapes (error); plan: rejected (not confined to its innermost region)
+  call of demo_play::spawned (struct) at demo_play.bot:168:13: escapes (error); plan: rejected (not confined to its innermost region)
+  call of demo_play::spawned (struct) at demo_play.bot:169:13: escapes (error); plan: rejected (not confined to its innermost region)
+  call of demo_play::show<std::io::IO=std::linux::io::LinuxIO> (list) at demo_play.bot:170:5: escapes (error); plan: rejected (not confined to its innermost region)
+  call of demo_play::play<std::io::IO=std::linux::io::LinuxIO> (struct) at demo_play.bot:171:13: escapes (error); plan: rejected (not confined to its innermost region)
+  call of demo_play::decimal (str) at demo_play.bot:172:53: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  call of std::str::concat (str) at demo_play.bot:172:27: transient; plan: selected
+  call of std::str::concat (str) at demo_play.bot:172:27: transient; plan: selected
+  call of demo_play::show<std::io::IO=std::linux::io::LinuxIO> (list) at demo_play.bot:172:5: escapes (error); plan: rejected (not confined to its innermost region)
+  call of demo_play::decimal (str) at demo_play.bot:173:41: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  call of std::str::concat (str) at demo_play.bot:173:25: transient; plan: selected
+  call of std::str::concat (str) at demo_play.bot:173:25: transient; plan: selected
+  call of demo_play::decimal (str) at demo_play.bot:173:101: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  call of std::str::concat (str) at demo_play.bot:173:25: transient; plan: selected
+unit game2048::value<enum>
+unit game2048::merged<List[int]>
+  closure (closure) at game2048.bot:97:21: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  call of list (list) at game2048.bot:105:27: result; plan: rejected (not representable: the native list)
+  game2048::Slide {cells, score} (struct) at game2048.bot:105:13: result; plan: rejected (not representable: a struct (only Strings are placed))
+  call of from (struct) at game2048.bot:105:5: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+unit from<int, any> -- recursive
+  call of std::list::append (list) at game2048.bot:102:39: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  game2048::Slide {cells, score} (struct) at game2048.bot:102:25: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of from (struct) at game2048.bot:102:13: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of std::list::append (list) at game2048.bot:104:39: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  game2048::Slide {cells, score} (struct) at game2048.bot:104:25: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of from (struct) at game2048.bot:104:13: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+unit from<generic> -- recursive
+  call of std::list::append (list) at game2048.bot:102:39: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  game2048::Slide {cells, score} (struct) at game2048.bot:102:25: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of from (struct) at game2048.bot:102:13: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of std::list::append (list) at game2048.bot:104:39: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  game2048::Slide {cells, score} (struct) at game2048.bot:104:25: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+  call of from (struct) at game2048.bot:104:13: result; plan: rejected (it is recursive: a region's mark is held for the whole activation, a word of every activation's frame, which a recursion multiplies by its depth)
+unit game2048::slide<List[int]>
+  loop (list) at game2048.bot:110:13: transient; plan: rejected (not representable: a list (only Strings are placed))
+  call of game2048::merged (struct) at game2048.bot:114:13: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  loop (list) at game2048.bot:115:14: result; plan: rejected (not representable: a list (only Strings are placed))
+  game2048::Slide {cells, score} (struct) at game2048.bot:117:5: result; plan: rejected (not representable: a struct (only Strings are placed))
+unit game2048::reversed<List[int]>
+  loop (list) at game2048.bot:122:5: result; plan: rejected (not representable: a list (only Strings are placed))
+unit game2048::each_reversed<List[List[int]]>
+  loop (list) at game2048.bot:126:5: result; plan: rejected (not representable: a list (only Strings are placed))
+  call of game2048::reversed (list) at game2048.bot:127:9: escapes (inherited); plan: rejected (not confined to its innermost region)
+unit game2048::transposed<List[List[int]]>
+  loop (list) at game2048.bot:131:5: result; plan: rejected (not representable: a list (only Strings are placed))
+  loop (list) at game2048.bot:132:9: escapes (inherited); plan: rejected (not representable: a list (only Strings are placed))
+unit game2048::lines_toward<List[List[int]], enum>
+  call of game2048::each_reversed (list) at game2048.bot:141:9: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of game2048::transposed (list) at game2048.bot:143:9: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of game2048::transposed (list) at game2048.bot:145:9: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  call of game2048::each_reversed (list) at game2048.bot:145:9: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+unit game2048::rows_from<List[List[int]], enum>
+  call of game2048::each_reversed (list) at game2048.bot:153:9: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of game2048::transposed (list) at game2048.bot:155:9: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of game2048::each_reversed (list) at game2048.bot:157:9: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  call of game2048::transposed (list) at game2048.bot:157:9: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+unit game2048::replaced<List[int], int, int>
+  loop (list) at game2048.bot:161:5: result; plan: rejected (not representable: a list (only Strings are placed))
+unit game2048::total<List[int]>
+  closure (closure) at game2048.bot:169:12: transient; plan: rejected (not representable: a closure (only Strings are placed))
+unit from<int> -- recursive
+unit from<generic>
+unit game2048::empty_board<generic>
+  loop (list) at game2048.bot:179:12: result; plan: rejected (not representable: a list (only Strings are placed))
+  loop (list) at game2048.bot:180:9: escapes (inherited); plan: rejected (not representable: a list (only Strings are placed))
+  game2048::Board {rows} (struct) at game2048.bot:182:5: result; plan: rejected (not representable: a struct (only Strings are placed))
+unit game2048::rows<game2048::Board>
+unit game2048::cell<game2048::Board, game2048::Position>
+  call of list (list) at game2048.bot:206:28: transient; plan: rejected (not representable: the native list)
+unit game2048::no_positions<generic>
+  call of list (list) at game2048.bot:209:36: result; plan: rejected (not representable: the native list)
+  call of std::mutable_vector::from_list (mutvec) at game2048.bot:209:5: result; plan: rejected (not representable: the native std::mutable_vector::from_list)
+unit game2048::empty_positions<game2048::Board>
+  call of game2048::no_positions (mutvec) at game2048.bot:213:13: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  game2048::Position {row, column} (struct) at game2048.bot:216:18: escapes (inherited); plan: rejected (not representable: a struct (only Strings are placed))
+  call of mutable_vector#to_list (list) at game2048.bot:219:16: result; plan: rejected (not representable: the native mutable_vector#to_list)
+  loop (list) at game2048.bot:219:5: result; plan: rejected (not representable: a list (only Strings are placed))
+unit game2048::reached?<game2048::Board, int>
+unit game2048::new_game<generic>
+  call of game2048::empty_board (struct) at game2048.bot:234:18: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  game2048::Game {board, score} (struct) at game2048.bot:234:5: result; plan: rejected (not representable: a struct (only Strings are placed))
+unit game2048::move<game2048::Game, enum>
+  call of game2048::lines_toward (list) at game2048.bot:239:27: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  loop (list) at game2048.bot:239:14: transient; plan: rejected (not representable: a list (only Strings are placed))
+  call of game2048::slide (struct) at game2048.bot:240:9: escapes (inherited); plan: rejected (not confined to its innermost region)
+  loop (list) at game2048.bot:241:13: result; plan: rejected (not representable: a list (only Strings are placed))
+  call of game2048::rows_from (list) at game2048.bot:243:13: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  loop (list) at game2048.bot:244:14: transient; plan: rejected (not representable: a list (only Strings are placed))
+  game2048::Board {rows} (struct) at game2048.bot:247:30: result; plan: rejected (not representable: a struct (only Strings are placed))
+  game2048::Game {board, score} (struct) at game2048.bot:247:17: result; plan: rejected (not representable: a struct (only Strings are placed))
+  game2048::Move {game, gained, changed} (struct) at game2048.bot:247:5: result; plan: rejected (not representable: a struct (only Strings are placed))
+unit game2048::spawn<game2048::Game, game2048::Position, enum>
+  loop (list) at game2048.bot:254:12: result; plan: rejected (not representable: a list (only Strings are placed))
+  call of game2048::replaced (list) at game2048.bot:256:13: escapes (inherited); plan: rejected (not confined to its innermost region)
+  game2048::Board {rows} (struct) at game2048.bot:259:18: result; plan: rejected (not representable: a struct (only Strings are placed))
+  game2048::Game {board, score} (struct) at game2048.bot:259:5: result; plan: rejected (not representable: a struct (only Strings are placed))
+unit game2048::has_empty?<List[List[int]]>
+unit game2048::equal_neighbours?<List[List[int]]>
+unit game2048::game_over?<game2048::Game>
+  call of game2048::transposed (list) at game2048.bot:280:68: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+
+owner classes: transient 33, segment 0, persistent 0, result 69, escapes 22, unknown 0

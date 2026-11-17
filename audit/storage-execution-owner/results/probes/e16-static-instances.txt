@@ -1,0 +1,17 @@
+# e16-static-instances (audit/storage-execution-owner/probes/e16-static-instances.bot)
+
+value: interp value 35; native value 35
+
+unit <program>
+  Meter {rate} (struct) at e16-static-instances.bot:29:14: escapes (context); plan: rejected (not representable: a struct (only Strings are placed))
+unit tick<int> -- may suspend
+  suspension call of coroutine#yield at e16-static-instances.bot:21:9: live bindings 2, pending operands 0, objects kept 0
+unit run<generic>
+  call of coroutine#create (coroutine) at e16-static-instances.bot:26:5: transient; plan: rejected (not representable: the native coroutine#create)
+unit the coroutine of tick constructed at e16-static-instances.bot:26:5 -- may suspend
+  suspension call of tick at e16-static-instances.bot:26:31: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 1, segment 0, persistent 0, result 0, escapes 1, unknown 0
+native, scratch storage on: heap allocations 0, heap bytes 0, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 0, heap bytes 0, collections 0
+String sites lowering emitted a placement for: 0

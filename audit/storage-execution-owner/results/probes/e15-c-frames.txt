@@ -1,0 +1,30 @@
+# e15-c-frames (audit/storage-execution-owner/probes/e15-c-frames.bot)
+
+value: interp value 284; native value 284
+
+unit <program>
+  call of coroutine#create (coroutine) at e15-c-frames.bot:30:1: transient; plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#create (coroutine) at e15-c-frames.bot:31:1: transient; plan: rejected (not representable: the native coroutine#create)
+  Tick {by} (struct) at e15-c-frames.bot:32:8: transient; plan: rejected (not representable: a struct (only Strings are placed))
+  Tick {by} (struct) at e15-c-frames.bot:33:8: transient; plan: rejected (not representable: a struct (only Strings are placed))
+  Tick {by} (struct) at e15-c-frames.bot:34:8: transient; plan: rejected (not representable: a struct (only Strings are placed))
+  call of coroutine#create (coroutine) at e15-c-frames.bot:35:1: transient; plan: rejected (not representable: the native coroutine#create)
+unit counter<int> -- may suspend
+  suspension call of coroutine#yield at e15-c-frames.bot:16:13: live bindings 1, pending operands 0, objects kept 0
+unit inner<int> -- may suspend
+  suspension call of coroutine#yield at e15-c-frames.bot:21:5: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at e15-c-frames.bot:22:5: live bindings 1, pending operands 0, objects kept 0
+unit outer<int> -- may suspend
+  suspension call of inner at e15-c-frames.bot:26:13: live bindings 1, pending operands 0, objects kept 0
+  suspension call of inner at e15-c-frames.bot:27:14: live bindings 1, pending operands 0, objects kept 0
+unit the coroutine of counter constructed at e15-c-frames.bot:30:1 -- may suspend
+  suspension call of counter at e15-c-frames.bot:30:34: live bindings 0, pending operands 0, objects kept 0
+unit the coroutine of counter constructed at e15-c-frames.bot:31:1 -- may suspend
+  suspension call of counter at e15-c-frames.bot:31:34: live bindings 0, pending operands 0, objects kept 0
+unit the coroutine of outer constructed at e15-c-frames.bot:35:1 -- may suspend
+  suspension call of outer at e15-c-frames.bot:35:34: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 6, segment 0, persistent 0, result 0, escapes 0, unknown 0
+native, scratch storage on: heap allocations 0, heap bytes 0, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 0, heap bytes 0, collections 0
+String sites lowering emitted a placement for: 0
