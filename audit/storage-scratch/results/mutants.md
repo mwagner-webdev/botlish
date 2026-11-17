@@ -45,6 +45,11 @@ KILLED lower-request-constant-at-entry -- by ss-nir-frame-roots
 KILLED roots-mark-rooted -- by ss-nir-frame-roots
 2 mutants, 0 not killed
 exit 0
+# tclsh9.0 audit/storage-scratch/tools/mutate.tcl -only lifetime-fresh-one-kind
+BASELINE: every detector passes on the unmutated copy
+KILLED lifetime-fresh-one-kind -- by ss-run-fresh-nested, sl-fresh-nested-kinds
+1 mutants, 0 not killed
+exit 0
 ```
 
-24 mutants in the catalog, each killed by its last run.
+25 mutants in the catalog, each killed by its last run.

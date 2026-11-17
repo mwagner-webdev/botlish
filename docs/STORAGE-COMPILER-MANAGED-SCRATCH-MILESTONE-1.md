@@ -49,11 +49,11 @@ first region, at every N.
 scratch storage and on the interpreter, plain and under GC stress with
 released storage poisoned, with no root into released storage and no
 protocol error (`tests/scratch-storage.test`'s `ss-run-census`; the
-positive workloads also on the Tcl compiler, `ss-run-tcl-backends`; 40
+positive workloads also on the Tcl compiler, `ss-run-tcl-backends`; 42
 tests in all), and 240 generated programs agree on the interpreter, the
-Tcl compiler and four native configurations (section 19).
-Three defects of the lifetime facts the integration exposed were fixed
-in `hir/lifetime.tcl` (section 5).
+Tcl compiler and five native configurations (section 19).
+Four defects of the lifetime facts the integration exposed were fixed
+in `hir/lifetime.tcl` (section 5), the fourth found by CI (section 24).
 
 Acceptance criteria (brief section 25):
 
@@ -78,7 +78,7 @@ Acceptance criteria (brief section 25):
 | 17 | independent tests and mutants detect unsafe reuse | met: 25 mutants killed, 240 fuzzed programs in five modes | section 19 |
 | 18 | compatible with strict bounded storage and execution owners | met by design: policy and placement are the provider's, regions are the plan's | sections 10, 26 |
 | 19 | no backend or language behavior weakened | met | sections 14, 24 |
-| 20 | regression and CI checks pass | pending: CI of `1d26dc9b`; local runs pass | section 24 |
+| 20 | regression and CI checks pass | met: every CI run of `1d26dc9b` succeeded; the local runs pass | section 24 |
 
 ## 2. Baseline allocation evidence
 
@@ -139,7 +139,7 @@ storage"):
 
 | part | file | decides |
 |---|---|---|
-| lifetime facts | `hir/lifetime.tcl` (milestone 1, three fixes: section 5) | when an object may be observed: per producer, `confined`, `escapes` or `unknown` for its activation, each enclosing iteration and its non-suspending segment |
+| lifetime facts | `hir/lifetime.tcl` (milestone 1, four fixes: section 5) | when an object may be observed: per producer, `confined`, `escapes` or `unknown` for its activation, each enclosing iteration and its non-suspending segment |
 | storage-use plan | `hir/storageplan.tcl` (new) | which sites are placed, in which region, and why the others are not |
 | backend realization | `native/lower.tcl`, "Scratch storage" (new); `nir.rs`, `codegen/clif.rs` | the frames, loop regions, requests and destinations it can represent |
 | storage provider | `native/src/runtime/scratch.rs` (new); `heap.rs`, `vm.rs` | where the bytes are, and their reuse |
@@ -1215,8 +1215,9 @@ counts that scratch storage would now take off the heap):
 `tests/string-allocation.test`, `tests/virtual-construction.test` and
 `tests/portable-io.test` measure with `-scratch-opt 0`, as AGENTS.md's
 section now says a test of another optimization's heap evidence does. No
-other existing test changed; `tests/storage-lifetime.test` gained the three
-tests of section 5, and `tests/scratch-storage.test` is new (40 tests).
+other existing test changed; `tests/storage-lifetime.test` gained the four
+tests of section 5, and `tests/scratch-storage.test` is new (42 tests, the
+last two added with section 24's fixes).
 
 **Commits** (on `claude/gracious-hopper-zg4doz`, from `d6b0161c`):
 
@@ -1349,10 +1350,20 @@ fuzzer (200 programs, 0 unsound, every verdict precise), its C differential
 (0 violations), the persistence check (identical to its record) and the
 native reachability check (0 contradictions) pass.
 
-**CI of the second fix.** **[test]** At `1d26dc9b`, dispatched: tests.yml
-(run 44027592974), tests-arm64.yml (44027595731), macos-arm64.yml
-(44027598498), windows-x86_64.yml (44027601055) and static-decisions.yml
-(44027603637) -- pending.
+**CI of the second fix.** **[test]** At `1d26dc9b`, dispatched, every
+run succeeded, every job of it: tests.yml (run 44027592974: the canary,
+the Tcl suites on interp and compile, the cranelift and cranelift-generic
+coverage, the golden shards, the native Rust unit tests, the method-call
+decision, the stub- and system-linked executables), tests-arm64.yml
+(44027595731: the same, and its two GC-stress jobs, which had failed at
+`e18e11de`), macos-arm64.yml (44027598498: smoke, its Linux control, the
+six acceptance shards, the system linker, main-thread startup and the
+application's jobs), windows-x86_64.yml (44027601055: canary, smoke, root
+plans, system linker, the four acceptance shards) and static-decisions.yml
+(44027603637: the batched and sequential schedulers agree on every golden
+suite). The fuzzer's and the mutants' records of section 19
+(`results/fuzz.txt`, `results/mutants.md`) were committed after these
+runs, so that their push cancelled none of them.
 
 ## 25. Known limitations
 
