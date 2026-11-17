@@ -1,0 +1,68 @@
+# Yielding functions whose parameters and results are scalar in the native
+# backend's representation (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+# MILESTONE-1.md, "Results"): proven-small Int parameters (the raw Int ABI,
+# saved in a frame's raw slots), thunks with an environment, and a raw Int
+# result crossing a suspension inside a nested yielding call. The resumable
+# lowering boxes a scalar result at its returns and unboxes it at its
+# callers after their suspension check: every value must be the
+# interpreter's.
+# expect: [[0, 0, 4, 1, 1, 3], [0, 0, 6, 1, 1, 3], [0, 0, 500, 1, 1, 3], [1, 4]]
+import std::coroutine
+import std::str
+
+type Small = Int in 0..1000
+
+fn tick(n: Small) -> int:
+    yield 0
+    if n > 500:
+        return 500
+    n + 1
+
+fn twice(n: Small) -> int:
+    a = tick(n)
+    b = tick(n)
+    if b > 900:
+        return 900
+    b
+
+fn letter(i: Small) -> str:
+    yield "-"
+    if i > 500:
+        return "x"
+    if i > 5:
+        return ""
+    "y"
+
+fn spell(n: Small) -> str:
+    a = letter(n)
+    b = letter(n)
+    std::str::concat(a, b)
+
+# A yielding function with a constant result: the raw Int ABI's result,
+# boxed by the lowering and unboxed by its caller after a suspension.
+struct Ev:
+    n: int
+
+fn deepest() -> int:
+    yield Ev {n: 1}
+    3
+
+fn middle() -> int:
+    deepest() + 1
+
+fn worker() -> Ev:
+    x = middle()
+    return Ev {n: x}
+
+fn drive(n: Small) -> List[int]:
+    coroutine {step: t, first: t0} = twice(n)
+    t1 = t()
+    t2 = t()
+    coroutine {step: s, first: s0} = spell(n)
+    s1 = s()
+    s2 = s()
+    [t0, t1, t2, std::str::length(s0), std::str::length(s1), std::str::length(std::str::concat(s2, "!"))]
+
+coroutine {step: w, first: w0} = worker()
+w1 = w()
+[drive(3), drive(5), drive(700), [w0.n, w1.n]]

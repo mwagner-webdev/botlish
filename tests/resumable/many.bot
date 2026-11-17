@@ -1,0 +1,32 @@
+# 10,000 coroutines suspended at once, each holding a small List across its
+# yield, kept in a MutableVector and resumed in turn: suspended state scales
+# with the live activations (two frames each), never with a stack per
+# coroutine.
+# expect: 50025000
+import std::coroutine
+import std::list
+import std::mutable_vector
+
+fn holder(i: int) -> int:
+    xs = [i, i + 1, i + 2]
+    yield i
+    std::list::length(xs) + i
+
+fn no_tasks() -> MutableVector[Coroutine{args: [], return: int, errors: []}]:
+    std::mutable_vector::from_list([])
+
+fn many(n: int) -> int errors IndexNotFound:
+    tasks = no_tasks()
+    loop i from 0 to n:
+        coroutine {step: s} = holder(i)
+        tasks.push(s)
+    sums = loop i from 0 to n:
+        s = tasks.take(0)
+        s()
+    fold v in sums with intermediate acc 0:
+        acc + v
+
+m = many(10000):
+    on IndexNotFound:
+        -1
+m

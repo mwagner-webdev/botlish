@@ -623,6 +623,11 @@ impl Metrics {
         if self.by_kind[KIND_ENUMCASE as usize].allocations > 0 {
             kinds.push(KIND_ENUMCASE);
         }
+        // And resumable coroutines' frames (runtime/resumable.rs): only a
+        // program whose coroutines suspended on a resumable runtime.
+        if self.by_kind[KIND_FRAME as usize].allocations > 0 {
+            kinds.push(KIND_FRAME);
+        }
         // And raw C floating values (RAW-C-FLOAT-FFI-MILESTONE-1.md).
         for kind in [KIND_RAWF32, KIND_RAWF64] {
             if self.by_kind[kind as usize].allocations > 0 {

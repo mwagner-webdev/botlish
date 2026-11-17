@@ -900,7 +900,11 @@ test sc-gc-stress {item 84: a rejected block's payload (message String, related 
         set hir [scHir "import std::list\nimport std::str\n${::scAffineDecls}fn bad(k: int) -> List\[int\] errors std::compiler::CompilerError:\n    if k > 0:\n        static compile:\n            coroutine \{step\} = worker(k)\n            consume(step, 1)\n            consume(step, 2)\n    \[k\]\n\nfn good(k: int) -> int:\n    static compile:\n        coroutine \{step, first\} = worker(k)\n        first.value + consume(step, k)\n\nfn probe(i: int) -> List\[int\]:\n    r = bad(i):\n        on std::compiler::CompilerError \{code, primary, related, message\}:\n            g = good(i)\n            rel = loop l in related:\n                l.line * 1000 + l.column\n            first = std::list::at(rel, 0):\n                on IndexNotFound:\n                    -1\n            \[g, primary.line * 1000 + primary.column, first, std::str::length(message)\]\n    r\n\nloop i from 1 to 6:\n    probe(i)\n"]
         lappend results [lrange [outcomeUnderHir cranelift $hir] 0 1]
         set c [dict get [native::allocationReport $hir summary] coroutines]
-        lappend results [expr {[dict get $c released] == [dict get $c stacksMapped] + [dict get $c stacksReused]
+        # Five releases, none swept; on the stackful runtime one stack each
+        # (resumable frames take none: coroutineCounters).
+        set counted [coroutineCounters $c]
+        lappend results [expr {(![dict exists $counted stacksMapped]
+                || [dict get $c released] == [dict get $c stacksMapped] + [dict get $c stacksReused])
             && [dict get $c released] == 5 && [dict get $c sweptSuspended] == 0}]
         set results
     } finally {

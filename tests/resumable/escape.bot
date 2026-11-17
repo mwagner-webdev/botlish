@@ -1,0 +1,35 @@
+# Coroutine handles moved into a MutableVector and resumed later in an
+# order the data decides (no static resume order).
+# expect: [1, 2, 2003, 2006, 3, 1002, 3004, 3008, 4, 3012]
+import std::coroutine
+import std::mutable_vector
+
+fn ticker(id: int, period: int) -> int:
+    fold i from 0 to 6 with intermediate acc 0:
+        yield id * 1000 + acc
+        acc + period
+    id
+
+fn no_tasks() -> MutableVector[Coroutine{args: [], return: int, errors: []}]:
+    std::mutable_vector::from_list([])
+
+fn build(n: int) -> MutableVector[Coroutine{args: [], return: int, errors: []}]:
+    tasks = no_tasks()
+    loop i from 0 to n:
+        coroutine {step: s} = ticker(i, i + 1)
+        tasks.push(s)
+    tasks
+
+fn run(order: List[int]) -> List[int] errors IndexNotFound:
+    tasks = build(4)
+    out = loop k in order:
+        s = tasks.take(k)
+        v = s()
+        tasks.push(s)
+        v
+    out
+
+r = run([0, 3, 1, 3, 2, 0, 0, 3, 1, 2]):
+    on IndexNotFound:
+        []
+r

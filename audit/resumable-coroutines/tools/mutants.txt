@@ -1,0 +1,179 @@
+# Mutants of the resumable coroutine mechanism and the ShadowOnly root plan
+# (audit/resumable-coroutines/tools/mutate.tcl;
+# WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md, sections 6 and 12):
+# deliberate bugs of the lowering (native/src/codegen/resumable.rs), the
+# frame and its tracing (native/src/runtime/resumable.rs, heap.rs), the
+# coroutine runtime (runtime/coroutine.rs), the frame operations' code
+# (codegen/clif.rs) and the root plan (codegen/roots.rs). Each names the
+# invariant of the report's section 6 it breaks.
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# I3: suspended references remain reachable
+
+@@ tagged-slots-untraced M1 of WASM-TARGET-AND-COROUTINE-ARCHITECTURE-MILESTONE-1.md: a suspended frame's tagged slots are not traced, only its callee frame (I3)
+## native/src/runtime/heap.rs
+<<<<
+                KIND_FRAME => stack.extend(super::resumable::frame_of(v).traced()),
+====
+                KIND_FRAME => stack.push(super::resumable::frame_of(v).callee),
+>>>>
+
+@@ callee-untraced a suspended frame does not trace its suspended callee's frame: a deep chain's inner frames are swept while suspended (I3)
+## native/src/runtime/resumable.rs
+<<<<
+        std::iter::once(self.callee).chain(self.slots()[..n].iter().copied())
+====
+        std::iter::once(UNIT).chain(self.slots()[..n].iter().copied())
+>>>>
+
+# ---------------------------------------------------------------------------
+# I5: registers are restored correctly
+
+@@ live-register-unsaved M2 of the architecture report: every suspension point omits the first tagged register live across it (I5)
+## native/src/codegen/resumable.rs
+<<<<
+        saved.push((tagged, raw));
+====
+        saved.push((tagged.into_iter().skip(1).collect(), raw));
+>>>>
+
+@@ closure-unsaved a callenv's closure is not kept across its suspension: the re-entered callee reads its captures through an undefined closure (I5)
+## native/src/codegen/resumable.rs
+<<<<
+            let keep = (out[r as usize] && !dsts.contains(&r)) || closure == Some(r);
+====
+            let keep = out[r as usize] && !dsts.contains(&r);
+>>>>
+
+# ---------------------------------------------------------------------------
+# I6: tagged and raw slots remain distinct
+
+@@ raw-slots-traced the collector traces a frame's raw slots as well: a raw Int that looks like a heap address is followed (I6)
+## native/src/runtime/resumable.rs
+<<<<
+        let n = (self.ntagged as usize).min(self.cap_tagged as usize);
+====
+        let n = self.cap_tagged as usize + self.cap_raw as usize;
+>>>>
+
+@@ raw-slots-overlap raw slot J is addressed as if the frame had no tagged slots: raw words overwrite the tagged slots the collector traces (I6)
+## native/src/codegen/clif.rs
+<<<<
+        FRAME_SLOTS_OFFSET + 8 * (shape.tagged as i32 + j as i32)
+====
+        FRAME_SLOTS_OFFSET + 8 * (j as i32)
+>>>>
+
+# ---------------------------------------------------------------------------
+# I4: dead references are not retained
+
+@@ dead-registers-saved every register, live or dead, is saved at every suspension point: a suspended frame keeps what the function referenced earlier (I4)
+## native/src/codegen/resumable.rs
+<<<<
+            let keep = (out[r as usize] && !dsts.contains(&r)) || closure == Some(r);
+====
+            let keep = ((out[r as usize] || (r > fp && f.kind_of(r) == RegKind::Tagged && !f.plan_regs[r as usize])) && !dsts.contains(&r)) || closure == Some(r);
+>>>>
+
+@@ running-frame-traced a resumed frame stays traced while its activation runs (frrestore keeps ntagged): the values of its last suspension stay reachable through the frame (I4)
+## native/src/codegen/clif.rs
+<<<<
+                self.b.ins().store(MemFlagsData::trusted(), zero, fr, FRAME_POINT_OFFSET);
+                self.b.ins().store(MemFlagsData::trusted(), zero, fr, FRAME_NTAGGED_OFFSET);
+====
+                self.b.ins().store(MemFlagsData::trusted(), zero, fr, FRAME_POINT_OFFSET);
+>>>>
+
+# ---------------------------------------------------------------------------
+# I2, I7: frame hand-off and unique ownership
+
+@@ caller-frame-handed-down a fresh yielding call hands the callee its caller's own frame instead of UNIT: the callee reuses a frame another live activation owns (I7)
+## native/src/codegen/resumable.rs
+<<<<
+                    body.push(Inst::Unit { dst: h });
+====
+                    body.push(Inst::Move { dst: h, src: fr });
+>>>>
+
+@@ callee-frame-dropped a resumed call re-enters its callee without the callee's frame: the callee starts afresh instead of continuing (I2)
+## native/src/codegen/resumable.rs
+<<<<
+                    dispatches.push((Inst::Op { dst: h, op: OpCode::FrCallee, args: vec![fr] }, None));
+====
+                    dispatches.push((Inst::Unit { dst: h }, None));
+>>>>
+
+@@ tail-frame-not-reused a yielding self tail call starts the next activation without the finished one's frame: one frame per iteration (a declared recognizer's per symbol)
+## native/src/codegen/resumable.rs
+<<<<
+            Inst::Tail { mut args } => {
+                report.tail_sites += 1;
+                args.push(fr);
+====
+            Inst::Tail { mut args } => {
+                report.tail_sites += 1;
+                args.push(fp);
+>>>>
+
+# ---------------------------------------------------------------------------
+# I8: completion and abandonment release the frame chain
+
+@@ release-keeps-frames a released suspended coroutine keeps its frame chain: everything its frames hold stays reachable through the dead handle (I8)
+## native/src/runtime/coroutine.rs
+<<<<
+    // A resumable coroutine's frame chain goes with it (invariant I8):
+    // nothing runs it again, and nothing else holds it.
+    co.frame = UNIT;
+====
+>>>>
+
+@@ abandonment-not-unwound a resumed yield of an abandoned coroutine reads the message as unit instead of failing: the frames' release pads do not run
+## native/src/runtime/resumable.rs
+<<<<
+        return vm.fail(RtError::Bug("a resumed yield has no message and no pending abandonment".to_string()));
+    }
+    message
+====
+        return vm.fail(RtError::Bug("a resumed yield has no message and no pending abandonment".to_string()));
+    }
+    if message == NO_VALUE { UNIT } else { message }
+>>>>
+
+# ---------------------------------------------------------------------------
+# I1: suspension restores the running root stack
+
+@@ shadow-frame-not-popped a ShadowOnly function never pops its shadow-stack frame: every return, suspension and error exit leaves it behind (I1)
+## native/src/codegen/clif.rs
+<<<<
+        self.shadow_frame = true;
+====
+>>>>
+
+@@ segment-check-removed the runtime's check of invariant I1 (a segment restored the shadow stack) is gone: a leaked shadow frame goes unreported
+## native/src/runtime/resumable.rs
+<<<<
+        if (*p).ss_top != entry_top {
+====
+        if false && (*p).ss_top != entry_top {
+>>>>
+
+# ---------------------------------------------------------------------------
+# I9: ShadowOnly has no leaf publication exception
+
+@@ leaf-roots-unscanned a ShadowOnly function without a Botlish call keeps its root slots in its own native frame, which nothing scans -- the old fallback plan's leaf exception without even its publication (I9)
+## native/src/codegen/roots.rs
+<<<<
+        RootMode::ShadowOnly { depth_token } => (RootStorage::RuntimeStack, depth_token && has_call),
+====
+        RootMode::ShadowOnly { depth_token } => (if has_call { RootStorage::RuntimeStack } else { RootStorage::NativeFrame }, depth_token && has_call),
+>>>>

@@ -1,0 +1,21 @@
+# A function with no Botlish call (a leaf, as codegen::roots sees it) keeps
+# a List of Strings live across std::mutable_array::generate, whose factory
+# -- run by the runtime, from inside the op -- is itself a leaf with a root
+# slot that allocates.
+# expect: 340
+import std::int
+import std::mutable_array
+import std::str
+
+fn label(i: int) -> str:
+    std::str::concat("v", std::int::to_string(i))
+
+fn outer(n: int) -> int:
+    keep = loop i from 0 to 100:
+        std::str::concat("k", std::int::to_string(i))
+    arr = std::mutable_array::generate(n, label)
+    total = fold s in keep with intermediate acc 0:
+        acc + std::str::length(s)
+    total + std::mutable_array::capacity(arr)
+
+outer(50)

@@ -125,12 +125,22 @@ testConstraint symbolLinker [expr {$::nativeLinker in {rustc system}}]
 testConstraint cLinker [expr {$::nativeLinker in {rustc system auto}}]
 
 # Native coroutines (runtime/coroutine.rs, MACOS-AARCH64-MILESTONE-3.md,
-# WINDOWS-X86-64-MILESTONE-5.md): the native backend switches stacks on Linux
-# x86-64 and AArch64, on macOS AArch64 and on Windows x86-64 (a fiber per
-# coroutine stack). A capability, not an operating system: a test that needs coroutines
-# or the native collector and runtime evidence around them carries this one;
-# a test that needs Linux syscalls keeps nativeLinux.
+# WINDOWS-X86-64-MILESTONE-5.md; runtime/resumable.rs,
+# WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md): the native backend
+# runs coroutines on Linux x86-64 and AArch64, on macOS AArch64 and on
+# Windows x86-64 -- switching stacks (a fiber per coroutine stack on
+# Windows), or, with a `fallback-roots` driver, as resumable heap frames. A
+# capability, not an operating system: a test that needs coroutines or the
+# native collector and runtime evidence around them carries this one; a
+# test that needs Linux syscalls keeps nativeLinux. A test of one
+# mechanism's own evidence -- the stackful runtime's stacks and stack
+# counters, or the resumable runtime's frames -- carries
+# nativeStackfulCoroutines or nativeResumableCoroutines (the driver says
+# which it has); a value, a release, an error or a collection is the same
+# under both and carries only nativeCoroutines.
 testConstraint nativeCoroutines [native::hostSupports coroutines]
+testConstraint nativeStackfulCoroutines [native::hostSupports stackfulCoroutines]
+testConstraint nativeResumableCoroutines [native::hostSupports resumableCoroutines]
 
 # The native stack guard (runtime/platform/, MACOS-AARCH64-MILESTONE-4.md,
 # WINDOWS-X86-64-MILESTONE-4.md): the runtime knows the bounds of the
@@ -149,6 +159,12 @@ testConstraint nativeStackGuard [native::hostSupports stackGuard]
 # where a `fallback-roots` driver runs. A test of the root plan expects the
 # host's plan by it.
 testConstraint nativeFrameRoots [native::hostSupports frameRoots]
+
+# The other root plan: one LIFO shadow stack holds every running function's
+# roots, leaf or not (codegen::roots's ShadowOnly mode,
+# WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md), where a
+# `fallback-roots` driver runs on a host the native backend supports.
+testConstraint nativeShadowOnlyRoots [expr {[native::hostSupports jit] && ![native::hostSupports frameRoots]}]
 
 # A depth check bounds Botlish recursion (runtime::native_stack::depth_checked):
 # unless native frames hold the roots and the stack guard reports an exhausted
@@ -703,6 +719,32 @@ proc withImports {source} {
         }
     }
     return $header$source
+}
+
+# The counters of an allocation report's `coroutines` section COUNTERS that
+# hold for either native coroutine mechanism (WASM-RESUMABLE-COROUTINES-
+# SHADOW-ROOTS-MILESTONE-1.md, "Semantic and implementation-specific
+# assertions"): releases, releases of a suspended coroutine, and sweeps of a
+# coroutine still holding suspended state -- plus, where coroutines switch
+# stacks (nativeStackfulCoroutines), that runtime's own stack counters
+# (stacksMapped, stacksReused), which resumable frames have no counterpart
+# of. Compare with expectedCoroutineCounters.
+proc coroutineCounters {counters} {
+    set keys {released releasedSuspended sweptSuspended}
+    if {[testConstraint nativeStackfulCoroutines]} {
+        set keys [concat {stacksMapped stacksReused} $keys]
+    }
+    return [dict filter $counters script {k v} {expr {$k in $keys}}]
+}
+
+# What coroutineCounters should be: STACKS ({stacksMapped N stacksReused
+# M}, the stackful runtime's) where coroutines switch stacks, followed by
+# SEMANTIC ({released N releasedSuspended M sweptSuspended K}) everywhere.
+proc expectedCoroutineCounters {stacks semantic} {
+    if {[testConstraint nativeStackfulCoroutines]} {
+        return [concat $stacks $semantic]
+    }
+    return $semantic
 }
 
 # Runs SCRIPT in the caller's scope with $::core::libraryDir pointed at a

@@ -1,0 +1,71 @@
+# Context-bearing state across suspension
+# (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md, section 7;
+# COROUTINES.md point 39): a coroutine runs with the providers its
+# construction selected. A context-trait operation before the first yield
+# (at the construction) and after each resume goes to the same provider; a
+# value read from a context before a yield stays live across it; and the
+# coroutines are constructed in one function and resumed in another, in an
+# order the data decides.
+# expect: [3, 4, 5, 6, 6, 2001, 5, 5, 2002, 1010, 1020, 1021, 1011, 1022, 1012]
+import std::list
+import std::mutable_vector
+
+context trait Sink:
+    fn put(n: int) -> int
+
+type Base = Int in 0..100000
+
+context struct Acc:
+    items: MutableVector[int]
+    base: Base
+
+fn put(n: int, context c: Acc) -> int:
+    c.items.push(n + c.base)
+    c.items.length()
+
+fn base(context c: Acc) -> int:
+    c.base
+
+fn items(context c: Acc) -> List[int] errors IndexNotFound:
+    loop i from 0 to c.items.length():
+        c.items.at(i)
+
+fn producer(n: int, context out: Sink) -> int:
+    a = out.put(n)
+    yield a
+    b = out.put(n + 1)
+    yield b
+    out.put(n + 2)
+
+fn holder(context c: Acc) -> int:
+    k = base() * 2
+    yield k
+    yield k + 1
+    k + 2
+
+fn no_tasks() -> MutableVector[Coroutine{args: [], return: int, errors: []}]:
+    std::mutable_vector::from_list([])
+
+fn build(context c: Acc) -> MutableVector[Coroutine{args: [], return: int, errors: []}]:
+    tasks = no_tasks()
+    coroutine {step: p} = producer(10)
+    tasks.push(p)
+    coroutine {step: h} = holder()
+    tasks.push(h)
+    coroutine {step: q} = producer(20)
+    tasks.push(q)
+    tasks
+
+fn drive(context c: Acc) -> List[int] errors IndexNotFound:
+    tasks = build()
+    out = loop k in [2, 0, 1, 1, 2, 0, 0, 2, 1]:
+        s = tasks.take(k)
+        v = s()
+        tasks.push(s)
+        v
+    std::list::flat([out, items()])
+
+with context Acc {items: std::mutable_vector::from_list([]), base: 1000}
+drive():
+    on IndexNotFound:
+        []

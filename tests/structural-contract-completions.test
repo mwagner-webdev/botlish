@@ -653,9 +653,9 @@ test scc-affine-native {natively, on the general coroutine runtime (coroutine fu
     nativeCoroutines
 } -body {
     withoutCoroutineFusion {
-        dict get [native::allocationReport [surface::compile $sccAffine -warnings off] summary] coroutines
+        coroutineCounters [dict get [native::allocationReport [surface::compile $sccAffine -warnings off] summary] coroutines]
     }
-} -result {stacksMapped 1 stacksReused 3 released 4 releasedSuspended 2 sweptSuspended 0}
+} -result [expectedCoroutineCounters {stacksMapped 1 stacksReused 3} {released 4 releasedSuspended 2 sweptSuspended 0}]
 
 # An affine-payload error through a structural contract: the error edge and
 # the payload's ownership are the contract's -- a coroutine live across the

@@ -1,0 +1,34 @@
+# A value reachable only from a suspended coroutine's frame survives the
+# collections the main program runs meanwhile: the coroutine builds a List
+# of 2,000 fresh Strings, suspends holding it, and is resumed after the main
+# program allocates heavily.
+# expect: [0, 20000, 18411, 20000, 10, true]
+import std::coroutine
+import std::int
+import std::list
+import std::str
+
+fn keeper(n: int) -> int:
+    held = loop i from 0 to n:
+        std::str::concat("item-", std::int::to_string(i * 7))
+    yield 0
+    total = fold s in held with intermediate acc 0:
+        acc + std::str::length(s)
+    yield total
+    last = std::list::at(held, n - 1):
+        on IndexNotFound:
+            ""
+    std::str::length(last)
+
+fn churn(rounds: int) -> int:
+    fold i from 0 to rounds with intermediate acc 0:
+        junk = loop j from 0 to 50:
+            std::str::concat("junk", std::int::to_string(i + j))
+        acc + std::list::length(junk)
+
+coroutine {step: k, first: z} = keeper(2000)
+c = churn(400)
+t = k()
+c2 = churn(400)
+last = k()
+[z, c, t, c2, last, std::coroutine::done?(k)]

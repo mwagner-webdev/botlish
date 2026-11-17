@@ -159,7 +159,7 @@ proc hir::affine::Unwinds {hir owner} {
 @@ native-abandon-discards the native runtime's coabandon releases a suspended coroutine without unwinding it
 ## native/src/runtime/coroutine.rs
 <<<<
-        if (*co).state != CO_SUSPENDED || (*co).stack.is_none() {
+        if !holds_suspended_state(&*co) {
             return rt_co_release(p, handle);
         }
         vm(p).metrics.record_coroutine_abandoned();

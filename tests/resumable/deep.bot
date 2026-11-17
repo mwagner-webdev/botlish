@@ -1,0 +1,56 @@
+# Deep suspension (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md,
+# sections 4 and 9): a yield 300 yielding activations deep, through
+# recursion and a self tail call, each activation holding a String it reads
+# after its resume; resumed several times (each resume re-enters the whole
+# chain from its outermost frame), then a second deep coroutine abandoned
+# while suspended, under the collections the main program runs meanwhile.
+# expect: [[1, 4, 6, 7, 10, 13, 0], [95]]
+import std::coroutine
+import std::int
+import std::str
+
+# A self tail call between yields: the activation's frame is reused.
+fn spin(n: int, acc: int) -> int:
+    if n == 0:
+        return acc
+    yield acc
+    spin(n - 1, acc + n)
+
+fn bottom(tag: str) -> int:
+    spin(3, std::str::length(tag))
+
+fn down(depth: int, tag: str) -> int:
+    if depth == 0:
+        return bottom(tag)
+    mine = std::str::concat(tag, std::int::to_string(depth))
+    v = down(depth - 1, tag)
+    yield v
+    v + 1 + std::str::length(mine)
+
+fn churn(rounds: int) -> int:
+    fold i from 0 to rounds with intermediate acc 0:
+        junk = loop j from 0 to 20:
+            std::str::concat("junk", std::int::to_string(i + j))
+        acc + std::str::length(std::int::to_string(i))
+
+fn deep_values(depth: int) -> List[int]:
+    coroutine {step: d, first: d0} = down(depth, "t")
+    c = churn(50)
+    d1 = d()
+    d2 = d()
+    d3 = d()
+    d4 = d()
+    d5 = d()
+    done = if std::coroutine::done?(d):
+        1
+    else:
+        0
+    [d0, d1, d2, d3, d4, d5, done]
+
+fn abandoned(depth: int) -> int:
+    coroutine {step: d, first: d0} = down(depth, "a")
+    d1 = d()
+    c = churn(50)
+    d0 + d1 + c
+
+[deep_values(300), [abandoned(300)]]

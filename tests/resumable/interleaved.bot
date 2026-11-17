@@ -1,0 +1,19 @@
+# Two coroutines yielding independently, resumed in interleaved order.
+# expect: [0, 100, 1, 110, 120, 2, 3, 130, false]
+import std::coroutine
+
+fn counter(start: int, step: int) -> int:
+    fold i from 0 to 5 with intermediate acc start:
+        yield acc
+        acc + step
+    -1
+
+coroutine {step: a, first: a0} = counter(0, 1)
+coroutine {step: b, first: b0} = counter(100, 10)
+a1 = a()
+b1 = b()
+b2 = b()
+a2 = a()
+a3 = a()
+b3 = b()
+[a0, b0, a1, b1, b2, a2, a3, b3, std::coroutine::done?(a)]

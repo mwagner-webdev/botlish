@@ -809,7 +809,7 @@ proc machineCode {exe function} {
     exec objdump -d --no-show-raw-insn --disassemble=$function $exe
 }
 
-test contexts-native-machine-code {the machine code of std::linux::io::write in the standalone executable: stdout's descriptor is two loads -- the running Vm's context-area base from the Vm argument (%rdi) at the Vm field's offset, once in the function's entry, then the word at +8 from it -- with no RIP-relative or GOT access, no helper call and no other call than std::linux::write; the executable holds no context data symbol (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md)} -constraints {linuxX86_64 objdump posixShell symbolLinker} -body {
+test contexts-native-machine-code {the machine code of std::linux::io::write in the standalone executable: stdout's descriptor is two loads -- the running Vm's context-area base from the Vm argument (%rdi) at the Vm field's offset, once in the function's entry, then the word at +8 from it -- with no RIP-relative or GOT access, no helper call and no other call than std::linux::write; the executable holds no context data symbol (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md); the native-frame root plan's code (nativeFrameRoots: a ShadowOnly frame adds its shadow-stack bound and its cold overflow call)} -constraints {linuxX86_64 objdump posixShell symbolLinker nativeFrameRoots} -body {
     set exe [buildExecutable hello $::helloText]
     set id [nirFunctionId [native::nir [ctxHir $::helloText]] std::linux::io::write]
     set code [machineCode $exe botlish_fn_$id]

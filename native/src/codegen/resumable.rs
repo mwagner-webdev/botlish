@@ -13,11 +13,13 @@
 //! (`call`, `callenv`, `callmulti`, `callenvmulti`) of one, to a fixpoint.
 //! It is exact because a function that may yield never becomes a value
 //! (`UNWRAPPED-YIELD`, COROUTINES.md point 37): the only indirect entry is
-//! the coroutine runtime's call of a thunk, the coroutine's boundary. The
-//! pass checks that structurally (`check_boundaries`): a yielding function
-//! is a value only as a zero-argument thunk, never a C callback, never the
-//! program; so no Rust activation (`rt_call_value`, an operation that runs
-//! a closure) can sit between a suspension and its resumer.
+//! the coroutine runtime's call of a thunk, the coroutine's boundary; a
+//! capturing yielding closure is a NIR `closure` only as the environment of
+//! a direct `callenv`. The pass checks what can be checked structurally
+//! (`check_boundaries`: never the program, a C callback or a library
+//! export), and the hidden frame parameter makes any dynamic call of a
+//! lowered function an arity error (`rt_call_value`) before it runs: no Rust
+//! activation can sit between a suspension and its resumer.
 //!
 //! # The shape of a lowered function
 //!
@@ -91,6 +93,11 @@ pub struct Report {
     pub tail_sites: usize,
     /// Yielding functions whose scalar result became a tagged one.
     pub boxed_results: usize,
+    /// Yielding multi-result companions (the frame in their first result).
+    pub multi_results: usize,
+    /// Plan registers saved across a suspension point (the frame owns
+    /// each until its resume point restores it).
+    pub plans_saved: usize,
 }
 
 impl Report {
@@ -103,12 +110,14 @@ impl Report {
             .map(|(name, shape)| format!("function {} tagged {} raw {}", crate::runtime::show::tcl_list(&[name.clone()]), shape.tagged, shape.raw))
             .collect();
         lines.push(format!(
-            "functions {} yields {} calls {} tails {} boxed {}",
+            "functions {} yields {} calls {} tails {} boxed {} multi {} plans {}",
             self.functions.len(),
             self.yield_sites,
             self.call_sites,
             self.tail_sites,
-            self.boxed_results
+            self.boxed_results,
+            self.multi_results,
+            self.plans_saved
         ));
         lines.join("\n")
     }
@@ -166,31 +175,30 @@ fn boxing(kind: RegKind) -> Option<(OpCode, OpCode)> {
 /// The structural facts the lowering relies on (this module's doc), checked
 /// on PROGRAM before anything changes. Err: a compiler bug upstream, never a
 /// program the language allows.
+///
+/// A yielding function's generic entry is reached only by the coroutine
+/// segment (a thunk, called with its frame) -- never by a C callback or a
+/// library export, which run outside any coroutine (checked here), and
+/// never by a dynamic call: `UNWRAPPED-YIELD` keeps a yielding function
+/// from becoming a function value in the language, and NIR's `fnvalue` or
+/// `closure` of one is either a thunk or the environment a direct `callenv`
+/// passes (a capturing yielding closure). Should a dynamic call reach one
+/// anyway, its hidden frame parameter makes the closure's arity one more
+/// than any call could pass: `rt_call_value` refuses it (ARITY) before any
+/// code runs, so no Rust activation can ever sit between a suspension and
+/// its resumer.
 fn check_boundaries(program: &Program, y: &[bool]) -> Result<(), String> {
     if y.first() == Some(&true) {
         return Err("the program function may yield: no coroutine runs it".into());
     }
-    for f in &program.functions {
-        for inst in &f.body {
-            let target = match inst {
-                Inst::FnValue { func, .. } | Inst::Closure { func, .. } => *func,
-                Inst::CallbackAddress { .. } => continue,
-                _ => continue,
-            };
-            let g = &program.functions[target as usize];
-            if y[target as usize] && g.params != 0 {
-                return Err(format!(
-                    "{} becomes a value in {} and may yield, but is no coroutine thunk (it takes {} argument(s)): UNWRAPPED-YIELD",
-                    name_of(g),
-                    name_of(f),
-                    g.params
-                ));
-            }
-        }
-    }
     for c in &program.callbacks {
         if y.get(c.func as usize) == Some(&true) {
             return Err(format!("C callback {} may yield", name_of(&program.functions[c.func as usize])));
+        }
+    }
+    for e in &program.exports {
+        if y.get(e.func as usize) == Some(&true) {
+            return Err(format!("exported C function {} may yield", e.symbol));
         }
     }
     for (i, f) in program.functions.iter().enumerate() {
@@ -334,6 +342,10 @@ fn lower_function(original: &Function, y: &[bool], unboxing: &[Option<OpCode>], 
             if f.kind_of(r) == RegKind::Tagged { tagged.push(r) } else { raw.push(r) }
         }
         saved.push((tagged, raw));
+    }
+    report.plans_saved += saved.iter().flat_map(|s| s.0.iter()).filter(|r| f.plan_regs[**r as usize]).count();
+    if f.results > 1 {
+        report.multi_results += 1;
     }
     let shape = FrameShape {
         tagged: saved.iter().map(|s| s.0.len() as u32).max().unwrap_or(0),

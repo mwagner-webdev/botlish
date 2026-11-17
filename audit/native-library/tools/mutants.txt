@@ -231,9 +231,9 @@ proc native::library::TopLevelProblems {hir} {
 @@ stack-check-callers-unchecked a library call that can fail for the stack is proven infallible: its callers go on past the failure
 ## native/src/nir.rs
 <<<<
-        local[i].0 = (depth_checked || stack_checked) && f.has_botlish_call();
+        local[i].0 = (stack_checked && f.has_botlish_call()) || (depth_checked && f.may_reserve_shadow_slots());
 ====
-        local[i].0 = depth_checked && f.has_botlish_call();
+        local[i].0 = depth_checked && f.may_reserve_shadow_slots();
 >>>>
 
 @@ stack-limit-not-followed a coroutine's code is checked against the limit of the thread's stack, not of the stack it runs on

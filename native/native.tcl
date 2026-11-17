@@ -238,10 +238,19 @@ proc native::WithProgramDirs {hir run script} {
 #   frameRoots   GC roots in native frames, found by the frame walk
 #                (runtime/framewalk.rs's NATIVE_FRAME_ROOTS: the frame-pointer
 #                chain, on Windows with Windows' unwinder across Rust frames);
-#                elsewhere the fallback plan's shadow stack. A
-#                `fallback-roots` test build of the driver has none on any
-#                host: the tests of the native-frame plan then fail, by
-#                design.
+#                elsewhere the ShadowOnly shadow stack. A `fallback-roots`
+#                test build of the driver has none on any host: the driver
+#                says which plan it has (`botlish-native capabilities`,
+#                native::driverCapability), and hostSupports reads that.
+#   stackfulCoroutines  coroutines switch stacks (runtime/coroutine.rs);
+#                a driver whose runtime has no stack switch -- a
+#                `fallback-roots` build -- runs them as resumable frames
+#                instead (`coroutines`, runtime/resumable.rs,
+#                WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md), as
+#                the driver says. `coroutines` is the semantic capability
+#                (they run natively, by either mechanism); this one is the
+#                stackful runtime's own evidence (its stacks and counters).
+#   resumableCoroutines  the other mechanism: heap frames, no stacks.
 #
 # Windows x86-64 (MSVC) runs native code and links executables since
 # WINDOWS-X86-64-MILESTONE-1.md and C calls since WINDOWS-X86-64-MILESTONE-2.md
@@ -269,6 +278,8 @@ namespace eval native {
         cVariadics {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         cCallbacks {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
+        stackfulCoroutines {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
+        resumableCoroutines {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         libraries {linux-x86_64 linux-aarch64 windows-x86_64} \
@@ -291,10 +302,39 @@ proc native::targetSupports {capability target} {
 }
 
 # Whether the native backend has CAPABILITY (native::capabilities) on this
-# host.
+# host, with this driver: the root plan and the coroutine mechanism are the
+# driver build's (native::driverCapability), never assumed from the host.
 proc native::hostSupports {capability} {
     variable capabilities
-    return [expr {[core::cabi::hostTarget] in [dict get $capabilities $capability]}]
+    if {[core::cabi::hostTarget] ni [dict get $capabilities $capability]} {
+        return 0
+    }
+    switch -- $capability {
+        frameRoots {return [expr {[driverCapability roots] eq "native-frame"}]}
+        stackfulCoroutines {return [expr {[driverCapability coroutines] eq "stackful"}]}
+        resumableCoroutines {return [expr {[driverCapability coroutines] eq "resumable"}]}
+    }
+    return 1
+}
+
+# What the driver says of its runtime (`botlish-native capabilities`, asked
+# once per process): `roots` (native-frame or shadow-only) and `coroutines`
+# (stackful or resumable), runtime::capabilities. A driver too old to say,
+# or none built yet, is the host's shipped runtime: native-frame roots and
+# stackful coroutines.
+proc native::driverCapability {key} {
+    variable driverCapabilities
+    if {![info exists driverCapabilities]} {
+        set driverCapabilities [dict create roots native-frame coroutines stackful]
+        if {![catch {exec [binary] capabilities 2>@1} output]} {
+            foreach line [split $output \n] {
+                if {[lindex $line 0] in {roots coroutines}} {
+                    dict set driverCapabilities [lindex $line 0] [lindex $line 1]
+                }
+            }
+        }
+    }
+    return [dict get $driverCapabilities $key]
 }
 
 # Whether the native backend's driver can run programs in-process (the
@@ -845,8 +885,32 @@ proc native::fusion {hir args} {
     return [lmap line $lines {if {$line eq ""} continue; set line}]
 }
 
-# The NIR of the program-mode HIR program HIR after coroutine fusion: what
-# every native consumer compiles (the driver's `fused`).
+# What the resumable lowering did to the program-mode HIR program HIR
+# (codegen::resumable, WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md;
+# the driver's `resumable`): a dict -- `functions`, a dict of each lowered
+# function's frame shape {tagged T raw R}, and the counts `yields`, `calls`,
+# `tails`, `boxed`, `multi`, `plans` -- or an empty dict where coroutines
+# switch stacks.
+proc native::resumable {hir args} {
+    set lines [Driver resumable [nir $hir {*}$args]]
+    if {[regexp {^error } [lindex $lines 0]]} {
+        Outcome $lines
+    }
+    set report [dict create]
+    set functions [dict create]
+    foreach line $lines {
+        if {[lindex $line 0] eq "function"} {
+            dict set functions [lindex $line 1] [lrange $line 2 end]
+        } elseif {[lindex $line 0] eq "functions"} {
+            set report [dict create functions $functions {*}[lrange $line 2 end]]
+        }
+    }
+    return $report
+}
+
+# The NIR of the program-mode HIR program HIR after coroutine fusion and the
+# resumable lowering: what every native consumer compiles (the driver's
+# `fused`).
 proc native::fusedNir {hir args} {
     set lines [Driver fused [nir $hir {*}$args]]
     if {[regexp {^error } [lindex $lines 0]]} {
