@@ -78,7 +78,7 @@ Acceptance criteria (brief section 25):
 | 17 | independent tests and mutants detect unsafe reuse | met: 24 mutants killed, 240 fuzzed programs | section 19 |
 | 18 | compatible with strict bounded storage and execution owners | met by design: policy and placement are the provider's, regions are the plan's | sections 10, 26 |
 | 19 | no backend or language behavior weakened | met | sections 14, 24 |
-| 20 | regression and CI checks pass | «CI» | section 24 |
+| 20 | regression and CI checks pass | pending: CI of `1d26dc9b`; local runs pass | section 24 |
 
 ## 2. Baseline allocation evidence
 
@@ -1216,6 +1216,10 @@ tests of section 5, and `tests/scratch-storage.test` is new (40 tests).
 | `7c0e237a` | the mutant catalog's record run |
 | `ee71d90a` | the report: the lifetime audit's rerun |
 | `00646ca2` | `ss-run-census`: p16 only where a C call links (the CI finding) |
+| `4a4a1426` | the report: regression results and commits |
+| `e18e11de` | a region costs its frame only the mark; no region in a recursion (the macOS finding) |
+| `0a7a21eb` | the report: the fuzzer's run after the frame-cost fix |
+| `1d26dc9b` | lifetime facts: a call's fresh part may be a String the caller reads (the arm64 finding) |
 
 **CI on the branch.** **[test]**
 
@@ -1283,9 +1287,54 @@ mutant of recursive units now targets their region
 (`plan-recursive-region`), and `ss-run-nested` adds a recursion through a
 function value held in a struct field, which the direct call graph does
 not see, so its frames nest level by level. After the fix, on this
-container: «AFTERFIX»
+container: `tests/scratch-storage.test` 41 of 41 on interp and compile and
+under `BOTLISH_NATIVE_GC_STRESS=1`; `tools/mutant-catalogs.tcl` 117
+catalogs, 3,955 mutants, 0 problems; the fuzzer's 240 programs (seeds
+1-40, 6 each) 0 failures, its counts unchanged; `tests/local.tcl` every
+golden suite (122) on all four backends and every Tcl test file (299) on
+interp and compile, 598 runs and 20,088 tests passed, 0 failures (taken
+in four parts: the container restarted twice).
 
-**CI of the fix.** **[test]** At «FIXCOMMIT»: «CIRUNS»
+**CI of the fix.** **[test]** At `e18e11de`: tests.yml (run 43992559792),
+macos-arm64.yml (43992569633, its main-thread startup job included: the
+census's 8 MiB control holds `keep` 100,000 deep again),
+windows-x86_64.yml (43992574209) and static-decisions.yml (43992578232)
+succeeded; tests-arm64.yml (43992564924) failed in its two GC-stress jobs
+only, every other arm64 job succeeding. Both failed in traits.test's
+`trait-future-path-shape` and compilation-isolation.test's `ci-golden-pair`
+(the same program, `traits-path.bot`): cranelift-generic panicked, "not a
+program value". It reproduced on x86-64 under GC stress, and not with
+`-scratch-opt 0`.
+
+**The fresh-part finding.** **[probe]** The program builds a struct around
+a String in a callee and reads the String back out through a function
+returning `str` (`somewhere(w).parent().render()`), into its result. With
+`-specialize 0` the callee chain is canonical functions, framed: the
+program passed its destination down, the String was placed in the
+program's region, and the program read it after the region's reset. The
+fact was wrong whatever the backend: a call's fresh part is one abstract
+object standing for every object the callee made (it contains itself), but
+the solver gave it the result's kind, so render's String was never taken
+to be it and its way into the result was lost. The fix and its detectors
+are section 5's fourth row: an object that contains itself has a fixed
+kind only as a String. The specialized backend never placed this String
+(the struct result stays in registers, a companion with no frame), which
+is why the census and the fuzzer, both specialized, missed it: the fuzzer
+now keeps a String through a projecting function in every program and
+runs cranelift-generic under GC stress (`generic`), and fails every program
+without the fix. The census plans and its heap and scratch counts are
+unchanged; the corpus's facts change only where the fix corrects them
+(section 5). After the fix: the two failing tests pass under GC stress on
+interp and compile; `tests/storage-lifetime.test` and
+`tests/scratch-storage.test` pass; the lifetime oracle's selftest, its
+fuzzer (200 programs, 0 unsound, every verdict precise), its C differential
+(0 violations), the persistence check (identical to its record) and the
+native reachability check (0 contradictions) pass.
+
+**CI of the second fix.** **[test]** At `1d26dc9b`, dispatched: tests.yml
+(run 44027592974), tests-arm64.yml (44027595731), macos-arm64.yml
+(44027598498), windows-x86_64.yml (44027601055) and static-decisions.yml
+(44027603637) -- pending.
 
 ## 25. Known limitations
 
