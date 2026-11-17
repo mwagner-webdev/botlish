@@ -12312,6 +12312,7 @@ tests/payload-enum-transfer.test pet-remote-calls-gc-stress pass
 tests/payload-enum-transfer.test pet-actor-same-thread pass
 tests/storage-lifetime.test sl-error-let-through pass
 tests/storage-lifetime.test sl-fresh-holds-parameter pass
+tests/storage-lifetime.test sl-fresh-nested-kinds pass
 tests/storage-lifetime.test sl-recursive-reasons-converge pass
 tests/scratch-storage.test ss-plan-p01 pass
 tests/scratch-storage.test ss-plan-p04 pass
@@ -12349,6 +12350,7 @@ tests/scratch-storage.test ss-run-error-steady pass
 tests/scratch-storage.test ss-run-nested-loops-steady pass
 tests/scratch-storage.test ss-run-context-escape pass
 tests/scratch-storage.test ss-run-dest-stale pass
+tests/scratch-storage.test ss-run-fresh-nested pass
 tests/scratch-storage.test ss-run-closures pass
 tests/scratch-storage.test ss-run-coroutines pass
 tests/scratch-storage.test ss-run-tcl-backends pass

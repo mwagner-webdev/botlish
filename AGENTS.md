@@ -1973,13 +1973,17 @@ and what every suspension point keeps. Keep it so:
   verdict, and never let a fact depend on `hir/escape.tcl`, STRUCTOPTS or
   `hir/transport.tcl`.
 * A confined object is reused storage now: an unsound `confined` is a
-  native use of released memory, never only a wrong report. Three rules
+  native use of released memory, never only a wrong report. Four rules
   STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md added keep it so: an
   error a call lets out of the unit carries what the callee may fail with
   out too (`perr`, an `error` sink); a callee's fresh result contains what
   its result-reaching parameters reach, not only what it may be (the kind
-  filter is no containment); a recursive component's escape keeps the
-  first reason found (`KeepReasons`), so its summaries converge.
+  filter is no containment); an object that contains itself (a call's or a
+  native's fresh part: every object it made, nested ones too) has a fixed
+  kind only as a String, so the String a callee put in the struct it
+  returns is a String the caller's code may be (`Solve`'s `nested`); a
+  recursive component's escape keeps the first reason found
+  (`KeepReasons`), so its summaries converge.
 * Unknown is an answer: a call through a function value, a C argument
   without a borrowing contract, a resume message a coroutine may keep stay
   `unknown`, never `confined`. No budget decides a fact; the solver's and
@@ -1995,7 +1999,8 @@ and what every suspension point keeps. Keep it so:
 * The representation contract is conservative on purpose: a native's
   result may be, or hold, any object its operands reach (plans and
   substring regions keep their operands), narrowed only by kind (a value
-  of one kind is never an object of another). A caller's, a context's and a
+  of one kind is never an object of another, unless that object stands
+  for nested ones too). A caller's, a context's and a
   message's objects stand for everything they hold (they contain
   themselves). Containment is flow-insensitive; the may-have-been-made
   filter only removes objects that cannot exist yet.
@@ -2090,7 +2095,9 @@ hir/lifetime.tcl, run `tests/scratch-storage.test` (also under
 --release --manifest-path native/Cargo.toml --lib scratch`,
 `audit/storage-scratch/tools/fuzz.tcl` (several seeds: the interpreter
 against the Tcl compiler and native runs plain, under GC stress with
-released storage poisoned, with tiny chunks and without scratch storage) and `audit/storage-scratch/tools/mutate.tcl` (every
+released storage poisoned, with tiny chunks, without scratch storage, and
+cranelift-generic under GC stress, whose canonical functions return
+structs) and `audit/storage-scratch/tools/mutate.tcl` (every
 mutant in its `mutants.txt` must still apply and be killed by a detector
 its `!!` line names: update a mutant's text when you change the code it
 mutates, keeping it a mutant of the same rule).

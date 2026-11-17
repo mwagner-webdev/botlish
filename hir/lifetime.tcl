@@ -1259,10 +1259,28 @@ proc hir::lifetime::Solve {g summaries} {
     set contents [dict create]
     set cons [dict get $g cons]
     # The kind of each producer's object (others -- a caller's, a
-    # context's, a message -- may be of any kind).
+    # context's, a message -- may be of any kind). An object that contains
+    # itself stands for nested objects of its own too -- a call's fresh
+    # part is every object the callee made, a struct and the String it
+    # holds alike -- so it has a fixed kind only when its kind holds no
+    # object of another: a String (its plan's pieces and its region's
+    # String are Strings). A value of another kind may be one of them: the
+    # field a caller projects out of a callee's fresh struct is the String
+    # the callee made (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md,
+    # "Soundness fixes the integration found").
+    set nested [dict create]
+    foreach con $cons {
+        if {[lindex $con 0] eq "containobj" && [lindex $con 1] eq [lindex $con 2]} {
+            dict set nested [lindex $con 1] 1
+        }
+    }
     set kinds [dict create]
     dict for {site p} [dict get $g producers] {
-        dict set kinds $site [dict get $p kind]
+        set kind [dict get $p kind]
+        if {[dict exists $nested $site] && $kind ne "str"} {
+            set kind fresh
+        }
+        dict set kinds $site $kind
     }
     set changed 1
     set rounds 0

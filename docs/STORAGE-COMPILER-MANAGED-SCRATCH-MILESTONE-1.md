@@ -201,21 +201,27 @@ coroutine switch (section 7). The segment verdict therefore equals the
 activation verdict wherever a region exists.
 
 **[inspection]** Placing objects for real, and running the analysis on
-every natively compiled program, exposed three defects in
-`hir/lifetime.tcl`: two unsound facts, each a native use of released
+every natively compiled program, exposed four defects in
+`hir/lifetime.tcl`: three unsound facts, each a native use of released
 memory under GC stress, and a summary fixpoint that never converged (a
 compilation failure). Each is fixed in the analysis, not worked around in
-the plan, and pinned by a test that fails without its fix:
+the plan, and pinned by a test that fails without its fix (the fourth was
+found by CI after the frame-cost fix, section 24):
 
 | fact | defect | failure observed | fix | test |
 |---|---|---|---|---|
 | an error a call lets through | the payload of a declared error a callee may fail with (an argument the callee puts in the payload) was not an escape of the caller's unit | tests/error-payloads.test's `ep-gc-stress`: a payload String read after its region was reset | the call's let-through errors get an `error` sink (`perr`), and the callee's error may hold what its arguments reach | `sl-error-let-through` |
 | a fresh result's contents | a callee's fresh result (a struct it builds) was taken to hold only objects of its own kind, not the parameter-reaching objects it stores | tests/golden-framework.test: EILSEQ and NATIVE BUG -- a String the caller placed, stored by a callee into the struct it returns, released with the caller's region while the struct lived on | `fresh` results contain what their result-reaching parameters reach (`Add contents`) | `sl-fresh-holds-parameter` |
 | recursive reasons | a recursive component's escape reasons grew a step every round (the reason text named the previous round's), so the summaries never reached a fixpoint | tests/event-loop.test: "no summary fixpoint" | a summary keeps the first reasons found (`KeepReasons`) | `sl-recursive-reasons-converge` |
+| a fresh part's kinds | a call's fresh part (every object the callee made, nested ones too: it contains itself) kept its result's kind, so a value of another kind was never taken to be it -- the String a callee put in the struct it returns, projected by a function returning `str` (`label(make(i))`), lost its way to the caller's escape | tests-arm64.yml's GC-stress job (traits.test's `trait-future-path-shape`, compilation-isolation.test's `ci-golden-pair`): cranelift-generic placed the kept String in the caller's region, "not a program value" | an object that contains itself has a fixed kind only as a String, whose pieces are Strings (`Solve`'s `nested`) | `sl-fresh-nested-kinds`, `ss-run-fresh-nested` |
 
-**[test]** `tests/storage-lifetime.test`: 66 tests (63 of milestone 1, the
-three above), passing. The facts of milestone 1's corpus are otherwise
-unchanged (section 19 reruns its oracle).
+**[test]** `tests/storage-lifetime.test`: 67 tests (63 of milestone 1, the
+four above), passing. The facts of milestone 1's corpus are otherwise
+unchanged, except where the fourth fix corrects them: p12's actor
+coroutines and their closures, moved into `std::actor::start` and kept in
+the event loop's installed context, escape `main`'s activation (they were
+taken as confined; coroutines are never placed), and p13's `respond`
+coexists with `raw` (section 19 reruns its oracle).
 
 ## 6. Supported and excluded String operations
 
@@ -915,6 +921,7 @@ the reruns of the mutants section 24's fix touched or added):
 | nir-protocol-unchecked | the NIR validator accepts any request or destination | ss-nir-validator, a Rust test |
 | lifetime-error-let-through | an error a call lets through carries nothing out | sl-error-let-through, the fuzzer |
 | lifetime-fresh-holds-nothing | a callee's fresh result holds nothing it was given | sl-fresh-holds-parameter, the fuzzer |
+| lifetime-fresh-one-kind | a call's fresh part keeps its result's kind | sl-fresh-nested-kinds, ss-run-fresh-nested |
 | lifetime-reasons-grow | a recursive component's reasons are the latest found | sl-recursive-reasons-converge |
 
 The brief's runtime mutants map onto these: reset one region too early

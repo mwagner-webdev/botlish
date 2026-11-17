@@ -859,6 +859,34 @@ run(4)
         [slReasons $p make* 13 str activation 2] [slVerdict $p run* 16 struct activation]
 } -result {escapes escapes result confined}
 
+test sl-fresh-nested-kinds {a call's fresh part is every object the callee made, nested ones too: the String make puts in the struct it returns is that object, so a caller that returns it through a function projecting it (label) makes the call's result escape, though label's result is a String and the call's object a struct; a caller that only measures it confines it (the fourth soundness fix, found by tests-arm64.yml's GC-stress job)} -body {
+    set m {
+import std::int
+import std::str
+
+struct Box:
+    label: str
+    n: int
+
+fn make(i: int) -> Box:
+    Box {label: std::int::to_string(i).concat("!"), n: i}
+
+fn label(b: Box) -> str:
+    b.label
+
+fn kept(i: int) -> str:
+    label(make(i))
+
+fn measured(i: int) -> int:
+    std::str::length(label(make(i)))
+
+std::str::length(kept(4)) + measured(5)
+}
+    set p [slFacts $m]
+    list [slVerdict $p kept* 16 struct activation] [slReasons $p kept* 16 struct activation] \
+        [slVerdict $p measured* 19 struct activation]
+} -result {escapes result confined}
+
 test sl-recursive-reasons-converge {a recursive component whose escape reason goes around its cycle -- the event-loop scenario's storm, which adopts a coroutine of itself into the loop's context -- converges: each escape keeps the first reason found, so the facts stop changing and so does their text (the third fix)} -body {
     set hir [surface::readProgramFile [file join $::projectRoot tests event-loop fairness.bot] -warnings off]
     set facts [hir::lifetime::analyze $hir]

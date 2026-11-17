@@ -288,6 +288,15 @@ fn validate_scratch(program: &Program, f: &Function) -> Result<(), String> {
                         incr i
 >>>>
 
+@@ lifetime-fresh-one-kind a call's fresh part keeps its result's kind: the String a callee put in the struct it returns is never a String the caller's code may be, so a caller keeping it through a function that projects it confines the call, and cranelift-generic placed it in the caller's region
+!! sl-fresh-nested-kinds ss-run-fresh-nested
+## hir/lifetime.tcl
+<<<<
+        if {[dict exists $nested $site] && $kind ne "str"} {
+====
+        if {0 && [dict exists $nested $site] && $kind ne "str"} {
+>>>>
+
 @@ lifetime-reasons-grow a recursive component's escape reasons are the latest found: their text grows a step every round around the cycle and the summaries never converge
 !! sl-recursive-reasons-converge
 ## hir/lifetime.tcl

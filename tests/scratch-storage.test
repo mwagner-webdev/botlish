@@ -988,6 +988,57 @@ run(30)
     list [lindex $agree 0] [expr {$stressed eq [lindex $agree 1]}] [dict get [ssUnit $plan piece*] capable] [ssClean [ssAlloc $hir]]
 } -result {same 1 1 {stale 0 protocol 0}}
 
+test ss-run-fresh-nested {a callee's fresh struct holds a String it made; a caller keeps that String through a function that projects it (label(make(i))): the call's fresh result is every object the callee made, the String too, so it escapes and the call passes no destination; where the String is only measured (used) it does. Generic and specialized, poisoned and under GC stress (found by tests-arm64.yml's GC-stress job: cranelift-generic placed the kept String in the caller's region)} -constraints ssNative -body {
+    set hir [surface::compile {import std::int
+import std::str
+import std::mutable_vector
+
+struct Box:
+    label: str
+    n: int
+
+fn make(i: int) -> Box:
+    Box {label: std::int::to_string(i).concat("!"), n: i}
+
+fn label(b: Box) -> str:
+    b.label
+
+fn used(i: int) -> int:
+    std::str::length(label(make(i)))
+
+fn run(n: int) -> str:
+    kept = std::mutable_vector::from_list(["k"])
+    loop i from 0 to n:
+        kept.push(label(make(i)))
+        kept.push(make(i + 1).label)
+        kept.push(std::int::to_string(used(i)))
+    fold k from 0 to std::mutable_vector::length(kept) with intermediate out "":
+        item = std::mutable_vector::at(kept, k):
+            on IndexNotFound:
+                "?"
+        out.concat(item)
+
+run(30)
+} -warnings off]
+    set agree [ssAgree $hir]
+    set want [lindex $agree 1]
+    set runs {}
+    foreach backend {cranelift cranelift-generic} {
+        lappend runs [expr {[withEnvironment {BOTLISH_NATIVE_SCRATCH_POISON 1} {outcomeUnderHir $backend $hir}] eq $want}] \
+            [expr {[withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {outcomeUnderHir $backend $hir}] eq $want}]
+    }
+    set plan [ssPlan $hir]
+    set calls {}
+    foreach {glob line} {run* 21 run* 22 used* 16} {
+        foreach s [ssSites $hir [ssUnit $plan $glob]] {
+            if {[lindex $s 0] == $line && [lindex $s 1] eq "struct"} {
+                lappend calls [lindex $s 2]
+            }
+        }
+    }
+    list [lindex $agree 0] $runs $calls
+} -result {same {1 1 1 1} {rejected rejected selected}}
+
 test ss-run-closures {Strings inside a closure called directly, a closure passed as a callback and a closure that escapes: each closure's own regions are its own; nothing it keeps is in scratch storage} -constraints ssNative -body {
     set hir [surface::compile {import std::int
 import std::str

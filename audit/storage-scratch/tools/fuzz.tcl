@@ -3,7 +3,7 @@
 # and mutation-testing evidence").
 #
 #   tclsh9.0 audit/storage-scratch/tools/fuzz.tcl ?-seeds 1-5? ?-count 20?
-#       ?-modes {plain stress growth off}? ?-compile 0|1? ?-keep DIR?
+#       ?-modes {plain stress growth off generic}? ?-compile 0|1? ?-keep DIR?
 #
 # For each seed, a generator of its own (no compiler code: a grammar of
 # ordinary Botlish over Strings) writes COUNT programs that build Strings in
@@ -25,7 +25,12 @@
 #   growth  BOTLISH_NATIVE_SCRATCH_CHUNK=48: every few Strings a new chunk,
 #           growth and replacement on every path;
 #   off     BOTLISH_NATIVE_SCRATCH_OPT=0: the native backend without scratch
-#           storage (the baseline the optimization must not change).
+#           storage (the baseline the optimization must not change);
+#   generic cranelift-generic (-specialize 0) under GC stress: every
+#           function compiled once, its canonical function, so a helper
+#           that returns a struct is a framed function that takes a
+#           destination (the specialized backend keeps such a result in
+#           registers, a companion with no frame).
 #
 # A program passes when every mode's outcome equals interp's and the
 # allocation report (stress mode) counts no stale root and no protocol
@@ -34,7 +39,7 @@
 # on any failure or any program that does not compile (a generator bug).
 set here [file dirname [file normalize [info script]]]
 set root [file dirname [file dirname [file dirname $here]]]
-set options [dict create -seeds 1-5 -count 20 -modes {plain stress growth off} -compile 1 -keep ""]
+set options [dict create -seeds 1-5 -count 20 -modes {plain stress growth off generic} -compile 1 -keep ""]
 foreach {k v} $argv {
     if {![dict exists $options $k]} {
         error "unknown option $k"
@@ -300,6 +305,7 @@ proc Program {} {
         lappend helpers [list $name $kind]
     }
     lappend lines "fn through(f: Fn{args: \[int\], return: Box}, i: int) -> Box:" "    f(i)" "" \
+        "fn label(b: Box) -> str:" "    b.label" "" \
         "fn main(n: int) -> str:" \
         "    kept = std::mutable_vector::from_list(\[\"start\"\])" \
         "    total = fold i from 0 to n with intermediate acc 0:"
@@ -309,11 +315,18 @@ proc Program {} {
         lappend body {*}[Statement {i acc} strs]
     }
     # Every program keeps a String that left a helper inside a struct --
-    # through a direct call and through a call of a function value no
-    # specialization makes exact (the canonical function runs) -- and one
-    # that left a helper inside an error payload.
+    # through a direct call, through a call of a function value no
+    # specialization makes exact (the canonical function runs) and through
+    # a function that projects it (label: its result a String, the call's
+    # fresh part a struct holding the String the helper made) -- and one
+    # that left a helper inside an error payload; it measures a projected
+    # one too (that call's result is confined).
     set boxers [lmap h $helpers {if {[lindex $h 1] eq "boxer"} {lindex $h 0} else continue}]
+    set boxes [lmap h $helpers {if {[lindex $h 1] eq "box"} {lindex $h 0} else continue}]
     set relays [lmap h $helpers {if {[lindex $h 1] eq "relay"} {lindex $h 0} else continue}]
+    lappend body "        kept.push(label([lindex $boxes 0]\(i)))" \
+        "        kept.push(std::int::to_string(std::str::length(label([lindex $boxes end]\(i + 1)))))" \
+        "        kept.push(label([lindex $boxers end]\(i)))"
     lappend body "        kept.push([Pick $boxers]\(i).label)" \
         "        chosen = if i.mod(2) == 0:" "            [lindex $boxers 0]" "        else:" "            [lindex $boxers end]" \
         "        kept.push(through(chosen, i).label)" \
@@ -342,6 +355,7 @@ proc Mode {mode script} {
         stress { set env {BOTLISH_NATIVE_GC_STRESS 1} }
         growth { set env {BOTLISH_NATIVE_SCRATCH_CHUNK 48} }
         off { set env {BOTLISH_NATIVE_SCRATCH_OPT 0} }
+        generic { set env {BOTLISH_NATIVE_GC_STRESS 1} }
     }
     return [uplevel 1 [list withEnvironment $env $script]]
 }
@@ -378,7 +392,8 @@ foreach seed [Seeds [dict get $options -seeds]] {
             }
         }
         foreach mode [dict get $options -modes] {
-            if {[catch {Mode $mode {outcomeUnderHir cranelift $hir}} got]} {
+            set backend [if {$mode eq "generic"} {string cat cranelift-generic} else {string cat cranelift}]
+            if {[catch {Mode $mode {outcomeUnderHir $backend $hir}} got]} {
                 set got "the native run failed: [lindex [split $got \n] 0]"
             }
             if {$got ne $oracle} {
