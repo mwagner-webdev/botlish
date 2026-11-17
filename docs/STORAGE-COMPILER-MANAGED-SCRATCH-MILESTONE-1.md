@@ -868,7 +868,10 @@ every outcome equal to interp's on the Tcl compiler and in all four native
 modes, no stale root and no protocol error. The plan selected 3,563 sites;
 lowering placed 1,374 of them (27,731 Strings in scratch storage over the
 runs); 939 had no instruction of their own and 1,250 were in instances that
-have no canonical function (section 25).
+have no canonical function (section 25). The run after section 24's
+frame-cost fix (`e18e11de`, recursive units without regions) gave the same
+result, count for count: no generated program had a placed site in a
+recursive unit.
 
 **[probe]** Positive control: with each of the two unsound lifetime facts of
 section 5 reintroduced, 8 of 8 generated programs fail (NATIVE BUG or
