@@ -54,7 +54,7 @@ Block 3([]):
   Inst 31: load_ext_name userextname1+0, %v348
   Inst 32: call    *%v348
     UserStackMap { by_type: [(types::I64, CompoundBitSet {0})], sp_to_sized_stack_slots: None }
-  Inst 33: movq 0x40(%v192), %v346
+  Inst 33: movq 0x48(%v192), %v346
   Inst 34: movq %v347, (%v346)
   Inst 35: movq 0x10(%v192), %v345
   Inst 36: movq (%v345), %v344
@@ -134,7 +134,7 @@ Block 5([]):
     (original IR block: block4)
     (successor: Block 7([]))
     (successor: Block 6([]))
-  Inst 106: movq 0x40(%v192), %v309
+  Inst 106: movq 0x48(%v192), %v309
   Inst 107: movq %v310, 8(%v309)
   Inst 108: movq $0x16c, <offset:1>+(%rsp)
   Inst 109: movq $0x174, <offset:1>+8(%rsp)
@@ -170,7 +170,7 @@ Block 9([]):
     (original IR block: block6)
     (successor: Block 11([]))
     (successor: Block 10([]))
-  Inst 128: movq 0x40(%v192), %v303
+  Inst 128: movq 0x48(%v192), %v303
   Inst 129: movq %v304, 0x10(%v303)
   Inst 130: movl $0xe2a0e1, %v302
   Inst 131: call    User(userextname3)
@@ -1028,7 +1028,7 @@ Block 5([]):
     (original IR block: block7)
     (successor: Block 7([]))
     (successor: Block 6([]))
-  Inst 23: movq 0x40(%v192), %v227
+  Inst 23: movq 0x48(%v192), %v227
   Inst 24: movq (%v227), %v226
   Inst 25: load_ext_name userextname1+0, %v225
   Inst 26: call    *%v225
@@ -1112,7 +1112,7 @@ Block 5([]):
     (original IR block: block7)
     (successor: Block 7([]))
     (successor: Block 6([]))
-  Inst 23: movq 0x40(%v192), %v227
+  Inst 23: movq 0x48(%v192), %v227
   Inst 24: movq (%v227), %v226
   Inst 25: load_ext_name userextname1+0, %v225
   Inst 26: call    *%v225
@@ -1587,7 +1587,7 @@ Block 2([]):
     (original IR block: block4)
     (successor: Block 4([]))
     (successor: Block 3([]))
-  Inst 6: movq 0x40(%v192), %v215
+  Inst 6: movq 0x48(%v192), %v215
   Inst 7: movq 0x10(%v215), %v214
   Inst 8: load_ext_name userextname1+0, %v213
   Inst 9: call    *%v213
@@ -2117,14 +2117,14 @@ Block 1([]):
     (original IR block: block0)
     (successor: Block 3([]))
     (successor: Block 2([]))
-  Inst 2: movq 0x40(%v192), %v245
+  Inst 2: movq 0x48(%v192), %v245
   Inst 3: movq 8(%v245), %v244
   Inst 4: call    User(userextname0)
   Inst 5: movq 0x10(%v244), %v242
   Inst 6: sarq $1, (%v241 <- %v243)
   Inst 7: movq (%v242, %v241, 8), %v240
   Inst 8: movq %v240, <offset:1>+(%rsp)
-  Inst 9: movq 0x40(%v192), %v239
+  Inst 9: movq 0x48(%v192), %v239
   Inst 10: movq 8(%v239), %v238
   Inst 11: movq 0x10(%v238), %v237
   Inst 12: andq $0xf, (%v236 <- %v193)

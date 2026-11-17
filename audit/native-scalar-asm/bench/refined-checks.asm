@@ -87,7 +87,7 @@ Disassembly of section .text:
      138:	call   13d <botlish_fn_0+0x13d>
 			139: R_X86_64_PLT32	rt_set_from_list-0x4
      13d:	mov    rdi,QWORD PTR [rsp+0x158]
-     145:	mov    rcx,QWORD PTR [rdi+0x40]
+     145:	mov    rcx,QWORD PTR [rdi+0x48]
      149:	mov    QWORD PTR [rcx],rax
      14c:	mov    rax,QWORD PTR [rdi+0x10]
      150:	mov    rcx,QWORD PTR [rax]
@@ -180,7 +180,7 @@ Disassembly of section .text:
      34c:	test   rax,rax
      34f:	je     4c2 <botlish_fn_0+0x4c2>
      355:	mov    rdi,QWORD PTR [rsp+0x158]
-     35d:	mov    rcx,QWORD PTR [rdi+0x40]
+     35d:	mov    rcx,QWORD PTR [rdi+0x48]
      361:	mov    QWORD PTR [rcx+0x8],rax
      365:	mov    QWORD PTR [rsp],0x16c
      36d:	mov    QWORD PTR [rsp+0x8],0x174
@@ -204,7 +204,7 @@ Disassembly of section .text:
      3e7:	test   rax,rax
      3ea:	je     4c2 <botlish_fn_0+0x4c2>
      3f0:	mov    rdi,QWORD PTR [rsp+0x158]
-     3f8:	mov    rcx,QWORD PTR [rdi+0x40]
+     3f8:	mov    rcx,QWORD PTR [rdi+0x48]
      3fc:	mov    QWORD PTR [rcx+0x10],rax
      400:	mov    esi,0xe2a0e1
      405:	call   40a <botlish_fn_0+0x40a>
@@ -873,7 +873,7 @@ Disassembly of section .text:
      cd0:	mov    r13,rcx
      cd3:	cmp    rax,0x6
      cd7:	je     d0b <botlish_fn_11+0xb3>
-     cdd:	mov    rax,QWORD PTR [rbx+0x40]
+     cdd:	mov    rax,QWORD PTR [rbx+0x48]
      ce1:	mov    rsi,QWORD PTR [rax]
      ce4:	mov    rdx,r12
      ce7:	mov    rdi,rbx
@@ -948,7 +948,7 @@ Disassembly of section .text:
      dc0:	mov    r13,rcx
      dc3:	cmp    rax,0x6
      dc7:	je     dfb <botlish_fn_12+0xb3>
-     dcd:	mov    rax,QWORD PTR [rbx+0x40]
+     dcd:	mov    rax,QWORD PTR [rbx+0x48]
      dd1:	mov    rsi,QWORD PTR [rax]
      dd4:	mov    rdx,r12
      dd7:	mov    rdi,rbx
@@ -1387,7 +1387,7 @@ Disassembly of section .text:
 			1345: R_X86_64_PLT32	botlish_fn_7-0x4 ; std::ascii::is_alphanumeric<int>
     1349:	cmp    rax,0x6
     134d:	je     1384 <botlish_fn_18+0x5d>
-    1353:	mov    rax,QWORD PTR [rbx+0x40]
+    1353:	mov    rax,QWORD PTR [rbx+0x48]
     1357:	mov    rsi,QWORD PTR [rax+0x10]
     135b:	mov    rdx,r14
     135e:	mov    rdi,rbx
@@ -1790,7 +1790,7 @@ Disassembly of section .text:
     1873:	mov    QWORD PTR [rsp+0x30],rbx
     1878:	mov    QWORD PTR [rsp+0x38],r12
     187d:	mov    QWORD PTR [rsp+0x40],r13
-    1882:	mov    rax,QWORD PTR [rdi+0x40]
+    1882:	mov    rax,QWORD PTR [rdi+0x48]
     1886:	mov    r13,QWORD PTR [rax+0x8]
     188a:	mov    rbx,rsi
     188d:	mov    r12,rdi
@@ -1800,7 +1800,7 @@ Disassembly of section .text:
     1899:	sar    rax,1
     189c:	mov    rdx,QWORD PTR [rcx+rax*8]
     18a0:	mov    QWORD PTR [rsp],rdx
-    18a4:	mov    rax,QWORD PTR [r12+0x40]
+    18a4:	mov    rax,QWORD PTR [r12+0x48]
     18a9:	mov    rax,QWORD PTR [rax+0x8]
     18ad:	mov    rcx,QWORD PTR [rax+0x10]
     18b1:	and    rbx,0xf
