@@ -241,16 +241,16 @@ test at-target-pm-facts {the package manager knows the target as an ELF AArch64 
         [pm::target::platformLibrary android-aarch64 libc.so.6] [pm::target::platformLibrary linux-aarch64 liblog.so]
 } -result {elf 183 bionic libz.a 1 0 0}
 
-test at-driver-target-report {the driver reads aarch64-linux-android as Cranelift does, and says it emits code for it and never runs it here; a target with no Botlish runtime is emitted for by no driver} -constraints {nativeBuilt linuxX86_64Host} -body {
+test at-driver-target-report {the driver reads aarch64-linux-android as Cranelift does, and says it emits code for it (a driver whose runtime is the target's: nativeEmitsForTargets) and never runs it here; a target with no Botlish runtime is emitted for by no driver} -constraints {nativeBuilt linuxX86_64Host} -body {
     set android [dict create {*}[lrange [exec [native::binary] target aarch64-linux-android] 0 end]]
     set musl [dict create {*}[lrange [exec [native::binary] target aarch64-unknown-linux-musl] 0 end]]
     list [dict get $android arch] [dict get $android format] [dict get $android c-call-conv] \
         [dict get $android runs] [dict get $android emits] [dict get $musl emits]
-} -result {aarch64 elf system_v 0 1 0}
+} -result [list aarch64 elf system_v 0 [testConstraint nativeEmitsForTargets] 0]
 
 # ------------------------------------------------------------ emitting is not running
 
-test at-driver-library-object {a library's object is emitted for aarch64-linux-android from this host: an AArch64 ELF relocatable object; without --target the same program's object is the host's} -constraints {nativeBuilt linuxX86_64Host} -body {
+test at-driver-library-object {a library's object is emitted for aarch64-linux-android from this host: an AArch64 ELF relocatable object; without --target the same program's object is the host's} -constraints {nativeBuilt linuxX86_64Host nativeEmitsForTargets} -body {
     set dir [atDir obj]
     set nir [file join $dir lib.nir]
     atWrite $nir [atLibraryNir $::atLibrarySource lib]
@@ -353,7 +353,7 @@ test at-toolchain-refusals {a missing or unusable host toolchain is the toolchai
     set results
 } -result {unset 1 old 1 notool 1 noapi 1 nohost 1}
 
-test at-toolchain-failures {a link that fails leaves no library or manifest behind (not even an earlier build's), and one whose archive is not position-independent is PIC} -constraints {nativeBuilt linuxX86_64Host clang} -body {
+test at-toolchain-failures {a link that fails leaves no library or manifest behind (not even an earlier build's), and one whose archive is not position-independent is PIC} -constraints {nativeBuilt linuxX86_64Host clang nativeEmitsForTargets} -body {
     set app [atSupportApp [atDescriptor [native::runtimeAbi aarch64-linux-android]]]
     file mkdir $app/out
     foreach f {liblib.a liblib.so lib.manifest.json} { atWrite $app/out/$f "an earlier build\n" }
@@ -491,7 +491,7 @@ test at-link-plan-cross {a library of android-aarch64 that declares Android's pl
     list $status [dict get $facts machine] [lsort [dict get $facts needed]] $dependencies
 } -result {0 183 {libandroid.so libc.so libdl.so liblog.so libm.so} {-llog -landroid}}
 
-test at-link-plan-cross-refusals {a cross-target link plan is judged for Android: a static archive of this host's x86-64 objects is never linked into an Android library, a static library declared without a path is looked for in the -L directories only (never the host's), and nothing is left behind} -constraints {nativeBuilt linuxX86_64Host clang} -body {
+test at-link-plan-cross-refusals {a cross-target link plan is judged for Android: a static archive of this host's x86-64 objects is never linked into an Android library, a static library declared without a path is looked for in the -L directories only (never the host's), and nothing is left behind} -constraints {nativeBuilt linuxX86_64Host clang nativeEmitsForTargets} -body {
     set app [atSupportApp [atDescriptor [native::runtimeAbi aarch64-linux-android]]]
     set ndk [atFakeNdk 29.0 [dict create cc [auto_execok clang] ld [auto_execok ld] objcopy [auto_execok objcopy] ar [auto_execok ar]] 21]
     atWrite $app/host.c "int host_value(void) \{ return 7; \}\n"

@@ -160,6 +160,14 @@ testConstraint nativeStackGuard [native::hostSupports stackGuard]
 # host's plan by it.
 testConstraint nativeFrameRoots [native::hostSupports frameRoots]
 
+# The driver emits machine code for another target (a native library's
+# object, `library --target`) only when that target's runtime has the
+# driver's own capabilities (codegen/target.rs's check_emit): every shipped
+# target's runtime keeps roots in native frames and switches stacks, so a
+# `fallback-roots` driver (ShadowOnly, resumable coroutines) emits for no
+# other target, by design.
+testConstraint nativeEmitsForTargets [expr {[native::hostSupports frameRoots] && [native::hostSupports stackfulCoroutines]}]
+
 # The other root plan: one LIFO shadow stack holds every running function's
 # roots, leaf or not (codegen::roots's ShadowOnly mode,
 # WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md), where a

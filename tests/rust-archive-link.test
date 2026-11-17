@@ -219,7 +219,10 @@ proc ralWeakReferenceAlone {c} {
 set ::ralWeakReferenceAloneExpected [expr {$::ralMacho ? {{link failed} 1} : {pass 0}}]
 
 foreach linker {rustc system} {
-    set constraints [list rustlinkHost [expr {$linker eq "rustc" ? "rustcLinkerBuilt" : "systemLinkerBuilt"}]]
+    # The fixture's program calls back into Botlish from C (its digest's
+    # weigh callback): nativeCCallbacks, which a fallback-roots driver lacks
+    # by design (C-CALLBACK-MILESTONE-1.md).
+    set constraints [list rustlinkHost nativeCCallbacks [expr {$linker eq "rustc" ? "rustcLinkerBuilt" : "systemLinkerBuilt"}]]
     foreach program {without_provider.bot with_provider.bot} {
         set tag [file rootname $program]
         test ral-localized-$tag-$linker "the localized unit, $tag, the $linker linker: every check passes; one global personality routine, the unit's local" \

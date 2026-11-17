@@ -460,11 +460,11 @@ jobs:
           BOTLISH_NATIVE_COROUTINE_FUSION: "0"
         run: tclsh9.0 tests/golden/run.tcl -backends cranelift,cranelift-generic -quiet
 
-      - name: Coroutine, actor, event-loop, recognizer, resource and context tests
+      - name: Coroutine, actor, event-loop, recognizer, resource, context and root-plan tests
         if: ${{ !cancelled() }}
         env:
           BOTLISH_NATIVE_BIN: ${{ github.workspace }}/native/target-fallback/release/botlish-native
-        run: tclsh9.0 tests/all.tcl -file "resumable-coroutines.test coroutines.test coroutine-fusion.test actor.test event-loop.test dfa.test resources.test affine.test context-affine.test contexts.test golden-framework.test"
+        run: tclsh9.0 tests/all.tcl -file "resumable-coroutines.test coroutines.test coroutine-fusion.test actor.test event-loop.test dfa.test resources.test affine.test context-affine.test contexts.test golden-framework.test native-root-storage.test native-stack-map.test native-stack-overflow.test scratch-storage.test native-library.test"
 
       - name: Under GC stress
         if: ${{ !cancelled() }}

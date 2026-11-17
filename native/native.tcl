@@ -310,7 +310,12 @@ proc native::hostSupports {capability} {
         return 0
     }
     switch -- $capability {
-        frameRoots {return [expr {[driverCapability roots] eq "native-frame"}]}
+        frameRoots - cCallbacks {
+            # C callbacks run only where native frames hold the roots: the
+            # runtime refuses them on the ShadowOnly plan (C-CALLBACK-
+            # MILESTONE-1.md; NATIVE CALLBACK UNSUPPORTED).
+            return [expr {[driverCapability roots] eq "native-frame"}]
+        }
         stackfulCoroutines {return [expr {[driverCapability coroutines] eq "stackful"}]}
         resumableCoroutines {return [expr {[driverCapability coroutines] eq "resumable"}]}
     }

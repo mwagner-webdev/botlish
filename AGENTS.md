@@ -2227,6 +2227,20 @@ Keep it so:
 * Decisions read `RuntimeCapabilities` (nir::Program's `capabilities`, the
   driver's `host_runtime()` today), never the runtime's constants directly,
   so a target's code is generated for its runtime.
+* A ShadowOnly frame is scanned whole, dead slots included: anything that
+  releases storage a dead slot may still point to clears those slots (a
+  `scratchreset`: RootPlan's `scratch_reset_dead`). The shadow array is as
+  large as the running thread's stack, so a recursion that fits the stack
+  fits it.
+* Tests say which plan or mechanism they assert: a value, release, error or
+  collection under both carries `nativeCoroutines`; one mechanism's own
+  evidence `nativeStackfulCoroutines` or `nativeResumableCoroutines`; a root
+  plan's `nativeFrameRoots`/`nativeShadowOnlyRoots`; a fallible prologue
+  `nativeDepthChecked` (only where no stack guard exists); a capability the
+  fallback build refuses by design `nativeCCallbacks` or
+  `nativeEmitsForTargets`, read from the driver (`native::driverCapability`).
+  Machine-code call lists leave the ShadowOnly prologue's cold
+  `rt_shadow_overflow` out (`withoutShadowOverflow`).
 
 If you change codegen/resumable.rs, runtime/resumable.rs, the frame ops or
 `frsave`/`frrestore` in nir.rs or codegen/clif.rs, codegen/roots.rs's
@@ -2237,7 +2251,11 @@ native/target-fallback`) and run, with
 `BOTLISH_NATIVE_BIN=$PWD/native/target-fallback/release/botlish-native`:
 `tests/resumable-coroutines.test`, `tests/coroutines.test`,
 `tests/coroutine-fusion.test`, `tests/actor.test`, `tests/event-loop.test`,
-`tests/dfa.test` and `tests/resources.test`; the golden suites on
+`tests/dfa.test` and `tests/resources.test`, and for a root-plan change
+`tests/native-root-storage.test`, `tests/native-stack-map.test`,
+`tests/native-stack-overflow.test`, `tests/scratch-storage.test` and
+`tests/native-library.test` (before a milestone, the whole Tcl suite:
+`tests/local.tcl -parts tcl -backends interp` with that driver); the golden suites on
 cranelift and cranelift-generic with `BOTLISH_NATIVE_COROUTINE_FUSION=0`
 (`tests/local.tcl -parts golden -golden-backends cranelift,cranelift-generic`);
 the fallback build's Rust tests (`cargo test --release --features

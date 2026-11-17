@@ -467,6 +467,26 @@ resumable` on the fallback build). Native-frame roots are untouched:
   sequence, and no activation outlives its segment.
 * **Checked**: `segment` compares `ss_top` with its entry value after every
   segment and reports a Bug (invariant I1, `runtime/resumable.rs:244`).
+* **Dead slots at a scratch reset** [fact, obs]: the collector scans a
+  shadow frame whole, dead slots included (native frames' stack maps are
+  precise per safepoint). A dead slot still holding a String of a scratch
+  region (STORAGE-COMPILER-MANAGED-SCRATCH-MILESTONE-1.md) just reset was a
+  root into released storage -- skipped safely (the collector tests the
+  address before reading), but counted as `stale_roots`, which must be 0:
+  `scratch-storage.test`'s census program p07b, under GC stress, counted
+  2,997. The planner now lists, per `scratchreset`, the slots no register
+  live after it occupies (`RootPlan::scratch_reset_dead`), and the code
+  generator zeroes them right after the reset; a slot is only a root,
+  never read back for a value, so zeroing a dead one changes nothing else.
+  Unit test `a_scratch_reset_clears_dead_shadow_slots`.
+* **Size** [fact]: the shadow array is as large as the running thread's
+  stack, and at least the former 4Mi slots (`vm.rs`'s `shadow_slots`).
+  Under native-frame roots each root slot takes 8 bytes of its function's
+  native frame, so roots that fit the stack fit the array, and a recursion
+  that fits the stack returns its value on either plan
+  (`native-stack-overflow.test`'s `ns-main-finite`, which main's fallback
+  build failed with its fixed 32 MiB array). The array is a zeroed
+  allocation, reserved and touched only as far as a run reaches.
 
 ### 6.3 The depth token [fact, inf]
 
@@ -646,8 +666,47 @@ changed for the same reason: `af-drop-native`, `cao-error-paths`,
 `gf-coroutine-cleanup-native`, `contexts-native-machine-code` (native-frame
 code shape, now `nativeFrameRoots`), and the coroutine-op lists of
 `co-source-operations`, `higher-order-completions.test`,
-`structural-contract-completions.test` and `static-compile.test`. No test
-is skipped on either build for being implementation-specific.
+`structural-contract-completions.test` and `static-compile.test`.
+
+The whole Tcl suite run on the fallback driver (section 11.3) found more
+tests encoding the old fallback plan or one mechanism, now plan- or
+mechanism-aware: `native-root-storage.test` (a leaf's storage: native
+frame, or the shadow stack on ShadowOnly), `native-stack-map.test` and
+`nativeDepthChecked` (the depth reservation and fallible prologues only
+where no stack guard exists; used by `native.test`'s `native-aot-2`,
+`hashable.test`, `setcontains-equality-total.test`,
+`setfromlist-equality-total.test`), `withoutShadowOverflow` (the ShadowOnly
+prologue's cold `rt_shadow_overflow` call left out of the machine-code call
+lists of `abi-bytes.test` and `abi-mutable-bytes.test`),
+`native-stack-overflow.test`'s `ns-co-edge` and `ns-co-fused` (a
+coroutine's recursion is bounded by its own 8 MiB stack where coroutines
+switch stacks, by its resumer's thread stack where they are resumable
+frames: section 15), and `scc-affine-payload-native` (releases counted
+against coroutines made, plus the stack identity where stacks exist),
+`native-library.test`'s `nl-stack-safety-coroutine` (the same bound, in a
+library on a 512 KiB thread) and `nl-coroutine-stacks-released` (the
+stackful runtime's stack pool: `nativeStackfulCoroutines`).
+
+Two capabilities the fallback build lacks by design, as on main, are now
+detected from the driver instead of assumed from the host:
+`nativeCCallbacks` (`hostSupports cCallbacks`: the runtime refuses C
+callbacks unless native frames hold the roots, C-CALLBACK-MILESTONE-1.md)
+and `nativeEmitsForTargets` (a driver emits code for another target only
+when that target's runtime has its capabilities, `codegen/target.rs`'s
+`check_emit`; every shipped target's runtime is native-frame and stackful).
+Main's fallback build failed those tests outright (its comment in
+`native/native.tcl`: "the tests of the native-frame plan then fail, by
+design"); they are now constrained out on it and run unchanged on the
+stock build. No test of a capability the fallback build has is skipped on
+it.
+
+### 11.3 The whole Tcl suite on the fallback driver [obs]
+
+`BOTLISH_NATIVE_BIN=FALLBACK-DRIVER tclsh9.0 tests/local.tcl -parts tcl
+-backends interp -jobs 4` (every test file, the golden-duplicated tests
+skipped as locally by default):
+
+[[TCL-SUITE]]
 
 ## 12. GC-stress and mutation-test results
 
@@ -702,7 +761,10 @@ coverage:
    (every coroutine on the general mechanism);
 5. focused files: resumable-coroutines (corpus, leaf re-entry, evidence),
    coroutines, coroutine-fusion, actor, event-loop, dfa, resources, affine,
-   context-affine, contexts, golden-framework;
+   context-affine, contexts, golden-framework, and the root-plan files
+   whose fallback-plan expectations section 11.3 found wanting --
+   native-root-storage, native-stack-map, native-stack-overflow,
+   scratch-storage (its census under GC stress), native-library;
 6. GC stress: the Rust tests and the coroutine and tree golden suites with
    a collection at every allocation (the corpus's stressed runs are in
    step 5);
@@ -716,6 +778,19 @@ resumable-evidence tests are constrained out.
 
 ## 15. Known limitations and remaining risks
 
+* **A coroutine's recursion limit differs** [fact, obs]: a stackful
+  coroutine runs on its own 8 MiB stack, so a deep recursion inside it is
+  NATIVE LIMIT STACK at about ten million levels of a small function; a
+  resumable coroutine's activations run on its resumer's stack (1 GiB for a
+  program's thread), so the same recursion returns its value up to about
+  22 million levels (`ns-co-edge`'s bisection) -- as a fused coroutine
+  already did. Values, releases and errors are otherwise the same; only
+  this resource limit is wider.
+* **C callbacks and cross-target emission stay native-frame only**
+  [fact]: unchanged from main. ShadowOnly's strict LIFO stack suggests a
+  callback re-entering Botlish could push above the C frames like any
+  runtime operation that runs Botlish code [inf], but enabling it is a
+  change of the callback milestone's contract, out of A0's scope.
 * **Per-yield helpers** [fact]: `rt_co_suspend` and `rt_co_msg` remain
   calls (they touch the coroutine object through `Vm::co_current` and
   report abandonment); `rt_frame_new` is an allocation. Their cost is in
@@ -735,6 +810,11 @@ resumable-evidence tests are constrained out.
 * **The no-guard ShadowOnly discipline** (depth token, in-band overflow,
   checked callers) has no native host to run on; it is the pre-existing
   code path, covered by unit tests only [inf].
+* **The shadow array's reservation** is the thread's stack size (1 GiB for
+  a program's thread): a zeroed allocation, lazily backed on Linux and
+  macOS [fact: glibc and macOS satisfy large `calloc`s with fresh zero
+  pages]; on Windows the heap commits it, which counts against the commit
+  limit though not physical memory [inf; no Windows fallback build here].
 * **Windows and macOS fallback builds** were not built here; the fallback
   feature is host-independent code, and the lane runs on Linux x86-64
   [inf].
