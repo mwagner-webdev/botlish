@@ -1,0 +1,170 @@
+# reconcile.bot -- probe B of RN-OFFLINE-DOMAIN-ARCHITECTURE-CENSUS-MILESTONE-1.md:
+# the pure three-way reconciliation of one pet's editable fields, as an
+# executable model in ordinary Botlish (no storage, no transport, no
+# context). It is evidence for the census, not the domain package: the
+# implementation milestone (RN-PETSTORE-CONTRACT-AND-RECONCILIATION) owns
+# the real one.
+#
+#   base    the last state both sides confirmed (with its revision)
+#   local   the current local state (every local edit applied to it; the
+#           base is never touched by a local edit)
+#   remote  the latest observed server state, or Missing (deleted)
+#
+# Per field: local == base takes remote; remote == base takes local; local
+# == remote takes it; otherwise the field conflicts. A conflict is never
+# resolved here: it is reported with all three values. The outcome says
+# whether anything must be sent and under which precondition (the remote
+# revision the merge was computed against: If-Match).
+import std::int
+import std::list
+import std::str
+
+enum Status:
+    Available,
+    Pending,
+    Sold,
+
+struct Fields:
+    name: str
+    status: Status
+
+enum Remote:
+    Present {fields: Fields, revision: int},
+    Missing,
+
+enum Outcome:
+    # Nothing to send: local and remote agree after the merge; the new base
+    # is the remote state at REVISION.
+    Adopt {fields: Fields, revision: int},
+    # Send FIELDS conditionally on REVISION (If-Match); the new local state
+    # is FIELDS; the base stays until the server confirms.
+    Send {fields: Fields, if_match: int},
+    # The same field changed on both sides to different values.
+    Conflict {names: List[str], base: Fields, local: Fields, remote: Fields, revision: int},
+    # Deleted remotely; nothing was edited locally: drop the local copy.
+    Drop,
+    # Deleted remotely while edited locally: the user decides.
+    RemoteDeleted {local: Fields},
+
+enum Resolution:
+    KeepLocal,
+    AcceptRemote,
+    Supply {fields: Fields},
+
+fn pick(base, local, remote):
+    if local == base:
+        return {value: remote, conflict: false}
+    if remote == base:
+        return {value: local, conflict: false}
+    {value: local, conflict: local != remote}
+
+fn reconcile(base: Fields, local: Fields, remote: Remote) -> Outcome:
+    match remote:
+        case Remote::Missing:
+            if local == base:
+                Outcome::Drop
+            else:
+                Outcome::RemoteDeleted {local: local}
+        case Remote::Present {fields, revision}:
+            n = base.name.pick(local.name, fields.name)
+            s = base.status.pick(local.status, fields.status)
+            names = loop f in [{field: "name", c: n.conflict}, {field: "status", c: s.conflict}]:
+                if not f.c:
+                    continue
+                f.field
+            if names.length() > 0:
+                return Outcome::Conflict {names: names, base: base, local: local, remote: fields, revision: revision}
+            merged = Fields {name: n.value, status: s.value}
+            if merged == fields:
+                Outcome::Adopt {fields: merged, revision: revision}
+            else:
+                Outcome::Send {fields: merged, if_match: revision}
+
+# A conflict's resolution: the observed remote state (at REVISION) becomes
+# the new base, the chosen state the new local one; something is pending
+# exactly when the chosen state differs from the remote one, and it is sent
+# under the remote's revision.
+fn resolve(remote: Fields, local: Fields, revision: int, r: Resolution) -> Outcome:
+    chosen = match r:
+        case Resolution::KeepLocal:
+            local
+        case Resolution::AcceptRemote:
+            remote
+        case Resolution::Supply {fields}:
+            fields
+    remote.reconcile(chosen, Remote::Present {fields: remote, revision: revision})
+
+fn edit_name(f: Fields, name: str) -> Fields:
+    Fields {name: name, status: f.status}
+
+fn edit_status(f: Fields, status: Status) -> Fields:
+    Fields {name: f.name, status: status}
+
+fn status_text(s: Status) -> str:
+    match s:
+        case Status::Available:
+            "available"
+        case Status::Pending:
+            "pending"
+        case Status::Sold:
+            "sold"
+
+fn label(o: Outcome) -> str:
+    match o:
+        case Outcome::Adopt {fields, revision}:
+            "adopt ".concat(fields.name).append_char('/').concat(status_text(fields.status)).concat(" r").concat(std::int::to_string(revision))
+        case Outcome::Send {fields, if_match}:
+            "send ".concat(fields.name).append_char('/').concat(status_text(fields.status)).concat(" if-match r").concat(std::int::to_string(if_match))
+        case Outcome::Conflict {names, revision}:
+            c = fold n in names with intermediate acc "conflict":
+                acc.append_char(' ').concat(n)
+            c.concat(" r").concat(std::int::to_string(revision))
+        case Outcome::Drop:
+            "drop"
+        case Outcome::RemoteDeleted {local}:
+            "remote-deleted ".concat(local.name)
+
+milo = Fields {name: "Milo", status: Status::Available}
+fn at(f: Fields, r: int) -> Remote:
+    Remote::Present {fields: f, revision: r}
+
+# 1. disjoint fields merge: local renamed, remote changed status
+disjoint = milo.reconcile(milo.edit_name("Milo Jr."), milo.edit_status(Status::Pending).at(2))
+disjoint_ok = match disjoint:
+    case Outcome::Send {fields, if_match}:
+        fields == Fields {name: "Milo Jr.", status: Status::Pending} and if_match == 2
+    case Outcome::Adopt:
+        false
+    case Outcome::Conflict:
+        false
+    case Outcome::Drop:
+        false
+    case Outcome::RemoteDeleted:
+        false
+# 2. the same field changed to different values
+same = milo.reconcile(milo.edit_name("Milo Jr."), milo.edit_name("Max").at(3))
+# 3. equal edits on both sides: nothing to send
+equal = milo.reconcile(milo.edit_name("Max"), milo.edit_name("Max").at(4))
+# 4. a local edit reverted before synchronization: adopt the remote state
+reverted = milo.reconcile(milo.edit_name("Tmp").edit_name("Milo"), milo.edit_status(Status::Sold).at(5))
+# 5. repeated local edits against an unchanged remote: one send, the
+#    original base revision as the precondition
+repeated = milo.reconcile(milo.edit_name("Al").edit_name("Bo").edit_status(Status::Sold), milo.at(1))
+# 6. remote deletion, with and without a local edit
+gone_edited = milo.reconcile(milo.edit_name("Kept"), Remote::Missing)
+gone_clean = milo.reconcile(milo, Remote::Missing)
+# 7. both fields conflict
+both = milo.reconcile(Fields {name: "Lu", status: Status::Sold}, Fields {name: "Ro", status: Status::Pending}.at(6))
+# 8. the name conflicts while the status merges
+mixed = milo.reconcile(Fields {name: "Lu", status: Status::Available}, Fields {name: "Ro", status: Status::Sold}.at(7))
+# 9. resolutions of conflict 2: keep local sends under the remote's
+#    revision; accept remote sends nothing; a supplied value sends it
+max = milo.edit_name("Max")
+jr = milo.edit_name("Milo Jr.")
+keep = max.resolve(jr, 3, Resolution::KeepLocal)
+accept = max.resolve(jr, 3, Resolution::AcceptRemote)
+supply = max.resolve(jr, 3, Resolution::Supply {fields: milo.edit_name("Milo II")})
+# 10. a supplied value equal to the remote state sends nothing
+supply_remote = max.resolve(jr, 3, Resolution::Supply {fields: max})
+
+[disjoint_ok, label(disjoint), label(same), label(equal), label(reverted), label(repeated), label(gone_edited), label(gone_clean), label(both), label(mixed), label(keep), label(accept), label(supply), label(supply_remote)]
