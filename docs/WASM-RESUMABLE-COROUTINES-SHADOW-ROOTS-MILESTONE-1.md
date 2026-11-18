@@ -119,11 +119,11 @@ change on hosts that switch stacks.
   plan and unbalanced error-exit spans. The coroutine runtime's protocol
   and the fallback root plan were unchanged since `c5b22364`.
 * **Main's CI** [obs], read before the first root or allocation change
-  (green) and again at the end, recorded then: the last completed
-  `tests.yml` run on main (43925972736, `d6b0161c`) passed every job, both
-  native GC-stress jobs included; the run on `07dcb10f` (44149413304) was
-  still running (11 jobs passed, none failed); `macos-arm64.yml` and
-  `windows-x86_64.yml` on `07dcb10f` passed.
+  (green) and again at the end, recorded then: the latest runs of
+  `tests.yml` (44149413304, both native GC-stress jobs included),
+  `tests-arm64.yml` (44149413015), `macos-arm64.yml` (44149413501) and
+  `windows-x86_64.yml` (44149413691), on `07dcb10f`, all passed; main's
+  head (`db473ee0`) did not move during the milestone.
 * **The fallback build of main** (`cargo build --release --features
   fallback-roots`, `db473ee0`) still refused coroutines
   (`coroutine.rs`'s NATIVE_FRAME_ROOTS check) and still published a leaf's
@@ -1021,9 +1021,11 @@ resumable-evidence tests are constrained out.
   macOS [fact: glibc and macOS satisfy large `calloc`s with fresh zero
   pages]; on Windows the heap commits it, which counts against the commit
   limit though not physical memory [inf; no Windows fallback build here].
-* **Windows and macOS fallback builds** were not built here; the fallback
-  feature is host-independent code, and the lane runs on Linux x86-64
-  [inf].
+* **Other hosts' fallback builds**: Windows' CI `roots` job (the
+  fallback plan's Rust tests and GC workloads on Windows x86-64, MSVC)
+  passed on this branch (run 44200859000, at `eda7d08`) [obs]; no macOS or
+  Linux AArch64 fallback build ran. The resumable lane runs on Linux
+  x86-64 only; the feature's code is host-independent [inf].
 * **Prototype frame-count difference** (1,000,007 here, 1,000,004 in the
   report) was recorded, not investigated (section 2.2).
 
