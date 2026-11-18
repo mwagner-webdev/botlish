@@ -132,7 +132,7 @@ foreach {name description edits} [readMutants [file join $here mutants.txt]] {
 # The private tree: compiler sources, library, tests, the audit directory,
 # the native backend's sources and a target directory of its own.
 set tree [file tempdir botlish-resumable-mutants]
-foreach dir {compiler core hir surface stdlib tests examples audit/resumable-coroutines .cargo} {
+foreach dir {compiler core hir surface stdlib tests examples compilerpedia audit/resumable-coroutines .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]
@@ -175,15 +175,23 @@ foreach path [lsort [glob -directory [file join $tree tests resumable] *.bot]] {
     dict set corpus $name [list $path $expect]
 }
 dict set corpus coro [list [file join $tree tests resources coro.bot] {[101, 102, 100, 111, 119, 110, 300, 401, 400, 500, 599, 600, 601]}]
+# The emitting run also runs each program on the seed driver: its value
+# must be the program's `# expect:` line, so a program that failed to emit
+# (an empty or truncated NIR file) stops the run here instead of becoming a
+# reference every mutant trivially agrees with.
 dict for {name entry} $corpus {
     lassign $entry path expect
-    lassign [run 900 tclsh9.0 [file join $tree main.tcl] -backend cranelift -emit-nir $path] status output
+    lassign [run 900 tclsh9.0 [file join $tree main.tcl] -warnings off -backend cranelift -emit-nir $path] status output
     set lines {}
     set inside 0
+    set value ""
     foreach line [split $output \n] {
         if {[string match "nir *" $line]} { set inside 1 }
-        if {[string match "   value*" $line]} { set inside 0 }
+        if {[regexp {^   value: (.*)$} $line -> value]} { set inside 0 }
         if {$inside && ![string match "==*" $line]} { lappend lines $line }
+    }
+    if {$value ne $expect} {
+        error "emitting $name: value \"$value\", expected \"$expect\" (status $status: [lastLine $output])"
     }
     writeFile [file join $scratch $name.nir] [join $lines \n]\n
 }
@@ -284,7 +292,11 @@ try {
     }
     set reference [dict create]
     foreach {name stress} [corpusRuns $corpus] {
-        dict set reference "$name $stress" [corpusValue $driver $scratch $name $stress [dict get $options -timeout]]
+        set got [corpusValue $driver $scratch $name $stress [dict get $options -timeout]]
+        if {![string match "value *" $got]} {
+            error "the unmutated build's run of $name (stress $stress) has no value: $got"
+        }
+        dict set reference "$name $stress" $got
     }
     set baseline [corpusDetector $driver $scratch $corpus $reference [dict get $options -timeout]]
     if {$baseline ne {}} {

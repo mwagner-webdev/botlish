@@ -62,15 +62,18 @@ follows from facts and observations but was not run as such.
   its frame; a call site hands its next call the finished callee's frame;
   a yielding self tail call is the next iteration of the same activation.
   A generator resumed 1,000,000 times makes 2 frames; a declared recognizer
-  over 1,000,000 symbols 6 (the prototype: 1,000,007); a loop calling a
-  yielding function 100,000 times a handful [obs, section 13].
+  over 1,000,000 symbols 6 (the prototype: 1,000,007); a loop, or yielding
+  tail recursion, calling a yielding function each iteration a handful
+  [obs, sections 4.5 and 13].
 * **The ShadowOnly root plan** (`codegen/roots.rs`, `RootMode::ShadowOnly`):
   every function with a root slot reserves its slots on the Vm's shadow
   stack, leaf or not, and pops them on every exit. The leaf publication
   through `Vm::native_roots_ptr` is gone, with its fields. The depth token
-  is dropped where the native stack guard bounds recursion. The mode is a
-  `RuntimeCapabilities` value (`native/src/runtime/capabilities.rs`), the
-  same description fusion, call effects and the lowering consult.
+  is dropped where the native stack guard bounds recursion; the shadow array
+  is as large as the thread's stack; a region reset clears the dead slots
+  that may still point into it. The mode is a `RuntimeCapabilities` value
+  (`native/src/runtime/capabilities.rs`), the same description fusion, call
+  effects and the lowering consult.
 * **Fusion's gate** is "a general coroutine mechanism exists"
   (`RuntimeCapabilities::coroutines()`), so fusion runs on the fallback build
   too, before the lowering, and never decides whether a program runs.
@@ -81,10 +84,13 @@ follows from facts and observations but was not run as such.
   with resumable coroutines -- cranelift 5,773 of 5,773, cranelift-generic
   5,671 of 5,671 -- with fusion on, with fusion off, and (cranelift, fusion
   off) under GC stress; the stock build passes the same counts (section 11).
-* **Focused files** [obs]: the coroutine, actor, event-loop, recognizer,
-  resource, affine, context and closure files pass on both builds, with no
-  test skipped for being implementation-specific: assertions about one
-  mechanism's own counters became mechanism-aware (section 11.2).
+* **Focused files and the whole Tcl suite** [obs]: the coroutine, actor,
+  event-loop, recognizer, resource, affine, context and closure files pass
+  on both builds; all 300 Tcl test files were run on the fallback driver
+  (section 11.3). No test is skipped for being implementation-specific:
+  assertions about one mechanism's own evidence became mechanism-aware,
+  and capabilities the fallback build lacks by design (C callbacks,
+  emitting for other targets) are read from the driver (section 11.2).
 * **The leaf re-entry defect** is fixed by the publication model, not the
   reproducer [obs]: `leaf-reentry.bot` returns 340 in every run, with and
   without GC stress, on both root plans; current main's fallback driver
@@ -112,12 +118,12 @@ change on hosts that switch stacks.
   compiler bug), alongside a yielding function returning a construction
   plan and unbalanced error-exit spans. The coroutine runtime's protocol
   and the fallback root plan were unchanged since `c5b22364`.
-* **CI before the first root or allocation change** [obs]: the last
-  completed `tests.yml` run on main (43925972736, `d6b0161c`) passed every
-  job, both native GC-stress jobs included; the run on `07dcb10f`
-  (44149413304) was still running (11 jobs passed, none failed) when the
-  milestone's final checks ran; `macos-arm64.yml` and `windows-x86_64.yml`
-  on `07dcb10f` passed.
+* **Main's CI** [obs], read before the first root or allocation change
+  (green) and again at the end, recorded then: the last completed
+  `tests.yml` run on main (43925972736, `d6b0161c`) passed every job, both
+  native GC-stress jobs included; the run on `07dcb10f` (44149413304) was
+  still running (11 jobs passed, none failed); `macos-arm64.yml` and
+  `windows-x86_64.yml` on `07dcb10f` passed.
 * **The fallback build of main** (`cargo build --release --features
   fallback-roots`, `db473ee0`) still refused coroutines
   (`coroutine.rs`'s NATIVE_FRAME_ROOTS check) and still published a leaf's
@@ -640,14 +646,56 @@ golden-framework's coroutine cleanup) pass on both mechanisms.
 `BOTLISH_NATIVE_BIN=DRIVER tclsh9.0 tests/local.tcl -parts golden
 -golden-backends cranelift,cranelift-generic -jobs 4` (front-end cache on):
 
-[[GOLDEN-TABLE]]
+| Driver | Coroutines | Fusion | GC stress | Suites | cranelift | cranelift-generic |
+|---|---|---|---|---|---|---|
+| fallback-roots (ShadowOnly) | resumable | on | no | 122, 0 failed | 5,773 / 5,773 | 5,671 / 5,671 |
+| fallback-roots | resumable | off | no | 122, 0 failed | 5,773 / 5,773 | 5,671 / 5,671 |
+| fallback-roots | resumable | off | yes (cranelift) | 122, 0 failed | 5,773 / 5,773 | -- |
+| stock (native-frame) | stackful | on | no | 122, 0 failed | 5,773 / 5,773 | 5,671 / 5,671 |
+
+The fallback rows are the final build (commit `eda7d08`; logs of the
+session, reproduction in section 17); the stock row is the same commit's
+stock build. Earlier builds of the milestone passed the same sweeps at each
+step (the hand-off recycling, the tail-call loop).
 
 No golden was changed. The prototype's 122 suites / 5,773 tests is the
 current count too.
 
 ### 11.2 Focused Tcl files [obs]
 
-[[FOCUSED-TABLE]]
+| File | fallback-roots driver (resumable, ShadowOnly) | stock driver (stackful, native-frame) |
+|---|---|---|
+| `resumable-coroutines` | 16 passed | 5 passed, 11 resumable-only skipped |
+| `coroutines` | 37 passed (44 golden duplicates) | 81 passed |
+| `coroutine-fusion` | 17 passed | 17 passed |
+| `actor` | 67 passed | 67 passed |
+| `event-loop` | 109 passed | 109 passed |
+| `dfa` | 85 passed | 85 passed |
+| `dfa-workloads` | 21 passed | -- |
+| `resources` | 42 passed | 42 passed |
+| `affine` | 28 passed (20 golden duplicates) | 48 passed |
+| `context-affine` | 28 passed | 28 passed |
+| `contexts` | 60 passed (12 golden duplicates, 1 skipped) | 73 passed |
+| `context-traits` | 53 passed (8 golden duplicates) | -- |
+| `owned-recursion` | 28 passed | -- |
+| `golden-framework` | 34 passed (8 golden duplicates) | 42 passed |
+| `higher-order-completions` | 20 passed (42 golden duplicates) | 62 passed |
+| `structural-contract-completions` | 22 passed (23 golden duplicates) | 45 passed |
+| `static-compile` | 55 passed (28 golden duplicates) | 83 passed |
+| `native-root-storage` | 10 passed | 10 passed |
+| `native-stack-map` | 9 passed (2 golden duplicates) | 11 passed |
+| `native-stack-overflow` | 21 passed | 21 passed |
+| `scratch-storage` | 42 passed | 42 passed |
+| `native` | 74 passed (16 golden duplicates) | 90 passed |
+| `abi-bytes, abi-mutable-bytes` | 52, 45 passed (golden duplicates skipped) | 73, 76 passed |
+| `hashable, setcontains-, setfromlist-equality-total` | 39, 16, 13 passed (duplicates skipped) | 48, 17, 15 passed |
+
+The fallback column is the final build's whole-suite run (section 11.3:
+`tests/local.tcl`, which skips the tests a golden test duplicates, so its
+counts are smaller); the stock column is a plain run of each file with the
+same commit's stock driver. No file has a failure in either column. The
+earlier, plain runs of the same files on the fallback driver (before the
+last fixes) are what found the expectations listed below.
 
 **Semantic versus implementation-specific assertions** [fact]
 (`tests/helpers.tcl`): `nativeCoroutines` (a value, release, error or
@@ -706,13 +754,50 @@ it.
 -backends interp -jobs 4` (every test file, the golden-duplicated tests
 skipped as locally by default):
 
-[[TCL-SUITE]]
+300 files; 294 passed on the first run. The six that did not:
+
+| File | Failed | Cause | Now (fallback / stock) |
+|---|---:|---|---|
+| `c-callbacks.test` | 24 | C callbacks, refused on the ShadowOnly plan by design (as on main) | constrained by the driver's `nativeCCallbacks`: 15 pass, 27 skipped / 40 pass |
+| `rust-archive-link.test` | 10 | its fixture's program calls back into Botlish from C | `nativeCCallbacks`: 16 pass / 30 pass |
+| `native-library.test` | 4 | two callback tests; the stackful stack pool; a coroutine's recursion bound | 30 pass, 15 skipped / all pass |
+| `android-target.test` | 4 | a fallback driver emits for no other target (`check_emit`, as on main) | `nativeEmitsForTargets`: 9 pass / all pass |
+| `aot-stub-linker.test` | 1 | compared the executable with the checkout's stub, not the driver's | 6 / 6 |
+| `process-linux.test` | 1 | `process-linux-descendants`, process-group timing under the sweep's load | 53 / 53 rerun |
+
+Before that run, the root-plan files had found the real defects of
+section 6.2 (dead slots at a scratch reset, the shadow array's size) and
+the tests encoding the old fallback plan (section 11.2); those were fixed
+first and are in the 294.
 
 ## 12. GC-stress and mutation-test results
 
 ### 12.1 GC stress [obs]
 
-[[STRESS-TABLE]]
+All on the final fallback build (resumable, ShadowOnly), with
+`BOTLISH_NATIVE_GC_STRESS=1` (a collection at every allocation):
+
+| What | Result |
+|---|---|
+| every golden suite, cranelift, fusion off | 122 suites, 5,773 / 5,773 |
+| the corpus (`rc-corpus-gc-stress`: 15 programs, fused and unfused) | all agree with the interpreter |
+| `leaf-reentry.bot`, five runs, on both root plans (`rc-leaf-reentry`) | 340 every time |
+| `actor.test`, whole file | 67 / 67 (654 s) |
+| `event-loop.test`, whole file | 109 / 109 (883 s) |
+| `resources.test`, `affine.test`, `context-affine.test` (cleanup) | 42 / 42, 48 / 48, 28 / 28 |
+| `coroutines.test` | 81 / 81 |
+| the fallback build's Rust tests of frames, segments, root plans, capabilities | 41 / 41 |
+| `scratch-storage.test`'s census (its own stressed runs) | no stale root (section 6.2) |
+
+The brief's specific cases, each a corpus program run under stress (and
+its reclamation measured, section 8): a suspended coroutine retaining a
+List of 2,000 Strings while 20,000 are allocated elsewhere
+(`retention.bot`); deep nested suspension (`deep.bot`, `nested.bot`);
+abandonment under collection pressure (`cleanup-gc.bot`, `coro.bot`);
+10,000 simultaneously suspended handles (`many.bot`); object death at a
+suspension point (`precision.bot`, run plainly -- quadratic under stress --
+and `reclaim.bot`, stressed). The stock build's own GC-stress jobs run on
+main's pushes (tests.yml `gc-stress`).
 
 ### 12.2 Mutation testing [obs]
 
@@ -741,7 +826,63 @@ bench`, compilation excluded), one `run --alloc summary` for allocation
 counts, peak live heap and collections, a separate run for the process's
 peak RSS. Times are this container's, comparable within a table only.
 
-[[BENCH]]
+The full tables are `audit/resumable-coroutines/results/bench.md` [obs].
+Condensed (wall time best of 3; allocations; frames and their bytes; peak
+RSS; collections):
+
+| Workload | stackful, fusion off | resumable, fusion off | stackful, fusion on | resumable, fusion on |
+|---|---|---|---|---|
+| generator, 1,000,000 resumes | 50.0 ms; 2 allocs; 0 frames | 15.4 ms; 4 allocs; 2 frames (96 B) | 3.1 ms; 0 | 2.4 ms; 0 |
+| many, 10,000 suspended | 259 ms; 30,005; RSS 53.2 MB; 93 GCs (158 ms) | 2.5 ms; 50,005; 20,000 frames (800,000 B); RSS 14.9 MB; 1 GC | 175 ms; RSS 53.1 MB | 3.5 ms; RSS 15.1 MB |
+| deep-1, 20,000 resumes | 1.02 ms | 0.46 ms; 4 frames | 1.22 ms | 0.49 ms |
+| deep-10 | 1.02 ms | 1.24 ms; 13 frames (448 B) | 1.35 ms | 1.27 ms |
+| deep-100 | 1.03 ms | 10.8 ms; 103 frames | 1.03 ms | 19.4 ms |
+| deep-1000 | 1.03 ms | 123.7 ms; 1,003 frames (32,128 B) | 1.03 ms | 122.1 ms |
+| dfa, 1,000,000 symbols | 137.8 ms; 1,000,007 allocs | 88.0 ms; 1,000,013 allocs; 6 frames (208 B) | 3.5 ms; 2 | 3.5 ms; 2 |
+| churn, 100,000 constructions released suspended | 25.1 ms; 300,000 allocs; 1,562 GCs | 25.8 ms; 500,000 allocs (200,000 frames, 7.2 MB); 25 GCs | 5.4 ms | 5.3 ms |
+| loop-sleepers, 10,000 idle tasks × 5 sleeps | 355 ms; RSS 59.2 MB; 49 GCs (100 ms) | 119 ms; 80,000 frames (2.88 MB); RSS 27.2 MB; 3 GCs (8.7 ms) | 320 ms | 125 ms |
+| loop-yielders, 100 tasks × 1,000 yields | 24.9 ms | 18.4 ms; 300 frames | 25.2 ms | 20.5 ms |
+
+Machine code of the workloads' yielding functions, fusion off (`botlish-native
+size`): resumable 2.05× (dfa) to 5.39× (loop-yielders) the stackful
+functions' bytes -- the dispatch, the save/restore stores and loads, the
+re-entry blocks, boxing (e.g. generator 371 B → 1,275 B for 2 functions).
+
+What the numbers say:
+
+* **Per resume** [obs]: steady-state suspension allocates nothing (generator:
+  2 frames for 1,000,000 resumes, the same 4 allocations as the prototype).
+  At depth 1-10 a resume costs about what a stack switch does (generator:
+  15 ns vs 50 ns per resume, unfused).
+* **Per construction** [obs]: a construction allocates its coroutine object
+  plus one frame per activation that suspends (churn: 5 allocations per
+  construction against the stackful runtime's 3, 2 of them frames of 32-40
+  bytes), at the same wall time; the stackful runtime instead maps or reuses
+  a stack per coroutine.
+* **Suspended state scales with live state** [obs]: 10,000 suspended
+  coroutines hold 800,000 bytes of frames plus 1,040,000 bytes of coroutine
+  objects (1.84 MB; the prototype's 2.8 MB with 88-byte frames); the
+  process's peak RSS is 14.9 MB against the stackful runtime's 53.2 MB,
+  whose touched stack pages are counted there and not in any object --
+  different metrics, both reported. Collections: 1 against 93 (the stackful
+  collector scans every suspended stack).
+* **Resume cost grows with yielding depth** [obs]: about 6 ns per level per
+  resume (deep-1000: 124 ms for 20,000 resumes × 1,000 levels), against a
+  flat ~1 ms for the stack switch. This is the mechanism's inherent trade
+  (section 15); fusion does not apply to recursive chains.
+* **DFA** [obs]: unfused, 6 frames for 1,000,000 symbols and faster than the
+  stackful runtime unfused; the per-symbol allocations are the resume
+  message (`std::dfa::Symbol`), which the stackful runtime unfused allocates
+  too. Fused, both are identical (2 allocations).
+* **Event loop** [obs]: 10,000 mostly idle tasks: 3× faster, 46% of the
+  RSS, 3 collections against 49.
+* **Helpers that remain** [fact, obs]: `rt_co_suspend`/`rt_co_msg` once per
+  yield and resume, `rt_frame_new` once per activation that first suspends;
+  their cost is inside the generator row's 15 ns per resume.
+* **No material regression** [inf]: against the stackful runtime the
+  resumable mechanism is slower only in deep yielding chains (O(depth)
+  resume) and larger in code; it is faster or equal elsewhere, by a wide
+  margin where many coroutines exist.
 
 ## 14. CI integration
 
