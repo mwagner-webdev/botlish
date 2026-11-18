@@ -982,6 +982,17 @@ stock lanes run `resumable-coroutines.test` too: its semantic tests
 (corpus agreement, leaf re-entry on native-frame roots) run there, its
 resumable-evidence tests are constrained out.
 
+**The branch's runs** [fact]: the four test workflows, dispatched on the
+branch tip `16e8b07` (every later commit changes only this report), all
+finished green: tests.yml (run 44208021135; the `resumable` job's every
+step, the build, the capabilities check, the Rust tests, the golden suites,
+the focused files, GC stress and the mutants, succeeded), tests-arm64.yml
+(44208024517, its GC-stress jobs included), macos-arm64.yml (44208028496)
+and windows-x86_64.yml (44208032067, its acceptance shards included).
+Main's latest runs of the same four workflows (at `07dcb10`; main's head
+`db473ee0` is scalar-asm-audit's commit, which no workflow runs) are green
+too, so no failure was compared away as main's.
+
 ## 15. Known limitations and remaining risks
 
 * **A coroutine's recursion limit differs** [fact, obs]: a stackful
