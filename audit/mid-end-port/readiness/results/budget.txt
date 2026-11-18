@@ -1,0 +1,15 @@
+# budget: maxPerBlock 16, maxInstances 2000; choose's body: 0 extra statements; distinct types: N
+16 types: accepted in 0.13 s; 16 semantic instances, at most 16 of one function; declined: ; peak 29 MB
+17 types: accepted in 0.10 s; 17 semantic instances, at most 17 of one function; declined: ; peak 33 MB
+64 types: accepted in 0.43 s; 64 semantic instances, at most 64 of one function; declined: ; peak 48 MB
+256 types: accepted in 2.03 s; 256 semantic instances, at most 256 of one function; declined: ; peak 113 MB
+1024 types: accepted in 8.02 s; 1024 semantic instances, at most 1024 of one function; declined: ; peak 373 MB
+-- body 40, 256 types
+# budget: maxPerBlock 16, maxInstances 2000; choose's body: 40 extra statements; distinct types: N
+256 types: accepted in 5.59 s; 256 semantic instances, at most 256 of one function; declined: ; peak 166 MB
+-- distinct 1 vs 1024 of 1024 types
+# budget: maxPerBlock 16, maxInstances 2000; choose's body: 0 extra statements; distinct types: 1
+1024 types: accepted in 7.00 s; 1 semantic instances, at most 1 of one function; declined: ; peak 304 MB
+-- max-instances 1000 at 1024 types (the guard)
+# budget: maxPerBlock 16, maxInstances 1000; choose's body: 0 extra statements; distinct types: N
+1024 types: rejected LIMIT in 4.68 s: hir::semantic: the semantic-instance limit was reached: 1000 instances were analyzed, and a call needs another one: choose (c : bool, x : T1001, y : T1001); the compiler does not fall back to the untyped analysis, which could reject a valid program (declare the parameter types of a function called with very many argument types)

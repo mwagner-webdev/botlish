@@ -1,0 +1,9 @@
+# authority.tsv -- the source of truth each semantic rule would have under a Botlish mid-end (PORTABILITY-MID-END-PORT-READINESS-CENSUS-1.md, section 14). risk: what duplicating it would cost.
+rule	stated today	proposed source of truth	risk
+native metadata, native names, C target table, builtin type names	core/native.tcl, core/cabi.tcl, core/linuxabi.tcl	immutable data generated per compiler build	low
+type admissibility, integer domains, builtin subtype/lub/narrow, refinement evidence	core/type.tcl	one Botlish module the Tcl front end calls during migration; Tcl-side for a first slice	high
+value equality, show, exact values, Int/Float64 semantics, exact binary64 simulation, decimal text	core/value.tcl, core/decimal.tcl, core/float.tcl; ops.rs, decimal.rs natively	one Botlish statement for the front end, checked by the existing oracles	high
+C floating narrowing, promotions, scalar domains	core/cabi.tcl	data for domains, one statement for Narrow	medium
+callable contracts, declared errors, completion facts	hir/	the mid-end itself	none
+registry writes (source types, enums, errors, payloads, identity tests)	core::type::register, core::native::declare*, core::value::set*Test	mid-end output: the HIR's declarations, installed by hir::activate	low
+depth-safe guard, error construction	core/deep.tcl, core::malformed	none; an internal-failure convention	none

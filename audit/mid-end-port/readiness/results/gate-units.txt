@@ -1,0 +1,133 @@
+  0.159   0.114    2    3 failed examples/stdlib/ai_text_clean.bot
+  0.169   0.136    3    0 ok     examples/stdlib/csv.bot
+  0.364   0.315    4    0 ok     examples/stdlib/csv_chunked.bot
+  0.326   0.287    3    0 ok     examples/stdlib/csv_geometric.bot
+  1.043   0.919    4    0 ok     examples/stdlib/csv_records.bot
+  0.598   0.554    3    0 ok     examples/stdlib/hashtable.bot
+  0.134   0.111    2    0 ok     examples/stdlib/matmul.bot
+  0.125   0.099    2    5 failed examples/stdlib/string_replace.bot
+  0.066   0.050    2    1 failed examples/stdlib/string_reverse.bot
+  0.009   0.007    1    0 ok     examples/surface/01-arithmetic.bot
+  0.016   0.013    1    0 ok     examples/surface/02-recursion.bot
+  0.014   0.010    1    0 ok     examples/surface/03-closure.bot
+  0.009   0.007    1    0 ok     examples/surface/04-branch-value.bot
+  0.007   0.006    1    0 ok     examples/surface/05-shadowing.bot
+  0.007   0.008    1    0 ok     examples/surface/06-list.bot
+  0.005   0.004    1    0 ok     examples/surface/07-loop-break.bot
+  0.022   0.018    1    0 ok     examples/surface/08-return.bot
+  0.019   0.017    -    - failed examples/surface/09-mutual-recursion.bot
+  0.006   0.005    -    - failed examples/surface/10-duplicate-binding.bot
+  0.030   0.021    1    0 ok     examples/surface/11-boolean-operators.bot
+  0.018   0.015    1    0 ok     examples/surface/12-if-value.bot
+  0.012   0.009    1    1 failed examples/surface/13-hygiene.bot
+  0.015   0.009    2    0 ok     examples/surface/14-modules.bot
+  0.030   0.021    1    0 ok     examples/surface/15-enums.bot
+  0.414   0.320    5   17 failed examples/refinement/refined-strings.bot
+  2.701   2.398   15    3 failed examples/io/child-path.bot
+  2.871   2.285   15    0 ok     examples/io/hello-darwin.bot
+  0.452   0.400   10    0 ok     examples/io/hello-windows.bot
+  0.570   0.445   10    0 ok     examples/io/hello.bot
+  2.362   2.733   17    2 failed examples/io/show-path.bot
+  0.143   0.082    3    0 ok     examples/abi/numeric-domains.bot
+  0.331   0.281    5    0 ok     examples/binary/c-structs.bot
+  0.559   0.480   10    0 ok     examples/linux/context-hello.bot
+  0.095   0.083    3    0 ok     examples/linux/getpid.bot
+  0.249   0.225    8    0 ok     examples/linux/read-stdin.bot
+  0.200   0.192    8    0 ok     examples/linux/write.bot
+  0.016   0.012    1    0 ok     bench/fib.bot
+  0.189   0.130    3    2 failed bench/lex-strategy.bot
+  0.033   0.023    1    0 ok     bench/loop-count.bot
+  0.595   0.402    5   17 failed bench/refined-checks.bot
+  0.106   0.087    3    2 failed bench/source-checks.bot
+  0.023   0.018    1    0 ok     bench/sum-refined.bot
+  0.116   0.080    2    0 ok     bench/test-selection.bot
+  0.267   0.293    5   17 failed bench/uri-steady.bot
+  0.121   0.076    1    0 ok     stdlib/abi.bot
+  1.818   0.565    -    - failed stdlib/actor.bot
+  0.059   0.040    2    0 ok     stdlib/ascii.bot
+  0.128   0.093    4    0 ok     stdlib/binary.bot
+  0.037   0.037    1    0 ok     stdlib/byte.bot
+  0.040   0.021    1    0 ok     stdlib/compiler.bot
+  2.627   2.405   12    0 ok     stdlib/darwin.bot
+  0.011   0.006    1    0 ok     stdlib/dfa.bot
+  1.002   1.084    -    - failed stdlib/event_loop.bot
+  0.033   0.021    1    0 ok     stdlib/float64.bot
+  0.147   0.069    -    - failed stdlib/immutable_map.bot
+  0.049   0.042    -    - failed stdlib/io.bot
+  0.358   0.238    7    0 ok     stdlib/linux.bot
+  0.011   0.011    -    - failed stdlib/list.bot
+  0.007   0.005    1    0 ok     stdlib/mathish.bot
+  0.002   0.002    -    - failed stdlib/mutable_array.bot
+  0.374   0.120    -    - failed stdlib/mutable_map.bot
+  0.042   0.035    -    - failed stdlib/mutable_set.bot
+  1.523   1.454    3    0 ok     stdlib/ordered_table.bot
+  1.229   0.848    -    - failed stdlib/test.bot
+  0.533   0.388    -    - failed stdlib/thread.bot
+  0.114   0.094    4    0 ok     stdlib/transfer.bot
+  0.046   0.026    -    - failed stdlib/tree.bot
+  0.339   0.333    4   17 failed stdlib/web.bot
+  0.230   0.198    6    0 ok     stdlib/windows.bot
+  0.108   0.086    2    0 ok     stdlib/abi/aarch64.bot
+  0.048   0.040    -    - failed stdlib/abi/bytes.bot
+  0.071   0.067    2    0 ok     stdlib/abi/x86_64.bot
+  0.742   0.608    -    - failed stdlib/actor/remote.bot
+  0.273   0.261    -    - failed stdlib/darwin/fs.bot
+  1.663   1.854    -    - failed stdlib/darwin/io.bot
+  0.151   0.131    -    - failed stdlib/darwin/path.bot
+  4.860   5.205    -    - failed stdlib/event_loop/deterministic.bot
+  0.009   0.005    1    0 ok     stdlib/ffi/c.bot
+  0.520   0.501    6    0 ok     stdlib/io/bytepath.bot
+  0.312   0.276    6    0 ok     stdlib/io/fs.bot
+  0.016   0.013    -    - failed stdlib/io/path.bot
+  0.380   0.206    -    - failed stdlib/linux/fs.bot
+  0.369   0.332    -    - failed stdlib/linux/io.bot
+  0.195   0.161    -    - failed stdlib/linux/path.bot
+  0.294   0.221    5    0 ok     stdlib/linux/sys.aarch64.bot
+  0.246   0.235    5    0 ok     stdlib/linux/sys.x86_64.bot
+  0.951   0.492    -    - failed stdlib/windows/fs.bot
+  0.277   0.279    -    - failed stdlib/windows/io.bot
+  0.204   0.180    -    - failed stdlib/windows/path.bot
+  0.058   0.044    2    0 ok     import std::abi
+  0.069   0.068    3    0 ok     import std::abi::aarch64
+  0.102   0.106    4    0 ok     import std::abi::bytes
+  0.069   0.074    3    0 ok     import std::abi::x86_64
+  8.730   8.885    7    0 ok     import std::actor
+ 11.785  12.351   12    0 ok     import std::actor::remote
+  0.066   0.072    3    0 ok     import std::ascii
+  0.186   0.119    5    0 ok     import std::binary
+  0.028   0.025    2    0 ok     import std::byte
+  0.007   0.006    2    0 ok     import std::compiler
+  2.429   2.399   13    0 ok     import std::darwin
+  1.869   1.935   11    0 ok     import std::darwin::fs
+  3.493   2.766   15    0 ok     import std::darwin::io
+  1.976   2.458   12    0 ok     import std::darwin::path
+  0.011   0.006    2    0 ok     import std::dfa
+  7.380   6.305    4    0 ok     import std::event_loop
+  8.037   8.030    5    0 ok     import std::event_loop::deterministic
+  0.012   0.005    2    0 ok     import std::ffi::c
+  0.021   0.013    2    0 ok     import std::float64
+  2.696   2.186    6    0 ok     import std::immutable_map
+  0.064   0.059    3    0 ok     import std::io
+  0.242   0.356    7    0 ok     import std::io::fs
+  0.016   0.013    2    0 ok     import std::io::path
+  0.301   0.269    8    0 ok     import std::linux
+  2.861   2.693   14    0 ok     import std::linux::fs
+  0.606   0.560   10    0 ok     import std::linux::io
+  2.669   2.468   15    2 failed import std::linux::path
+  0.307   0.178    6    0 ok     import std::linux::sys@linux-aarch64
+  0.159   0.159    6    0 ok     import std::linux::sys@linux-x86_64
+  0.017   0.014    2    0 ok     import std::list
+  0.007   0.005    2    0 ok     import std::mathish
+  0.007   0.006    2    0 ok     import std::mutable_array
+  2.890   2.435    7    0 ok     import std::mutable_map
+  1.477   1.783    5    0 ok     import std::mutable_set
+  1.072   0.778    5    0 ok     import std::test
+  7.404   7.748    9    0 ok     import std::thread
+  0.113   0.103    5    0 ok     import std::transfer
+  0.129   0.110    3    0 ok     import std::tree
+  0.473   0.309    5   17 failed import std::web
+  0.228   0.150    7    0 ok     import std::windows
+  3.818   3.292   10    0 ok     import std::windows::fs
+  0.375   0.346   10    0 ok     import std::windows::io
+  3.169   3.269   11    0 ok     import std::windows::path
+total: first pass 115.5 s, strict pass 85.3 s (units the gate compiles again)

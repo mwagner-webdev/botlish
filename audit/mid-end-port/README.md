@@ -3,6 +3,11 @@
 **The mid-end in Botlish: what it would save, and whether Botlish is ready
 for it.** Measurements and analysis; nothing is implemented.
 
+> **Since:** PORTABILITY-MID-END-PORT-READINESS-CENSUS-1.md (2026-11-17, at
+> `db473ee`; evidence in `readiness/`) re-measures these findings on a
+> later main. This report is kept as it was written on 2026-11-07 and
+> 2026-11-08; its figures are that revision's.
+
 Measured on 2026-11-07 at `f2787af`, on a shared 4-core, 16 GB Linux x86-64
 container (Tcl 9.0.1, rustc 1.97, the native backend built `--release`).
 Unless a table says "best of N", a figure is one run; times on this machine

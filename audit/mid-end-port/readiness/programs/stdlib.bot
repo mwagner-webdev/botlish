@@ -1,0 +1,177 @@
+# stdlib.bot -- compiler-shaped uses of the standard library, an audit-only
+# probe (PORTABILITY-MID-END-PORT-READINESS-CENSUS-1.md, section 6): what
+# each takes today, written with what std:: offers. tools/stdlib.tcl runs it
+# at several sizes with the native allocation report, whose copy counters
+# show which forms are linear.
+#
+#   sort    N names ("n" and a number) into a deterministic order: no sort
+#           and no String comparison in std, so a merge sort over a
+#           MutableArray and a comparison by scalar values, written here.
+#   text    a diagnostic of N parts built by concat in a fold (linear
+#           natively: the fold carries the String as a growing plan).
+#   update  one field of an 8-field analysis state changed N times: no
+#           struct update, so every change restates the other seven fields.
+#   grow    a List grown by append in a fold (virtual construction carries it).
+#   nested  N pushes into 16 buckets of a MutableArray[MutableVector[int]]:
+#           an element is not a place outside a context, so each push takes
+#           the bucket out (at), pushes, and stores it back (set).
+#   split   a String of N comma-separated fields split by a hand-written
+#           scanner (std::str has no split, search or trim).
+#   nested_swap  the bucket moved out with swap: still copied (the vector
+#           moved back in is shared on entry).
+#           (stdlib-nested-context.bot: an installed context's element is
+#           no mutation place either.)
+import std::mutable_vector
+import std::mutable_array
+import std::str
+import std::int
+import std::char
+import std::list
+
+prime = 1000000007
+
+fn next(seed: int) -> int:
+    (seed * 1103515245 + 12345).mod(2147483648)
+
+# ---- sort
+fn str_less(a: str, b: str, i: int) -> bool errors IndexNotFound:
+    if i == b.length():
+        return false
+    if i == a.length():
+        return true
+    x = a.char_at(i).scalar_value()
+    y = b.char_at(i).scalar_value()
+    if x != y:
+        return x < y
+    str_less(a, b, i + 1)
+
+fn merge(lo: int, mid: int, hi: int, place xs: MutableArray[str], place tmp: MutableArray[str]) -> unit errors IndexNotFound:
+    fold k from lo to hi with intermediate state [lo, mid]:
+        i = state.at(0)
+        j = state.at(1)
+        left = if j >= hi:
+            true
+        else:
+            if i >= mid:
+                false
+            else:
+                not str_less(xs.at(j), xs.at(i), 0)
+        if left:
+            tmp.set(k, xs.at(i))
+            [i + 1, j]
+        else:
+            tmp.set(k, xs.at(j))
+            [i, j + 1]
+    fold k from lo to hi with intermediate n 0:
+        xs.set(k, tmp.at(k))
+        n + 1
+    unit
+
+fn sort_range(lo: int, hi: int, place xs: MutableArray[str], place tmp: MutableArray[str]) -> unit errors IndexNotFound:
+    if hi - lo < 2:
+        return unit
+    mid = lo + (hi - lo).shift_right(1)
+    sort_range(lo, mid, xs, tmp)
+    sort_range(mid, hi, xs, tmp)
+    merge(lo, mid, hi, xs, tmp)
+
+fn sorted_check(n: int) -> int errors IndexNotFound:
+    names = std::mutable_array::create(n, "")
+    fold i from 0 to n with intermediate seed 3:
+        s = next(seed)
+        names.set(i, "n".concat(s.mod(100000).to_string()))
+        s
+    tmp = std::mutable_array::create(n, "")
+    sort_range(0, n, names, tmp)
+    fold i from 0 to n with intermediate h 0:
+        (h * 31 + names.at(i).length() + i * names.at(i).char_at(names.at(i).length() - 1).scalar_value()).mod(prime)
+
+# ---- text
+fn diagnostic(n: int) -> str:
+    fold i from 0 to n with intermediate text "error: expected one of":
+        text.concat(" ").concat(i.to_string()).concat(",")
+
+# ---- update
+struct State:
+    a: int
+    b: int
+    c: int
+    d: int
+    e: int
+    f: int
+    g: int
+    h: int
+
+fn with_d(s: State, d: int) -> State:
+    State {a: s.a, b: s.b, c: s.c, d: d, e: s.e, f: s.f, g: s.g, h: s.h}
+
+fn updated(n: int) -> int:
+    s = fold i from 0 to n with intermediate s State {a: 1, b: 2, c: 3, d: 0, e: 5, f: 6, g: 7, h: 8}:
+        with_d(s, (s.d + i).mod(prime))
+    s.a + s.d + s.h
+
+# ---- grow
+fn grown(n: int) -> int:
+    xs = fold i from 0 to n with intermediate acc []:
+        acc.append(i)
+    xs.length()
+
+# ---- nested
+fn nested(n: int) -> int errors IndexNotFound:
+    buckets = std::mutable_array::create(16, std::mutable_vector::from_list([0]))
+    fold i from 0 to n with intermediate seed 5:
+        s = next(seed)
+        k = s.mod(16)
+        bucket = buckets.at(k)
+        bucket.push(i)
+        buckets.set(k, bucket)
+        s
+    fold k from 0 to 16 with intermediate total 0:
+        total + buckets.at(k).length()
+
+# The same with the bucket moved out (swap in an empty vector), pushed and
+# moved back: no copy, since no other header shares the bucket's backing.
+fn nested_swap(n: int) -> int errors IndexNotFound:
+    buckets = std::mutable_array::create(16, std::mutable_vector::from_list([0]))
+    fold i from 0 to n with intermediate seed 5:
+        s = next(seed)
+        k = s.mod(16)
+        bucket = buckets.swap(k, std::mutable_vector::from_list([]))
+        bucket.push(i)
+        buckets.swap(k, bucket)
+        s
+    fold k from 0 to 16 with intermediate total 0:
+        total + buckets.at(k).length()
+
+# ---- split
+fn fields(n: int) -> str:
+    fold i from 0 to n with intermediate text "f0":
+        text.concat(",f").concat(i.to_string())
+
+fn split_from(text: str, i: int, start: int, place out: MutableVector[str]) -> unit errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    if i == text.length():
+        out.push(text.substring(start, i))
+        return unit
+    if text.char_at(i) == ',':
+        out.push(text.substring(start, i))
+        return split_from(text, i + 1, i + 1, out)
+    split_from(text, i + 1, start, out)
+
+fn strs() -> MutableVector[str]:
+    std::mutable_vector::from_list([])
+
+fn split_count(n: int) -> int errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    out = strs()
+    split_from(fields(n), 0, 0, out)
+    out.length()
+
+fn main(n: int) -> List[int] errors IndexNotFound, LowerUnderrun, UpperOverrun:
+    [sorted_check(n), diagnostic(n).length(), updated(n), grown(n), nested(n), nested_swap(n), split_count(n)]
+
+main(1000):
+    on IndexNotFound:
+        []
+    on LowerUnderrun:
+        []
+    on UpperOverrun:
+        []

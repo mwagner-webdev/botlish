@@ -1,0 +1,308 @@
+== static, every ::hir procedure
+scc 1: 77 procedures
+    types.tcl (33): Admits Bound CallableResult CoroutineMismatch FnLub FnMismatch FnSubtype IsSendable MakeApplied MakeCoroutine MakeCoroutineType MakeFn MakeList MakeMutArray MakeMutVec MakeSet MakeStruct NativeResult Presentable ReturnFits SendClass SendClassOf SendComponents SendParts SendStruct SendStructClass ShapeResult canonical glb lub presented structuralOf subtype
+    structs.tcl (9): AffineThrough ApplicationIssue ApplicationProblem AppliedFieldType AppliedFieldTypes AppliedRepresentation OwnedRecursion RecursionMessage RecursionSteps
+    summaries.tcl (1): Arguments
+    threads.tcl (2): EntryType Typed
+    layouts.tcl (4): ArrayConsumerType CopyType ReprOfTerm TermConsumerType
+    traits.tcl (8): Accept Implementation InstanceBinding Mismatch RequiredFn ShowRequired explain satisfies
+    ownership.tcl (8): Apply Expand Explore Node Recursion Substituted ThroughSteps Witness
+    imprint.tcl (2): Bind Substitute
+    coroutines.tcl (4): InstanceOutward Outward ShapeResult SpecializedNode
+    semantic.tcl (2): EraseArrays Refines
+    containers.tcl (1): ElementContract
+    callbacks.tcl (2): PointerType Signature
+    range.tcl (1): ProvesValueAcceptedBy
+scc 2: 26 procedures
+    traits.tcl (1): monomorphize
+    methods.tcl (6): Build BuildRecord Decide Final Proposal Verdicts
+    hir.tcl (5): BuildFull BuildOnce BuildSyntax DecideMethodCalls buildSyntax
+    resolve.tcl (11): CoroutineResume Expr FieldPathOperand LayoutOperand ProgramSection ResolveClone ResolveFoldInitial ResolvePlannedCall ResolveStruct Sequence program
+    flags.tcl (1): ResolveCall
+    static.tcl (2): Round decide
+scc 3: 24 procedures
+    completions.tcl (24): ArgChannel EffectiveFacts Eval EvalCall EvalCountloop EvalHandle EvalIf EvalListloop EvalLockloop EvalLoop FoldEntry IndirectFacts LoopDomain NativeCallFacts Recover Seq Subsume SubsumeCall SubsumeCollected SubsumeHandle SubsumedRaises ValueCarries WalkBlock analyzeBlock
+scc 4: 17 procedures
+    types.tcl (12): Bind Block Call Dependent Expr FoldBody FoldInitial Handle If Project Sequence Struct
+    semantic.tcl (5): Analyze Call Drain Nested Walk
+scc 5: 13 procedures
+    range.tcl (9): AnalyzeInstance Call Expr Fixpoint FoldInitial If NarrowRounds Sequence SettleInstance
+    rangerec.tcl (4): SolveInstance SolveMeasure SolveRecursive analyze
+scc 6: 13 procedures
+    emission.tcl (13): Apply Child Eval EvalBody EvalCall EvalHandle EvalIf EvalLoop EvalNode Read Summary Unrolled Walk
+scc 7: 8 procedures
+    resolve.tcl (2): ResolveApplied ResolveTypeExpr
+    layouts.tcl (3): ResolveArrayTerm ResolveNativeEdit ResolveNativeView
+    cabi.tcl (3): ResolveCType ResolveFnPtr ResolvePtr
+scc 8: 7 procedures
+    exactvalue.tcl (7): CallFact Equal Eval IfFact MaterialValue SourceFact Value
+scc 9: 6 procedures
+    refinements.tcl (1): Show
+    layouts.tcl (2): ShowNative ShowTerm
+    cabi.tcl (2): ShowPointee ShowSignature
+    types.tcl (1): show
+scc 10: 6 procedures
+    cardinality.tcl (6): Capacity IntForm IterationLength ListLength StrLength of_domain
+scc 11: 6 procedures
+    lower.tcl (6): Exprs FoldWrap Pending Seq body expr
+scc 12: 5 procedures
+    types.tcl (5): Components Totality TotalityClass TotalityClassOf TotalityFallback
+scc 13: 5 procedures
+    relations.tcl (5): Call Eval Loop Outcome Seq
+scc 14: 5 procedures
+    static.tcl (5): Form Node Sequence Value Value_
+scc 15: 5 procedures
+    lifetime.tcl (5): Call Eval Handle Loop Seq
+scc 16: 4 procedures
+    refine.tcl (4): BodyImplication HandleImplication IfImplication Implication
+scc 17: 3 procedures
+    enums.tcl (1): IsAffine
+    types.tcl (1): IsAffine
+    structs.tcl (1): IsAffine
+scc 18: 3 procedures
+    callables.tcl (3): Bearing BearingClass BearingNamed
+scc 19: 3 procedures
+    repeatable.tcl (3): Call Expr Walk
+scc 20: 3 procedures
+    induction.tcl (3): BindingInvariant Invariant InvariantBinding
+scc 21: 3 procedures
+    injection.tcl (3): Call Seq Tau
+scc 22: 3 procedures
+    modulebinding.tcl (3): ContextBlock ContextExpr ContextSequence
+scc 23: 3 procedures
+    modulebinding.tcl (3): ImmutableBlockCall ImmutableExpr ImmutableSequence
+scc 24: 3 procedures
+    signatures.tcl (3): Call Seq Value
+scc 25: 3 procedures
+    read.tcl (2): ParseTerm ParseType
+    cabi.tcl (1): ParsePointee
+scc 26: 3 procedures
+    sourcetypes.tcl (3): ValueStability ValueStabilityClass ValueStabilityParts
+scc 27: 3 procedures
+    structs.tcl (3): MutableComponent MutableComponentClass MutableComponentParts
+scc 28: 3 procedures
+    emission.tcl (3): Canon CanonId CanonValue
+scc 29: 3 procedures
+    transfer.tcl (3): Make Node StructNode
+scc 30: 3 procedures
+    escape.tcl (3): Classify ClassifyIf FoldShape
+scc 31: 2 procedures
+    imprint.tcl (2): Occurrences Placed
+scc 32: 2 procedures
+    imprint.tcl (2): Match MatchInner
+scc 33: 2 procedures
+    ownership.tcl (2): Walk WalkUncached
+scc 34: 2 procedures
+    layouts.tcl (2): ReprUnionPath UnionField
+scc 35: 2 procedures
+    summaries.tcl (2): Embeds EmbedsUncached
+scc 36: 2 procedures
+    layouts.tcl (2): ReprDescriptor descriptor
+scc 37: 2 procedures
+    affine.tcl (2): Flow Seq
+scc 38: 2 procedures
+    affine.tcl (2): Descriptor DescriptorOf
+scc 39: 2 procedures
+    callables.tcl (2): WalkExpr WalkFold
+scc 40: 2 procedures
+    layouts.tcl (2): DescriptorFormats WordsFormats
+scc 41: 2 procedures
+    cardinality.tcl (2): LayoutBody LayoutNode
+scc 42: 2 procedures
+    layouts.tcl (2): HasArrays ReprHasArrays
+scc 43: 2 procedures
+    layouts.tcl (2): PointerField ReprPointerPath
+scc 44: 2 procedures
+    cardinality.tcl (2): RelatedOfAtom related
+scc 45: 2 procedures
+    cardinality.tcl (2): ShowAtom show
+scc 46: 2 procedures
+    privacy.tcl (2): Find FindContract
+scc 47: 2 procedures
+    format.tcl (2): Expr FoldInitial
+scc 48: 2 procedures
+    layouts.tcl (2): Resolve ResolveRepr
+scc 49: 2 procedures
+    emitdfa.tcl (2): Complete StepBase
+scc 50: 2 procedures
+    mutvec.tcl (2): FoldWalk FoldWalkSequence
+scc 51: 2 procedures
+    traits.tcl (2): StampFold StampNode
+scc 52: 2 procedures
+    syntax.tcl (2): Sequence fromIR
+scc 53: 2 procedures
+    construction.tcl (2): SeqUses Uses
+scc 54: 2 procedures
+    discarded.tcl (2): ExitSequence ExitWalk
+scc 55: 2 procedures
+    escape.tcl (2): NoLossSequence NoLossWalk
+scc 56: 2 procedures
+    read.tcl (2): Expr ReadFoldInitial
+-- static, every ::hir procedure: 2909 procedures, 56 SCCs of 2 or more holding 321 procedures, 107 further self-recursive procedures
+== static, the procedures a front-end build ran
+scc 1: 51 procedures
+    types.tcl (26): Admits Bound CallableResult CoroutineMismatch FnLub FnMismatch FnSubtype MakeApplied MakeCoroutine MakeCoroutineType MakeFn MakeList MakeMutArray MakeMutVec MakeSet MakeStruct NativeResult Presentable ReturnFits ShapeResult canonical glb lub presented structuralOf subtype
+    structs.tcl (3): ApplicationIssue ApplicationProblem AppliedFieldType
+    layouts.tcl (4): ArrayConsumerType CopyType ReprOfTerm TermConsumerType
+    traits.tcl (8): Accept Implementation InstanceBinding Mismatch RequiredFn ShowRequired explain satisfies
+    imprint.tcl (2): Bind Substitute
+    coroutines.tcl (4): InstanceOutward Outward ShapeResult SpecializedNode
+    semantic.tcl (2): EraseArrays Refines
+    containers.tcl (1): ElementContract
+    range.tcl (1): ProvesValueAcceptedBy
+scc 2: 26 procedures
+    traits.tcl (1): monomorphize
+    methods.tcl (6): Build BuildRecord Decide Final Proposal Verdicts
+    hir.tcl (5): BuildFull BuildOnce BuildSyntax DecideMethodCalls buildSyntax
+    resolve.tcl (11): CoroutineResume Expr FieldPathOperand LayoutOperand ProgramSection ResolveClone ResolveFoldInitial ResolvePlannedCall ResolveStruct Sequence program
+    flags.tcl (1): ResolveCall
+    static.tcl (2): Round decide
+scc 3: 21 procedures
+    completions.tcl (21): EffectiveFacts Eval EvalCall EvalCountloop EvalHandle EvalIf EvalListloop EvalLockloop EvalLoop FoldEntry IndirectFacts LoopDomain NativeCallFacts Recover Seq Subsume SubsumeCall SubsumeCollected SubsumedRaises WalkBlock analyzeBlock
+scc 4: 16 procedures
+    types.tcl (11): Bind Block Call Expr FoldBody FoldInitial Handle If Project Sequence Struct
+    semantic.tcl (5): Analyze Call Drain Nested Walk
+scc 5: 8 procedures
+    resolve.tcl (2): ResolveApplied ResolveTypeExpr
+    layouts.tcl (3): ResolveArrayTerm ResolveNativeEdit ResolveNativeView
+    cabi.tcl (3): ResolveCType ResolveFnPtr ResolvePtr
+scc 6: 7 procedures
+    exactvalue.tcl (7): CallFact Equal Eval IfFact MaterialValue SourceFact Value
+scc 7: 6 procedures
+    cardinality.tcl (6): Capacity IntForm IterationLength ListLength StrLength of_domain
+scc 8: 6 procedures
+    types.tcl (6): SendClass SendClassOf SendComponents SendParts SendStruct SendStructClass
+scc 9: 5 procedures
+    refinements.tcl (1): Show
+    layouts.tcl (2): ShowNative ShowTerm
+    cabi.tcl (1): ShowPointee
+    types.tcl (1): show
+scc 10: 5 procedures
+    range.tcl (5): Call Expr FoldInitial If Sequence
+scc 11: 5 procedures
+    static.tcl (5): Form Node Sequence Value Value_
+scc 12: 4 procedures
+    types.tcl (4): Components Totality TotalityClass TotalityClassOf
+scc 13: 4 procedures
+    refine.tcl (4): BodyImplication HandleImplication IfImplication Implication
+scc 14: 3 procedures
+    enums.tcl (1): IsAffine
+    types.tcl (1): IsAffine
+    structs.tcl (1): IsAffine
+scc 15: 3 procedures
+    callables.tcl (3): Bearing BearingClass BearingNamed
+scc 16: 3 procedures
+    signatures.tcl (3): Call Seq Value
+scc 17: 3 procedures
+    repeatable.tcl (3): Call Expr Walk
+scc 18: 2 procedures
+    imprint.tcl (2): Occurrences Placed
+scc 19: 2 procedures
+    imprint.tcl (2): Match MatchInner
+scc 20: 2 procedures
+    ownership.tcl (2): Walk WalkUncached
+scc 21: 2 procedures
+    layouts.tcl (2): ReprUnionPath UnionField
+scc 22: 2 procedures
+    layouts.tcl (2): ReprDescriptor descriptor
+scc 23: 2 procedures
+    affine.tcl (2): Flow Seq
+scc 24: 2 procedures
+    affine.tcl (2): Descriptor DescriptorOf
+scc 25: 2 procedures
+    callables.tcl (2): WalkExpr WalkFold
+scc 26: 2 procedures
+    layouts.tcl (2): DescriptorFormats WordsFormats
+scc 27: 2 procedures
+    layouts.tcl (2): HasArrays ReprHasArrays
+scc 28: 2 procedures
+    layouts.tcl (2): PointerField ReprPointerPath
+scc 29: 2 procedures
+    cardinality.tcl (2): RelatedOfAtom related
+scc 30: 2 procedures
+    cardinality.tcl (2): ShowAtom show
+scc 31: 2 procedures
+    privacy.tcl (2): Find FindContract
+scc 32: 2 procedures
+    layouts.tcl (2): Resolve ResolveRepr
+scc 33: 2 procedures
+    mutvec.tcl (2): FoldWalk FoldWalkSequence
+scc 34: 2 procedures
+    traits.tcl (2): StampFold StampNode
+scc 35: 2 procedures
+    discarded.tcl (2): ExitSequence ExitWalk
+-- static, the procedures a front-end build ran: 1768 procedures, 35 SCCs of 2 or more holding 212 procedures, 74 further self-recursive procedures
+== dynamic, the procedures a front-end build ran
+scc 1: 82 procedures
+    summaries.tcl (7): Arguments Compute Fixpoint Level Summary Union Walk
+    types.tcl (40): Admits AnyAffine Bound Components CoroutineMismatch EqualityClass FnLub FnMismatch FnSubtype HashClass IsAffine MakeApplied MakeCoroutineType MakeFn MakeList MakeMutArray MakeMutVec MakeSet MakeStruct MentionsMutable MentionsMutableFrom MentionsMutableNode ReturnFits SendClass SendClassOf SendComponents SendNode SendParts SendStruct SendStructClass Totality TotalityClass TotalityClassOf TotalityNode TotalityParts canonical glb lub structuralOf subtype
+    traits.tcl (5): Accept Implementation Mismatch RequiredFn satisfies
+    range.tcl (1): ProvesValueAcceptedBy
+    staticdeps.tcl (2): CanCarry CanCarryNode
+    mutvec.tcl (2): MayHoldVector MayHoldVectorNode
+    decimal.tcl (2): Mentions MentionsNode
+    callables.tcl (8): Bearing BearingClass BearingNamed BearingNode CarriedInto CarriedNode EnumWalk FreshWalk
+    structs.tcl (7): AffinityOf AffinitySummary AppliedFieldTypes Fixpoint IsAffine PositionsOf SlotPositions
+    imprint.tcl (3): Occurrences Placed Substitute
+    ownership.tcl (4): Through ThroughOf Walk WalkUncached
+    enums.tcl (1): IsAffine
+scc 2: 32 procedures
+    resolve.tcl (9): CoroutineResume Expr FieldPathOperand LayoutOperand ResolveClone ResolveFoldInitial ResolvePlannedCall ResolveStruct Sequence
+    flags.tcl (1): ResolveCall
+    completions.tcl (21): EffectiveFacts Eval EvalCall EvalCountloop EvalHandle EvalIf EvalListloop EvalLockloop EvalLoop FoldEntry IndirectFacts LoopDomain NativeCallFacts Recover Seq Subsume SubsumeCall SubsumeCollected SubsumedRaises WalkBlock analyzeBlock
+    hir.tcl (1): CheckingCall
+scc 3: 16 procedures
+    types.tcl (11): Bind Block Call Expr FoldBody FoldInitial Handle If Project Sequence Struct
+    semantic.tcl (5): Analyze Call Drain Nested Walk
+scc 4: 15 procedures
+    traits.tcl (1): monomorphize
+    methods.tcl (6): Build BuildRecord Decide Final Proposal Verdicts
+    hir.tcl (6): BuildFull BuildOnce BuildSyntax DecideMethodCalls Deep check
+    static.tcl (2): Round decide
+scc 5: 8 procedures
+    resolve.tcl (2): ResolveApplied ResolveTypeExpr
+    layouts.tcl (3): ResolveArrayTerm ResolveNativeEdit ResolveNativeView
+    cabi.tcl (3): ResolveCType ResolveFnPtr ResolvePtr
+scc 6: 7 procedures
+    exactvalue.tcl (7): CallFact Equal Eval IfFact MaterialValue SourceFact Value
+scc 7: 6 procedures
+    static.tcl (5): Form Node Sequence Value Value_
+    syntax.tcl (1): mapFold
+scc 8: 5 procedures
+    refinements.tcl (1): Show
+    layouts.tcl (2): ShowNative ShowTerm
+    cabi.tcl (1): ShowPointee
+    types.tcl (1): show
+scc 9: 5 procedures
+    cardinality.tcl (5): Capacity IntForm IterationLength ListLength of_domain
+scc 10: 5 procedures
+    range.tcl (5): Call Expr FoldInitial If Sequence
+scc 11: 4 procedures
+    refine.tcl (4): BodyImplication HandleImplication IfImplication Implication
+scc 12: 3 procedures
+    signatures.tcl (3): Call Seq Value
+scc 13: 2 procedures
+    layouts.tcl (2): HasArrays ReprHasArrays
+scc 14: 2 procedures
+    layouts.tcl (2): PointerField ReprPointerPath
+scc 15: 2 procedures
+    layouts.tcl (2): ReprUnionPath UnionField
+scc 16: 2 procedures
+    layouts.tcl (2): ReprDescriptor descriptor
+scc 17: 2 procedures
+    layouts.tcl (2): DescriptorFormats WordsFormats
+scc 18: 2 procedures
+    imprint.tcl (2): Match MatchInner
+scc 19: 2 procedures
+    affine.tcl (2): Flow Seq
+scc 20: 2 procedures
+    affine.tcl (2): Descriptor DescriptorOf
+scc 21: 2 procedures
+    callables.tcl (2): WalkExpr WalkFold
+scc 22: 2 procedures
+    privacy.tcl (2): Find FindContract
+scc 23: 2 procedures
+    layouts.tcl (2): Resolve ResolveRepr
+scc 24: 2 procedures
+    traits.tcl (2): StampFold StampNode
+-- dynamic, the procedures a front-end build ran: 1768 procedures, 24 SCCs of 2 or more holding 212 procedures, 67 further self-recursive procedures

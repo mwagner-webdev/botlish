@@ -1,0 +1,2 @@
+ 1163 functions,  782 KB of text: 0.81 s
+ 2288 functions, 1540 KB of text: 3.15 s

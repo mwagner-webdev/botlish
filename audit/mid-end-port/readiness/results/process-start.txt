@@ -1,0 +1,9 @@
+# a native executable of `1 + 1` (main.tcl -emit-native-executable), run 8 times under tools/peak.py: process start and exit
+seconds 0.003 peakKb 12868 status 0
+seconds 0.002 peakKb 12820 status 0
+seconds 0.002 peakKb 12868 status 0
+seconds 0.002 peakKb 12812 status 0
+seconds 0.002 peakKb 12840 status 0
+seconds 0.002 peakKb 12868 status 0
+seconds 0.001 peakKb 12852 status 0
+seconds 0.002 peakKb 12852 status 0

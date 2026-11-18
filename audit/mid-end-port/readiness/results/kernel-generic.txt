@@ -1,0 +1,6 @@
+structs  specialize 1  lower+link 0.58 s  best 0.668 s  list {{int 455468} {int 6} {int 275164515}}
+structs  specialize 0  lower+link 0.21 s  best 0.953 s  list {{int 455468} {int 6} {int 275164515}}
+enums    specialize 1  lower+link 0.55 s  best 0.600 s  list {{int 455468} {int 6} {int 275164515}}
+enums    specialize 0  lower+link 0.24 s  best 0.885 s  list {{int 455468} {int 6} {int 275164515}}
+tables   specialize 1  lower+link 0.56 s  best 0.205 s  list {{int 455468} {int 6} {int 275164515}}
+tables   specialize 0  lower+link 0.23 s  best 0.341 s  list {{int 455468} {int 6} {int 275164515}}

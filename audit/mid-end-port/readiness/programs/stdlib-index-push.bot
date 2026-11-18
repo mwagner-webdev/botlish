@@ -1,0 +1,22 @@
+# stdlib-index-push.bot -- the reduced worklist reproducer
+# (PORTABILITY-MID-END-PORT-READINESS-CENSUS-1.md, section 6): an access
+# under a guard on both bounds is proven when the vector is not mutated
+# (readonly_place), and not proven when the same vector is pushed to after
+# the access (push_after_local), even for a local vector and even though
+# the push follows the access. Expected today: rejected at line 17 (an
+# unhandled IndexNotFound). A worklist reads its head item and pushes new
+# items, so every worklist access needs a handler or `errors IndexNotFound`.
+import std::mutable_vector
+fn readonly_place(head: int, place queue: MutableVector[int]) -> int:
+    if head >= 0 and head < queue.length():
+        return queue.at(head)
+    -1
+fn push_after_local(head: int) -> int:
+    queue = std::mutable_vector::from_list([1, 2])
+    if head >= 0 and head < queue.length():
+        item = queue.at(head)
+        queue.push(item)
+        return item
+    -1
+q = std::mutable_vector::from_list([3, 2])
+[readonly_place(1, q), push_after_local(1)]

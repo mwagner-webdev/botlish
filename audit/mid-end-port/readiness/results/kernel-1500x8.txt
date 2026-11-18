@@ -1,0 +1,8 @@
+kernel: 1500 functions, depth 8, best of 5 (nodes 455468, rounds 6, checksum 275164515)
+version            seconds dict / this  this / native tables
+tcl dict             5.028        1.0x                 20.9x
+tcl list             2.809        1.8x                 11.7x
+tcl tables           2.508        2.0x                 10.4x
+native structs       0.693        7.3x                  2.9x
+native enums         0.627        8.0x                  2.6x
+native tables        0.241       20.9x                  1.0x

@@ -1,0 +1,6 @@
+agree 300 6 tcl {14208 481 3486 677785035 748260083}
+agree 300 6 compile {14208 481 3486 677785035 748260083}
+agree 300 6 cranelift-generic {14208 481 3486 677785035 748260083}
+agree 300 6 cranelift {14208 481 3486 677785035 748260083}
+cost 2000 8 {tcl {value {282424 3566 62830 465693974 586191397} seconds 2.541 peakKb 107048} native {value {282424 3566 62830 465693974 586191397} lowerAndLink 1.80 seconds 0.539 peakKb 126432} generic {value {282424 3566 62830 465693974 586191397} lowerAndLink 0.98 seconds 0.770 peakKb 136932} alloc {allocs 2371694 bytes 92336598 structs 358386 strings 413924 lists 1231746 gcCycles 5 gcUs 85326 vectorDetaches 0 vectorDetachElements 0 arrayDetaches 0}}
+cost 8000 8 {tcl {value {1122566 14162 248028 190143608 898645269} seconds 10.706 peakKb 407112} native {value {1122566 14162 248028 190143608 898645269} lowerAndLink 2.37 seconds 2.711 peakKb 554740} generic {value {1122566 14162 248028 190143608 898645269} lowerAndLink 1.20 seconds 3.687 peakKb 487784} alloc {allocs 9878877 bytes 385163459 structs 1422918 strings 1636315 lists 5358637 gcCycles 6 gcUs 281883 vectorDetaches 0 vectorDetachElements 0 arrayDetaches 0}}

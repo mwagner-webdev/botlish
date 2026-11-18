@@ -1,0 +1,24 @@
+hir procedures: 2909
+ran in a front-end build: 1768
+ran in native lowering: 750
+ran in both: 397
+ran in native lowering only: 353
+static, all hir: SCCs>=2 56, procedures in them 321, self-recursive only 107
+static, front-end procedures: SCCs>=2 35, procedures in them 212, self-recursive only 74
+dynamic, front-end procedures: SCCs>=2 24, procedures in them 212, self-recursive only 67
+core/surface procedures the mid-end called (dynamic, both phases), by namespace: distinct procedures, calls
+    ::core::bytestore 5 158998
+    ::core::cabi 9 3381
+    ::core::contexts 3 791555
+    ::core::coroutines 8 1789393
+    ::core::decimal 39 413939
+    ::core::deep 6 394
+    ::core::float 14 22137
+    ::core::inttext 2 16
+    ::core::ir 7 618195
+    ::core::linuxabi 6 399951
+    ::core::native 18 6939652
+    ::core::strings 2 13826
+    ::core::type 29 9998637
+    ::core::value 28 6786296
+failures: 0
