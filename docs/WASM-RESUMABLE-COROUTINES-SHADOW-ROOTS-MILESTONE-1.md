@@ -450,7 +450,7 @@ fusion and the lowering read them there -- so a future Wasm target sets
 them without consulting the compiler host's constants. The driver prints
 them (`botlish-native capabilities`: `roots shadow-only`, `coroutines
 resumable` on the fallback build). Native-frame roots are untouched:
-`RootMode::NativeFrame` plans exactly as before (`roots.rs:846`).
+`RootMode::NativeFrame` plans exactly as before (`roots.rs:856`).
 
 ### 6.2 Storage and discipline [fact]
 
