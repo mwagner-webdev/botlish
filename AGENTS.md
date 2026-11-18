@@ -2203,8 +2203,9 @@ Keep it so:
 * What a suspension saves is the root planner's liveness at that point
   (`live_at_many`), tagged registers to tagged slots, every unboxed kind to
   raw slots; the collector traces `callee` and the first `ntagged` tagged
-  slots only, and `frrestore` marks a resumed frame untraced. Never trace a
-  raw slot, save a dead register or skip one live across the point.
+  slots only, and `frrestore` marks a resumed frame untraced
+  (rc-running-frame-untraced). Never trace a raw slot, save a dead register
+  or skip one live across the point.
 * An activation suspending again reuses its frame; a call site hands its
   next call the frame of the callee activation that returned; a yielding
   self tail call is the next iteration of the same activation (parameters

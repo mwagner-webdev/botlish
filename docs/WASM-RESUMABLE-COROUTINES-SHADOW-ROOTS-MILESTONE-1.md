@@ -95,10 +95,10 @@ follows from facts and observations but was not run as such.
   reproducer [obs]: `leaf-reentry.bot` returns 340 in every run, with and
   without GC stress, on both root plans; current main's fallback driver
   returns 50 or crashes under GC stress (section 7).
-* **An independent corpus** (`tests/resumable/`, 18 programs) agrees with
+* **An independent corpus** (`tests/resumable/`, 19 programs) agrees with
   the interpreter and the stackful backend, fused and not, under GC stress
   (section 12).
-* **Mutation testing** [obs]: [[MUTANT-SUMMARY]] (section 12.2).
+* **Mutation testing** [obs]: 19 mutants of the frame, the lowering, the coroutine runtime and the ShadowOnly plan, M1 and M2 among them, all killed (one, `running-frame-traced`, after its survival led to a new detector); the 9 mutants of other catalogs whose code moved, all killed (section 12.2).
 
 **Not done** (out of A0's scope, section 15): a Wasm emitter, WASI, any
 change on hosts that switch stacks.
@@ -561,7 +561,13 @@ shadow-stack storage, leaf or not); the mutant `leaf-roots-unscanned`
   sweep, plainly and under GC stress (rc-reclaimed).
 * **Precision** [obs]: `precision.bot` -- 200,000 Strings in a List dead at
   the suspension point: fewer than 50,000 Strings live at the end (only the
-  main program's own churn), 2 frames (rc-precision). Object death at a
+  main program's own churn), 2 frames (rc-precision). `running-frame.bot`
+  -- a List saved by a yield and dead soon after the resume, then an equally
+  large List built before the next yield: under GC stress its peak live
+  heap equals that of the same program with the List dead before the yield
+  (145,935 bytes both; 258,849 when a resumed frame stays traced, the
+  mutant `running-frame-traced`), so a running activation's frame retains
+  nothing (rc-running-frame-untraced). Object death at a
   suspension point: the same program's List is collectible while its
   coroutine stays suspended.
 * **Invariant checks** (the brief's I1-I9):
@@ -571,7 +577,7 @@ shadow-stack storage, leaf or not); the mutant `leaf-roots-unscanned`
 | I1 | a segment restores the shadow stack | runtime check in `segment`; mutants `shadow-frame-not-popped`, `segment-check-removed`; `fallback_tests`'s leaky entry |
 | I2 | no frame left in a hand-off location | structural: no hand-off location exists (section 4.3); `frcallee` and `segment` clear what they take; mutant `callee-frame-dropped` |
 | I3 | suspended references reachable | `traced()` unit test; GC-stress corpus; mutants M1 `tagged-slots-untraced`, `callee-untraced` |
-| I4 | dead references not retained | rc-precision; `frrestore` zeroes `ntagged`; mutants `dead-registers-saved`, `running-frame-traced` |
+| I4 | dead references not retained | rc-precision (at the suspension), rc-running-frame-untraced (after the resume: `frrestore` zeroes `ntagged`); mutants `dead-registers-saved`, `running-frame-traced` |
 | I5 | live registers restored | `nir::validate` (definite definition on every resume path); exact-save unit test; mutants M2 `live-register-unsaved`, `closure-unsaved`, `handoff-unsaved` |
 | I6 | tagged and raw distinct | layout (raw after `cap_tagged`), `traced()` unit test; mutants `raw-slots-traced`, `raw-slots-overlap` |
 | I7 | unique frame ownership | ownership rules (4.2); mutants `caller-frame-handed-down`, `handoff-not-recycled`, `tail-frame-not-reused`, `tail-handoffs-reset` |
@@ -770,6 +776,26 @@ section 6.2 (dead slots at a scratch reset, the shadow array's size) and
 the tests encoding the old fallback plan (section 11.2); those were fixed
 first and are in the 294.
 
+### 11.4 Stock code generation unchanged [obs]
+
+Current main's stock driver (`db473ee0`, `cargo build --release`) and this
+milestone's stock driver, on the NIR of 14 programs (the corpus programs
+nested, generator, many, dfa-tail, errors, contexts, leaf-reentry; the
+scratch census's p07b; `bench/fib.bot`, `lex-strategy.bot`,
+`loop-count.bot`, `refined-checks.bot`, `source-checks.bot`; the
+`tree-struct` golden suite), fusion on and off:
+
+* `botlish-native size`: identical, function by function, in all 28 runs.
+* `botlish-native clif`, with helper and function symbol numbers replaced
+  by names (the four new runtime helpers shift them): identical but for the
+  displacement of Vm fields after the two removed ones
+  (`native_roots_ptr`/`len`): `context_ptr` is at offset 88, was 104
+  (contexts, refined-checks, tree-struct).
+
+So the native-frame plan, its stack maps and the stackful mechanism
+generate the same instructions as before; the Vm layout change is covered
+by the AOT ABI fingerprint, which images are checked against.
+
 ## 12. GC-stress and mutation-test results
 
 ### 12.1 GC stress [obs]
@@ -780,7 +806,7 @@ All on the final fallback build (resumable, ShadowOnly), with
 | What | Result |
 |---|---|
 | every golden suite, cranelift, fusion off | 122 suites, 5,773 / 5,773 |
-| the corpus (`rc-corpus-gc-stress`: 15 programs, fused and unfused) | all agree with the interpreter |
+| the corpus (`rc-corpus-gc-stress`: 16 programs, fused and unfused) | all agree with the interpreter |
 | `leaf-reentry.bot`, five runs, on both root plans (`rc-leaf-reentry`) | 340 every time |
 | `actor.test`, whole file | 67 / 67 (654 s) |
 | `event-loop.test`, whole file | 109 / 109 (883 s) |
@@ -803,7 +829,7 @@ main's pushes (tests.yml `gc-stress`).
 
 `tclsh9.0 audit/resumable-coroutines/tools/mutate.tcl -seed-target
 native/target-fallback` (`audit/resumable-coroutines/tools/mutants.txt`, 19
-mutants). Detectors per mutant: the fallback build's Rust tests of the
+mutants; results: `audit/resumable-coroutines/results/mutants.txt`). Detectors per mutant: the fallback build's Rust tests of the
 frame, segment protocol, root plan and capabilities; the corpus with fusion
 off, plainly and under GC stress, compared with the unmutated build's
 values; five stressed leaf re-entry runs; the allocation evidence (frames
@@ -811,11 +837,50 @@ per resume, per symbol, per call, per tail-call iteration, 10,000
 suspended, reclamation, precision); then, for a mutant those miss,
 `tests/resumable-coroutines.test`.
 
-[[MUTANT-TABLE]]
+| Mutant | Invariant | Rust tests | Corpus and evidence |
+|---|---|---|---|
+| `tagged-slots-untraced` (**M1**) | I3 | killed | killed (`deep`, stressed: segfault) |
+| `callee-untraced` | I3 | killed | killed (`cleanup-gc`, stressed) |
+| `live-register-unsaved` (**M2**) | I5 | killed | killed (`cleanup-gc`: segfault) |
+| `closure-unsaved` | I5 | survived | killed (`closures`: segfault) |
+| `raw-slots-traced` | I6 | killed | killed (`cleanup-gc`, stressed) |
+| `raw-slots-overlap` | I6 | survived | killed (`cleanup-gc`: segfault) |
+| `dead-registers-saved` | I4 | killed | killed (reclaim: 1,509 frames still live) |
+| `running-frame-traced` | I4 | survived | **survived the first run**; killed after `running-frame.bot` was added (peak 258,849 B against the control's 145,935) |
+| `caller-frame-handed-down` | I7 | killed | survived |
+| `callee-frame-dropped` | I2 | survived | killed (`cleanup-gc`: segfault) |
+| `handoff-unsaved` | I5, I7 | killed | killed (`closures`: segfault) |
+| `handoff-not-recycled` | I7 (reuse) | survived | killed (loop-calls: 100,604 frames) |
+| `tail-frame-not-reused` | I7 (reuse) | killed | killed (tail-calls: 304 frames) |
+| `tail-handoffs-reset` | I7 (reuse) | killed | killed (tail-calls: 304 frames) |
+| `release-keeps-frames` | I8 | killed | survived |
+| `abandonment-not-unwound` | I8 | killed | killed (`cleanup-gc`) |
+| `shadow-frame-not-popped` | I1 | survived | killed (the segment's I1 check: NATIVE BUG) |
+| `segment-check-removed` | I1 | killed | survived |
+| `leaf-roots-unscanned` | I9 | killed | killed (`cleanup-gc`, stressed: segfault) |
+
+**19 mutants, 19 killed** -- 18 in the first full run, `running-frame-traced`
+after its investigation. It survived because nothing observed the window it
+opens: a resumed frame that keeps `ntagged` retains its last suspension's
+values only until the activation suspends again or returns, and no corpus
+program allocated much inside that window. `running-frame.bot` does (a List
+saved by a yield, dead after the resume, then an equally large List built
+before the next yield), and `rc-running-frame-untraced` and the harness
+compare its peak live heap under GC stress with the same program whose List
+is dead before the yield. Three mutants are killed by one detector only:
+`caller-frame-handed-down` (no corpus program recycles a callee frame whose
+function has yielding call sites of its own), `release-keeps-frames` and
+`segment-check-removed` (both by the Rust tests that construct exactly those
+states).
 
 Mutants of other catalogs whose code this milestone moved were updated to
 the code they now mutate and run through their own harnesses:
-[[FOREIGN-MUTANTS]]. `tools/mutant-catalogs.tcl`: 118 catalogs, 3,975
+native-stack's `effects-fallible-again`, `effects-infallible-on-fallback`,
+`depth-reserved-on-native-frames`, `fallback-runs-coroutines` (4 of 4
+killed); coroutines' `native-message-wrong-yield`,
+`native-release-keeps-stack` (2 of 2); lexical-cleanup's
+`native-abandon-discards`; native-aot's `fingerprint-ignores-record`;
+native-library's `stack-check-callers-unchecked` (each killed). `tools/mutant-catalogs.tcl`: 118 catalogs, 3,975
 mutants, 0 problems.
 
 ## 13. Performance and allocation measurements

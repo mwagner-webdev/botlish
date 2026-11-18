@@ -1,0 +1,109 @@
+# audit/resumable-coroutines/tools/mutate.tcl -seed-target <fallback target>, 2026-11-18, the session's 4-core Linux x86-64 container.
+# The full catalog first; running-frame-traced survived it, and was killed once the corpus gained
+# running-frame.bot and its peak-live check (rerun below, with -only).
+
+KILLED tagged-slots-untraced -- M1 of WASM-TARGET-AND-COROUTINE-ARCHITECTURE-MILESTONE-1.md: a suspended frame's tagged slots are not traced, only its callee frame (I3)
+    rust:   killed (runtime::resumable::tests::a_frame_traces_its_live_tagged_slots_and_callee_only)
+    corpus: killed (8: deep stress=1: status 1: child killed: segmentation violation)
+    tcl:    not run
+KILLED callee-untraced -- a suspended frame does not trace its suspended callee's frame: a deep chain's inner frames are swept while suspended (I3)
+    rust:   killed (runtime::resumable::tests::a_frame_traces_its_live_tagged_slots_and_callee_only)
+    corpus: killed (19: cleanup-gc stress=1: status 1: memory allocation of 34359738384 bytes failed
+stack backtrace:
+   0: std::alloc::rust_oom
+             at /rustc/0ef1bc386059596dada8fb65b50425aab2ea63)
+    tcl:    not run
+KILLED live-register-unsaved -- M2 of the architecture report: every suspension point omits the first tagged register live across it (I5)
+    rust:   killed (codegen::resumable::tests::a_yielding_tail_call_loops_in_its_activation, codegen::resumable::tests::a_suspension_saves_exactly_the_live_registers)
+    corpus: killed (36: cleanup-gc stress=0: status 1: child killed: segmentation violation)
+    tcl:    not run
+KILLED closure-unsaved -- a callenv's closure is not kept across its suspension: the re-entered callee reads its captures through an undefined closure (I5)
+    rust:   survived
+    corpus: killed (2: closures stress=0: status 1: child killed: segmentation violation)
+    tcl:    not run
+KILLED raw-slots-traced -- the collector traces a frame's raw slots as well: a raw Int that looks like a heap address is followed (I6)
+    rust:   killed (runtime::resumable::tests::a_frame_traces_its_live_tagged_slots_and_callee_only)
+    corpus: killed (8: cleanup-gc stress=1: status 1: child killed: segmentation violation)
+    tcl:    not run
+KILLED raw-slots-overlap -- raw slot J is addressed as if the frame had no tagged slots: raw words overwrite the tagged slots the collector traces (I6)
+    rust:   survived
+    corpus: killed (31: cleanup-gc stress=0: status 1: child killed: segmentation violation)
+    tcl:    not run
+KILLED dead-registers-saved -- every register, live or dead, is saved at every suspension point: a suspended frame keeps what the function referenced earlier (I4)
+    rust:   killed (codegen::resumable::tests::a_yielding_tail_call_loops_in_its_activation, codegen::resumable::tests::a_suspension_saves_exactly_the_live_registers)
+    corpus: killed (2: reclaim evidence: ResumeFrame currentLiveObjects 1509, expected == 0)
+    tcl:    not run
+SURVIVED running-frame-traced -- a resumed frame stays traced while its activation runs (frrestore keeps ntagged): the values of its last suspension stay reachable through the frame (I4)
+    rust:   survived
+    corpus: survived
+    tcl:    survived
+KILLED caller-frame-handed-down -- an activation's yielding call sites start with the activation's own incoming frame instead of UNIT: after a self tail call reuses that frame, or on any later fresh call, a callee starts in a frame its caller owns (I7)
+    rust:   killed (codegen::resumable::tests::a_yielding_tail_call_loops_in_its_activation)
+    corpus: survived
+    tcl:    not run
+KILLED callee-frame-dropped -- a resumed call re-enters its callee without the callee's frame: the callee starts afresh instead of continuing (I2)
+    rust:   survived
+    corpus: killed (36: cleanup-gc stress=0: status 1: child killed: segmentation violation)
+    tcl:    not run
+KILLED handoff-unsaved -- a call site's hand-off register is never saved across another suspension point: after a resume elsewhere its call passes an undefined frame (I5, I7)
+    rust:   killed (codegen::resumable::tests::a_suspension_saves_exactly_the_live_registers)
+    corpus: killed (8: closures stress=0: status 1: child killed: segmentation violation)
+    tcl:    not run
+KILLED handoff-not-recycled -- a call site resets its hand-off register before every call: a yielding call made anew in a loop makes a frame per iteration (an event loop's yield_now per dispatch)
+    rust:   survived
+    corpus: killed (2: loop-calls evidence: ResumeFrame allocations 100604, expected < 16)
+    tcl:    not run
+KILLED tail-frame-not-reused -- a yielding self tail call starts the next activation without the finished one's frame (no loop in the activation, and the tail call passes the incoming frame argument, UNIT for a fresh activation): one frame per iteration (a declared recognizer's per symbol)
+    rust:   killed (codegen::resumable::tests::a_yielding_tail_call_loops_in_its_activation)
+    corpus: killed (1: tail-calls evidence: ResumeFrame allocations 304, expected < 16)
+    tcl:    not run
+KILLED tail-handoffs-reset -- a yielding self tail call's loop goes back before the call sites' hand-off registers are set to UNIT: every iteration drops the callee frames its call sites recycle, one callee frame per iteration of a tail-recursive loop calling a yielding function
+    rust:   killed (codegen::resumable::tests::a_yielding_tail_call_loops_in_its_activation)
+    corpus: killed (1: tail-calls evidence: ResumeFrame allocations 304, expected < 16)
+    tcl:    not run
+KILLED release-keeps-frames -- a released suspended coroutine keeps its frame chain: everything its frames hold stays reachable through the dead handle (I8)
+    rust:   killed (runtime::coroutine::fallback_tests::release_and_abandonment_drop_the_frame_chain)
+    corpus: survived
+    tcl:    not run
+KILLED abandonment-not-unwound -- a resumed yield of an abandoned coroutine reads the message as unit instead of failing: the frames' release pads do not run
+    rust:   killed (runtime::coroutine::fallback_tests::release_and_abandonment_drop_the_frame_chain)
+    corpus: killed (4: cleanup-gc stress=0: status 1: child killed: segmentation violation)
+    tcl:    not run
+KILLED shadow-frame-not-popped -- a ShadowOnly function never pops its shadow-stack frame: every return, suspension and error exit leaves it behind (I1)
+    rust:   survived
+    corpus: killed (35: cleanup-gc stress=0: status 0: error {NATIVE BUG} {a resumable coroutine segment did not restore the shadow stack (invariant I1)})
+    tcl:    not run
+KILLED segment-check-removed -- the runtime's check of invariant I1 (a segment restored the shadow stack) is gone: a leaked shadow frame goes unreported
+    rust:   killed (runtime::coroutine::fallback_tests::a_segment_that_leaks_a_shadow_frame_is_a_bug)
+    corpus: survived
+    tcl:    not run
+KILLED leaf-roots-unscanned -- a ShadowOnly function without a Botlish call keeps its root slots in its own native frame, which nothing scans -- the old fallback plan's leaf exception without even its publication (I9)
+    rust:   killed (codegen::roots::tests::a_scratch_reset_clears_dead_shadow_slots, codegen::roots::tests::root_with_no_botlish_calls_is_native_frame, codegen::roots::tests::tail_self_loop_alone_is_native_frame)
+    corpus: killed (19: cleanup-gc stress=1: status 1: child killed: segmentation violation)
+    tcl:    not run
+19 mutants, 18 killed, 1 survived: running-frame-traced
+
+# Rerun after the running-frame detector:
+KILLED running-frame-traced -- a resumed frame stays traced while its activation runs (frrestore keeps ntagged): the values of its last suspension stay reachable through the frame (I4)
+    rust:   survived
+    corpus: killed (1: running-frame: peak live 258849 against its control's 145935)
+1 mutants, 1 killed, 0 survived
+
+# Foreign catalogs' mutants whose code this milestone moved (their own harnesses, -only):
+## audit/native-stack/tools/mutate.tcl
+KILLED effects-fallible-again -- a Botlish call is fallible again where the stack guard exists (both root plans of every native host): callers check for an error the guard makes impossible
+KILLED effects-infallible-on-fallback -- a function that reserves shadow slots proven infallible on a ShadowOnly runtime without the guard, whose shadow stack's bound can fail it: callers do not check (nir's call-effect test of such a runtime)
+KILLED depth-reserved-on-native-frames -- a function with a Botlish call reserves depth where native frames hold the roots, as the stack-limit check did
+KILLED fallback-runs-coroutines -- the fallback root plan runs coroutines on stacks of their own (stack switching) instead of resumable frames: its one LIFO shadow stack would hold a suspended coroutine's roots out of order
+4 mutants on linux-x86_64, 4 killed, 0 survived, 0 skipped (another host's code)
+## audit/coroutines/tools/mutate.tcl
+KILLED native-message-wrong-yield -- a native resume does not deliver its message: the yield evaluates to its own outward value
+KILLED native-release-keeps-stack -- a native release leaves a suspended coroutine's stack in place (a collection frees it later)
+## audit/lexical-cleanup/tools/mutate.tcl
+KILLED native-abandon-discards -- the native runtime's coabandon releases a suspended coroutine without unwinding it
+## audit/native-aot/tools/mutate.tcl
+KILLED fingerprint-ignores-record -- the ABI fingerprint leaves the program record's layout out: a runtime reads another layout's startup word
+1 mutants on linux-x86_64, 1 killed, 0 survived, 0 skipped (another host's code)
+## audit/native-library/tools/mutate.tcl
+KILLED stack-check-callers-unchecked -- a library call that can fail for the stack is proven infallible: its callers go on past the failure
+1 mutants on linux-x86_64, 1 killed, 0 survived, 0 skipped (no libraries on this host)

@@ -122,7 +122,7 @@ proc rcFusedNir {name} {
 # resumes, ten thousand suspended coroutines, collections over hundreds of
 # thousands of objects: minutes on the reference interpreter, which agreed
 # when their `# expect:` lines were recorded).
-set ::rcEverywhere {interleaved nested escape errors cleanup-gc contexts deep scalars closures reclaim tail-calls leaf-reentry coro}
+set ::rcEverywhere {interleaved nested escape errors cleanup-gc contexts deep scalars closures reclaim tail-calls running-frame leaf-reentry coro}
 set ::rcNativeOnly {retention generator many precision loop-calls}
 
 # ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ test rc-corpus-agree {every corpus file has its expected (the interpreter's) val
     lmap name $::rcEverywhere {
         rcAgrees $name {interp compile cranelift-generic cranelift cranelift-unfused}
     }
-} -result [lrepeat 13 ok]
+} -result [lrepeat 14 ok]
 
 test rc-corpus-agree-native {the large corpus files have their expected values natively, fused and on the general mechanism} -constraints nativeCoroutines -body {
     lmap name $::rcNativeOnly {
@@ -146,7 +146,7 @@ test rc-corpus-gc-stress {under GC stress (a collection at every allocation), ev
             rcAgrees $name {cranelift-unfused cranelift}
         }
     }
-} -result [lrepeat 15 ok]
+} -result [lrepeat 16 ok]
 
 test rc-dfa-tail-agree {a declared recognizer fed one symbol per resume (its lowering yields, then calls itself in tail position): the interpreter's value at 1,000 symbols, and the native value at 1,000,000, fused and not} -constraints nativeCoroutines -body {
     set small [string map {count(1000000) count(1000)} [rcText dfa-tail]]
@@ -215,6 +215,18 @@ test rc-tail-call-frames {a loop written as yielding tail recursion -- 300 itera
     set frames [rcKind [rcReport tail-calls] ResumeFrame allocations]
     expr {$frames > 0 && $frames < 16 ? "few" : $frames}
 } -cleanup {unset -nocomplain frames} -result few
+
+test rc-running-frame-untraced {a resumed frame retains nothing while its activation runs (I4): under GC stress, a List saved by a yield and dead soon after the resume does not raise the peak live heap while an equally large List is built -- the peak is the one of the same program with the List dead before the yield} -constraints nativeResumableCoroutines -body {
+    set text [rcText running-frame]
+    set control [string map [list "    yield 0\n    count = std::list::length(big)\n" "    count = std::list::length(big)\n    yield 0\n"] $text]
+    if {$control eq $text} { error "the control program was not derived" }
+    set peaks [rcGcStress {
+        list [dict get [rcReport running-frame] total peakLiveBytes] \
+            [dict get [withoutCoroutineFusion {native::allocationReport [surface::compile $control -warnings off] summary}] total peakLiveBytes]
+    }]
+    lassign $peaks peak reference
+    expr {$peak <= $reference * 5 / 4 ? "untraced" : $peaks}
+} -cleanup {unset -nocomplain text control peaks peak reference} -result untraced
 
 test rc-many-suspended {10,000 coroutines suspended at once hold two frames each -- suspended state scales with live activations, no stack is ever made} -constraints nativeResumableCoroutines -body {
     set report [rcReport many]

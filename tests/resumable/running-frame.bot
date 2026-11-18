@@ -1,0 +1,28 @@
+# A value live across a suspension and dead soon after its resume
+# (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md, invariant I4):
+# `big` is saved by the first yield and read once after the resume; the
+# activation then builds `other`, as large, before it suspends again. A
+# resumed frame is untraced while its activation runs (`frrestore`), so
+# `big` is collectible while `other` is built: under GC stress this
+# program's peak live heap is the same as when `big` is dead before the
+# yield (tests/resumable-coroutines.test's rc-running-frame-untraced).
+# expect: [0, 6000, 3000]
+import std::coroutine
+import std::int
+import std::list
+import std::str
+
+fn worker(n: int) -> int:
+    big = loop i from 0 to n:
+        std::str::concat("x", std::int::to_string(i))
+    yield 0
+    count = std::list::length(big)
+    other = loop i from 0 to n:
+        std::str::concat("y", std::int::to_string(i))
+    yield count + std::list::length(other)
+    count
+
+coroutine {step: w, first: f} = worker(3000)
+a = w()
+b = w()
+[f, a, b]

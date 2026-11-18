@@ -195,6 +195,19 @@ dict for {name entry} $corpus {
     }
     writeFile [file join $scratch $name.nir] [join $lines \n]\n
 }
+# running-frame's control: the same program with its List dead before the
+# yield (the peak a resumed frame that retains nothing must not exceed).
+set control [string map [list "    yield 0\n    count = std::list::length(big)\n" "    count = std::list::length(big)\n    yield 0\n"] [readFile [file join $tree tests resumable running-frame.bot]]]
+writeFile [file join $scratch running-frame-control.bot] $control
+lassign [run 900 tclsh9.0 [file join $tree main.tcl] -warnings off -backend cranelift -emit-nir [file join $scratch running-frame-control.bot]] status output
+set lines {}
+set inside 0
+foreach line [split $output \n] {
+    if {[string match "nir *" $line]} { set inside 1 }
+    if {[string match "   value: *" $line]} { set inside 0 }
+    if {$inside && ![string match "==*" $line]} { lappend lines $line }
+}
+writeFile [file join $scratch running-frame-control.nir] [join $lines \n]\n
 
 # The value line of DRIVER's run of NIR under ENV (a list of NAME VALUE).
 proc runNir {timeout driver nir env args} {
@@ -262,6 +275,19 @@ proc corpusDetector {driver scratch corpus reference timeout} {
         many {ResumeFrame allocations} {== 20000}
         reclaim {ResumeFrame currentLiveObjects} {== 0}
         precision {String currentLiveObjects} {< 50000}
+    }
+    # A resumed frame retains nothing while its activation runs (I4):
+    # running-frame's peak under GC stress is its control's (the List dead
+    # before the yield), within a quarter.
+    set peaks {}
+    foreach nir [list [file join $scratch running-frame.nir] [file join $scratch running-frame-control.nir]] {
+        lassign [runNir $timeout $driver $nir {BOTLISH_NATIVE_COROUTINE_FUSION 0 BOTLISH_NATIVE_GC_STRESS 1} --alloc summary] status output
+        if {![regexp {peakLiveBytes (\d+)} $output -> peak]} { set peak "" }
+        lappend peaks $peak
+    }
+    lassign $peaks peak reference
+    if {![string is integer -strict $peak] || ![string is integer -strict $reference] || $peak > $reference * 5 / 4} {
+        lappend failures "running-frame: peak live $peak against its control's $reference"
     }
     foreach {name keys check} $evidence {
         lassign [runNir $timeout $driver [file join $scratch $name.nir] {BOTLISH_NATIVE_COROUTINE_FUSION 0} --alloc summary] status output
