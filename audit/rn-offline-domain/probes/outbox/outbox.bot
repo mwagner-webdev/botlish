@@ -1,0 +1,155 @@
+# outbox.bot -- probe A of RN-OFFLINE-DOMAIN-ARCHITECTURE-CENSUS-MILESTONE-1.md:
+# the census's durable mutation model on the existing sqlite package
+# (github.com/mwagner-webdev/sqlite-botpkg 0.1.0), one step per process so
+# that a step can die mid-transaction. Evidence, not the domain package.
+#
+#   outbox DB init                     the schema; pet 1 "Milo"/available,
+#                                      confirmed at remote revision 1
+#   outbox DB edit ID NAME STATUS [crash]
+#                                      a local edit: the pet's row and its
+#                                      outbox intention in one IMMEDIATE
+#                                      transaction; "crash" aborts the
+#                                      process after both writes, before
+#                                      the commit
+#   outbox DB send ID                  select the pet's pending mutation:
+#                                      in_flight, the sent snapshot and the
+#                                      attempt recorded before any byte
+#                                      would leave
+#   outbox DB confirm ID REVISION      the server confirmed the sent snapshot
+#                                      at REVISION: it becomes the base; the
+#                                      intention is dropped, or kept pending
+#                                      against the new base when the pet was
+#                                      edited while the send was in flight
+#   outbox DB recover                  cold start: an in_flight mutation's
+#                                      outcome is unknown (never "unsent")
+#
+# The outbox holds no copy of the edit: it is the durable intention ("pet
+# ID has local changes since base revision R"), and the payload is computed
+# from the pet and its base when it is sent, so repeated edits compact by
+# construction and the base is never touched by a local edit.
+# tools: audit/rn-offline-domain/probes/outbox/run.sh (and inspect.py, the
+# independent reader).
+import sqlite
+import sqlite::failure
+import sqlite::value
+import std::int
+import std::io
+import std::linux::io
+import std::list
+import std::str
+
+extern c fn c_abort named "abort"() -> unit
+
+error Usage
+
+# The schema and the seed, one statement per element (no multi-line
+# String literals).
+private fn schema() -> List[str]:
+    ["create table pets(id integer primary key, name text not null, status text not null check (status in ('available', 'pending', 'sold')));",
+     "create table pet_baselines(id integer primary key references pets(id), name text not null, status text not null, remote_rev integer not null);",
+     "create table outbox(pet_id integer primary key references pets(id), base_rev integer not null, state text not null check (state in ('pending', 'in_flight', 'unknown', 'retry_wait', 'conflicted', 'rejected')), attempts integer not null default 0, mutation_key text not null unique, sent_name text, sent_status text);",
+     "create table meta(key text primary key, value integer not null);",
+     "insert into meta values ('local_revision', 0), ('schema_version', 1);",
+     "insert into pets values (1, 'Milo', 'available');",
+     "insert into pet_baselines values (1, 'Milo', 'available', 1);"]
+
+private fn text(s: str) -> sqlite::value::Value:
+    sqlite::value::text(s)
+
+private fn int(n: int) -> sqlite::value::Value errors sqlite::value::IntegerOutOfRange:
+    sqlite::value::integer_of(n)
+
+# The next local revision, which also names the mutation it makes.
+private fn bump(db: sqlite::Connection, context e: sqlite::Engine) -> int errors sqlite::failure::Failure, sqlite::value::ColumnError:
+    db.execute("update meta set value = value + 1 where key = 'local_revision'", [])
+    row = db.query_one("select value from meta where key = 'local_revision'", []):
+        on sqlite::NoRows:
+            return -1
+    row.integer_at(0)
+
+private fn edit(db: sqlite::Connection, id: int, name: str, status: str, crash: bool, context e: sqlite::Engine) -> int errors sqlite::failure::Failure, sqlite::value::ColumnError, sqlite::value::IntegerOutOfRange:
+    tx = db.begin_immediate()
+    changed = db.execute("update pets set name = ?, status = ? where id = ?", [text(name), text(status), int(id)])
+    revision = db.bump()
+    key = "m-".concat(std::int::to_string(revision))
+    db.execute("insert into outbox(pet_id, base_rev, state, mutation_key) select id, remote_rev, 'pending', ? from pet_baselines where id = ? on conflict(pet_id) do nothing", [text(key), int(id)])
+    if crash:
+        c_abort()
+    tx.commit()
+    changed
+
+# The schema and seed in one transaction.
+private fn init(db: sqlite::Connection, context e: sqlite::Engine) -> int errors sqlite::failure::Failure:
+    tx = db.begin_immediate()
+    loop statement in schema():
+        db.execute_script(statement)
+    tx.commit()
+    schema().length()
+
+private fn send(db: sqlite::Connection, id: int, context e: sqlite::Engine) -> int errors sqlite::failure::Failure, sqlite::value::IntegerOutOfRange:
+    tx = db.begin_immediate()
+    n = db.execute("update outbox set state = 'in_flight', attempts = attempts + 1, sent_name = (select name from pets where id = ?1), sent_status = (select status from pets where id = ?1) where pet_id = ?1 and state = 'pending'", [int(id)])
+    tx.commit()
+    n
+
+private fn confirm(db: sqlite::Connection, id: int, revision: int, context e: sqlite::Engine) -> int errors sqlite::failure::Failure, sqlite::value::ColumnError, sqlite::value::IntegerOutOfRange:
+    tx = db.begin_immediate()
+    db.execute("update pet_baselines set name = (select sent_name from outbox where pet_id = ?1), status = (select sent_status from outbox where pet_id = ?1), remote_rev = ?2 where id = ?1 and exists (select 1 from outbox where pet_id = ?1 and state = 'in_flight')", [int(id), int(revision)])
+    dropped = db.execute("delete from outbox where pet_id = ?1 and state = 'in_flight' and exists (select 1 from pets p join pet_baselines b on p.id = b.id where p.id = ?1 and p.name = b.name and p.status = b.status)", [int(id)])
+    key = "m-".concat(std::int::to_string(db.bump()))
+    db.execute("update outbox set state = 'pending', base_rev = ?2, sent_name = null, sent_status = null, mutation_key = ?3 where pet_id = ?1 and state = 'in_flight'", [int(id), int(revision), text(key)])
+    tx.commit()
+    dropped
+
+private fn recover(db: sqlite::Connection, context e: sqlite::Engine) -> int errors sqlite::failure::Failure:
+    tx = db.begin_immediate()
+    n = db.execute("update outbox set state = 'unknown' where state = 'in_flight'", [])
+    tx.commit()
+    n
+
+private fn number(s: str) -> int errors Usage:
+    std::int::from_string(s):
+        on InvalidIntegerText:
+            fail Usage
+
+private fn step(args: List[str], context e: sqlite::Engine) -> int errors Usage, IndexNotFound, sqlite::failure::Failure, sqlite::value::ColumnError, sqlite::value::IntegerOutOfRange:
+    db = sqlite::open(args.at(1))
+    command = args.at(2)
+    result = if command == "init":
+        db.init()
+    elif command == "edit":
+        db.edit(number(args.at(3)), args.at(4), args.at(5), args.get(6, "") == "crash")
+    elif command == "send":
+        db.send(number(args.at(3)))
+    elif command == "confirm":
+        db.confirm(number(args.at(3)), number(args.at(4)))
+    elif command == "recover":
+        db.recover()
+    else:
+        fail Usage
+    db.close()
+    result
+
+with context std::linux::io::create()
+with context sqlite::engine()
+
+private fn outcome(args: List[str], context e: sqlite::Engine) -> str:
+    r = step(args):
+        on Usage:
+            return "usage"
+        on IndexNotFound:
+            return "missing argument"
+        on sqlite::failure::Failure f:
+            return sqlite::failure::describe(f.info)
+        on sqlite::value::ColumnError:
+            return "column"
+        on sqlite::value::IntegerOutOfRange:
+            return "range"
+    std::int::to_string(r)
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+std::io::print_line(outcome(args)):
+    on std::io::WriteFailed:
+        unit

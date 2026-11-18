@@ -1,0 +1,26 @@
+init -> 7
+    pets=1:Milo/available base=1:Milo/available@1 outbox=[] local_revision=0 integrity=ok
+edit 1 Milo Jr. available -> 1
+    pets=1:Milo Jr./available base=1:Milo/available@1 outbox=[1:pending:base1:att0:m-1:sent=-] local_revision=1 integrity=ok
+edit 1 Milo III pending crash -> died (134)
+    hot-journal pets=1:Milo Jr./available base=1:Milo/available@1 outbox=[1:pending:base1:att0:m-1:sent=-] local_revision=1 integrity=ok
+edit 1 Milo III pending -> 1
+    pets=1:Milo III/pending base=1:Milo/available@1 outbox=[1:pending:base1:att0:m-1:sent=-] local_revision=2 integrity=ok
+send 1 -> 1
+    pets=1:Milo III/pending base=1:Milo/available@1 outbox=[1:in_flight:base1:att1:m-1:sent=Milo III/pending] local_revision=2 integrity=ok
+edit 1 Milo IV pending -> 1
+    pets=1:Milo IV/pending base=1:Milo/available@1 outbox=[1:in_flight:base1:att1:m-1:sent=Milo III/pending] local_revision=3 integrity=ok
+confirm 1 2 -> 0
+    pets=1:Milo IV/pending base=1:Milo III/pending@2 outbox=[1:pending:base2:att1:m-4:sent=-] local_revision=4 integrity=ok
+send 1 -> 1
+    pets=1:Milo IV/pending base=1:Milo III/pending@2 outbox=[1:in_flight:base2:att2:m-4:sent=Milo IV/pending] local_revision=4 integrity=ok
+recover -> 1
+    pets=1:Milo IV/pending base=1:Milo III/pending@2 outbox=[1:unknown:base2:att2:m-4:sent=Milo IV/pending] local_revision=4 integrity=ok
+init -> 7
+    pets=1:Milo/available base=1:Milo/available@1 outbox=[] local_revision=0 integrity=ok
+edit 1 Rex sold -> 1
+    pets=1:Rex/sold base=1:Milo/available@1 outbox=[1:pending:base1:att0:m-1:sent=-] local_revision=1 integrity=ok
+send 1 -> 1
+    pets=1:Rex/sold base=1:Milo/available@1 outbox=[1:in_flight:base1:att1:m-1:sent=Rex/sold] local_revision=1 integrity=ok
+confirm 1 2 -> 1
+    pets=1:Rex/sold base=1:Rex/sold@2 outbox=[] local_revision=2 integrity=ok
