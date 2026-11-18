@@ -1,0 +1,30 @@
+# E16 -- fixed static instances: how could several independent owners
+# share one compiled program without their state mixing? In the C subset,
+# a program whose functions read no top-level value writes no object of
+# static storage duration: each call of PREFIX_run keeps its whole state
+# (contexts, coroutine storage) in its own C frame, so independent runs are
+# independent instances. Compare e16b, where a function reads a top-level
+# value and the generated C keeps it in a file-scope object ("Not
+# reentrant"). The rate is a bounded domain: the native backend keeps an
+# installed context in fixed slots, which hold only small-Int values (an
+# unbounded `int` field is CONTEXT-NATIVE-LOWERING-UNSUPPORTED: a big
+# integer in fixed program data would have no GC root).
+import std::coroutine
+
+type Rate = Int in 0..1000
+
+context struct Meter:
+    rate: Rate
+
+fn tick(start: int, context m: Meter) -> int:
+    total = fold i from 0 to 4 with intermediate acc start:
+        yield acc
+        acc + m.rate
+    total
+
+fn run(context m: Meter) -> int:
+    coroutine {step, first} = tick(1)
+    first + step() + step() + step() + step()
+
+with context Meter {rate: 3}
+run()

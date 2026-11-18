@@ -1,0 +1,30 @@
+# e17-async-output-retention (audit/storage-execution-owner/probes/e17-async-output-retention.bot)
+
+value: interp value 21920; native value 21920
+
+unit <program>
+unit handler<str> -- may suspend
+  suspension call of coroutine#yield at e17-async-output-retention.bot:20:13: live bindings 0, pending operands 0, objects kept 0
+  call of std::int::to_string (str) at e17-async-output-retention.bot:21:19: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at e17-async-output-retention.bot:21:19: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at e17-async-output-retention.bot:22:42: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at e17-async-output-retention.bot:22:9: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+unit empty_queue<generic>
+  call of list (list) at e17-async-output-retention.bot:25:36: result; plan: rejected (not representable: the native list)
+  call of std::mutable_vector::from_list (mutvec) at e17-async-output-retention.bot:25:5: result; plan: rejected (not representable: the native std::mutable_vector::from_list)
+unit drive<int>
+  call of empty_queue (mutvec) at e17-async-output-retention.bot:28:13: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  call of coroutine#create (coroutine) at e17-async-output-retention.bot:29:5: transient; plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (str) at e17-async-output-retention.bot:29:5: transient; plan: rejected (not representable: the native coroutine#start)
+  Req {id} (struct) at e17-async-output-retention.bot:31:25: escapes (carried); plan: rejected (not representable: a struct (only Strings are placed))
+  call of coroutine#resume (str) at e17-async-output-retention.bot:31:20: escapes (carried); plan: rejected (not representable: the native coroutine#resume)
+unit the coroutine of handler constructed at e17-async-output-retention.bot:29:5 -- may suspend
+  suspension call of handler at e17-async-output-retention.bot:29:31: live bindings 0, pending operands 0, objects kept 0
+  call of handler (str) at e17-async-output-retention.bot:29:31: result; plan: rejected (it may suspend: a region is never live across a suspension)
+
+owner classes: transient 3, segment 2, persistent 0, result 3, escapes 4, unknown 0
+native, scratch storage on: heap allocations 4002, heap bytes 138660, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 4002, heap bytes 138660, collections 0
+String sites lowering emitted a placement for: 0

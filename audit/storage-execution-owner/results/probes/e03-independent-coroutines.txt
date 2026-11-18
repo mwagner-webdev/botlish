@@ -1,0 +1,27 @@
+# e03-independent-coroutines (audit/storage-execution-owner/probes/e03-independent-coroutines.bot)
+
+value: interp value 48670; native value 48670
+
+unit <program>
+unit worker<int> -- may suspend
+  suspension call of coroutine#yield at e03-independent-coroutines.bot:12:5: live bindings 2, pending operands 0, objects kept 2
+  suspension call of coroutine#yield at e03-independent-coroutines.bot:14:5: live bindings 2, pending operands 0, objects kept 3
+  call of std::int::to_string (str) at e03-independent-coroutines.bot:11:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 1999]: at most 4 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e03-independent-coroutines.bot:11:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at e03-independent-coroutines.bot:13:13: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 3998]: at most 4 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+unit pair<int>
+  closure (closure) at e03-independent-coroutines.bot:18:5: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e03-independent-coroutines.bot:18:5: transient; plan: rejected (not representable: the native coroutine#create)
+  closure (closure) at e03-independent-coroutines.bot:19:5: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e03-independent-coroutines.bot:19:5: transient; plan: rejected (not representable: the native coroutine#create)
+unit the coroutine of worker constructed at e03-independent-coroutines.bot:18:5 -- may suspend
+  suspension call of worker at e03-independent-coroutines.bot:18:38: live bindings 0, pending operands 0, objects kept 0
+unit the coroutine of worker constructed at e03-independent-coroutines.bot:19:5 -- may suspend
+  suspension call of worker at e03-independent-coroutines.bot:19:38: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 4, segment 0, persistent 3, result 0, escapes 0, unknown 0
+native, scratch storage on: heap allocations 6000, heap bytes 181225, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 6000, heap bytes 181225, collections 0
+String sites lowering emitted a placement for: 0

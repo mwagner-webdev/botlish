@@ -1,0 +1,27 @@
+# E03 -- independently suspended coroutines: two instances of one worker,
+# each keeping its own String across its suspensions, resumed interleaved.
+# While `a` runs, `b`'s kept String must survive, and the reverse: their
+# persistent storage must be distinct, though both come from one
+# construction site's code.
+import std::coroutine
+import std::int
+import std::str
+
+fn worker(tag: int) -> int:
+    kept = std::int::to_string(tag).concat(" kept")
+    yield std::str::length(kept)
+    again = std::int::to_string(tag * 2)
+    yield std::str::length(again)
+    std::str::length(kept) + std::str::length(again)
+
+fn pair(i: int) -> int:
+    coroutine {step: a, first: a0} = worker(i)
+    coroutine {step: b, first: b0} = worker(i + 1000)
+    a1 = a()
+    b1 = b()
+    a2 = a()
+    b2 = b()
+    a0 + b0 + a1 + b1 + a2 + b2
+
+fold i from 0 to 1000 with intermediate acc 0:
+    acc + pair(i)

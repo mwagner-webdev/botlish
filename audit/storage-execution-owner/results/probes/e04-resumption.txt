@@ -1,0 +1,23 @@
+# e04-resumption (audit/storage-execution-owner/probes/e04-resumption.bot)
+
+value: interp value 49468; native value 49468
+
+unit <program>
+unit scan<int> -- may suspend
+  suspension call of coroutine#yield at e04-resumption.bot:14:9: live bindings 4, pending operands 0, objects kept 2
+  call of std::int::to_string (str) at e04-resumption.bot:11:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 999]: at most 3 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e04-resumption.bot:11:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at e04-resumption.bot:13:17: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 1002]: at most 4 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e04-resumption.bot:13:17: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+unit drive<int>
+  closure (closure) at e04-resumption.bot:20:9: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e04-resumption.bot:20:9: transient; plan: rejected (not representable: the native coroutine#create)
+unit the coroutine of scan constructed at e04-resumption.bot:20:9 -- may suspend
+  suspension call of scan at e04-resumption.bot:20:35: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 2, segment 2, persistent 2, result 0, escapes 0, unknown 0
+native, scratch storage on: heap allocations 10000, heap bytes 307936, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 10000, heap bytes 307936, collections 0
+String sites lowering emitted a placement for: 0

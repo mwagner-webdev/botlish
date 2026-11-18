@@ -1,0 +1,61 @@
+# E07 -- an HTTP-like worker: p13's handler (audit/storage-static-reuse/
+# cases/p13-request-handler.bot) inside a persistent worker coroutine. Per
+# request the worker parses a request line handed to it on resumption,
+# suspends once more to receive the request body, then builds the response
+# from the parsed path (kept across that suspension) and the body, and
+# hands the response's length out. What could one worker share across its
+# sequential requests, and what must survive the mid-request suspension?
+import std::coroutine
+import std::int
+import std::str
+
+error BadRequest
+
+struct Request:
+    verb: str
+    path: str
+    id: int
+
+struct Input:
+    line: str
+    body: str
+
+fn parse(line: str, id: int) -> Request errors BadRequest:
+    n = std::str::length(line)
+    if n < 14:
+        fail BadRequest
+    verb = std::str::substring(line, 0, 3):
+        on LowerUnderrun:
+            fail BadRequest
+        on UpperOverrun:
+            fail BadRequest
+    path = std::str::substring(line, 4, n - 9):
+        on LowerUnderrun:
+            fail BadRequest
+        on UpperOverrun:
+            fail BadRequest
+    Request {verb: verb, path: path, id: id}
+
+fn respond(r: Request, body: str) -> str:
+    json = "{\"path\": \"".concat(r.path).concat("\", \"body\": \"").concat(body).concat("\"}")
+    "HTTP/1.1 200 OK\r\ncontent-length: ".concat(std::int::to_string(std::str::length(json))).concat("\r\n\r\n").concat(json)
+
+fn worker(first: int, resume Input) -> int:
+    fold id from 0 to 1000000 with intermediate served first:
+        head = yield served
+        r = parse(head.line, id):
+            on BadRequest:
+                continue
+        rest = yield 0
+        served + std::str::length(respond(r, rest.body))
+
+fn raw(i: int) -> str:
+    "GET /items/".concat(std::int::to_string(i)).concat(" HTTP/1.1")
+
+fn drive(n: int) -> int:
+    coroutine {step, first} = worker(0)
+    fold i from 0 to n with intermediate acc first:
+        step(Input {line: raw(i), body: ""})
+        acc + step(Input {line: "", body: std::int::to_string(i * 7)})
+
+drive(1000)

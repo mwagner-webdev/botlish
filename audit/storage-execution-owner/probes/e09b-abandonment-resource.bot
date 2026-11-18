@@ -1,0 +1,27 @@
+# E09b -- early abandonment of an execution that owns a resource: the
+# worker holds a `Lease` across its suspensions, so the program unwinds
+# (hir::affine::Unwinds): handles are scoped, and releasing the suspended
+# worker abandons it -- its pending yield fails with coroutine#abandoned and
+# only its frames' release pads run, so the lease's cleanup runs exactly
+# once, at abandonment. Storage an owner region held for the worker would
+# be released by the same abandonment.
+import e09_lease
+import std::coroutine
+import std::int
+import std::str
+
+fn worker(seed: int) -> int:
+    lease = e09_lease::take(seed)
+    kept = std::int::to_string(seed).concat(" kept")
+    yield std::str::length(kept)
+    yield 1
+    e09_lease::give_back(lease)
+    std::str::length(kept)
+
+fn drive(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        coroutine {step, first} = worker(i)
+        second = step()
+        acc + first + second
+
+drive(1000)

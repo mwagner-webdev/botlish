@@ -1,0 +1,15 @@
+# E11 -- a bounded String: can a sufficient byte size be derived? `i` is
+# proven to lie in [0, 9999] (a counted fold over a constant range), so
+# its decimal text is at most 4 ASCII bytes, and `label`'s at most 4 + 6.
+# The range analysis proves the Int range; no analysis turns it into a
+# byte count today (the tool reports both).
+import std::int
+import std::str
+
+fn label(i: int) -> int:
+    digits = std::int::to_string(i)
+    tagged = digits.concat(" items")
+    std::str::length(tagged)
+
+fold i from 0 to 10000 with intermediate acc 0:
+    acc + label(i)

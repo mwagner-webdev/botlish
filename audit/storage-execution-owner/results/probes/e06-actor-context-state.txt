@@ -1,0 +1,60 @@
+# e06-actor-context-state (audit/storage-execution-owner/probes/e06-actor-context-state.bot)
+
+value: interp value {[200, 19908, 201]}; native value {[200, 19908, 201]}
+
+unit <program>
+  call of std::event_loop::create (struct) at e06-actor-context-state.bot:59:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at e06-actor-context-state.bot:59:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of std::event_loop::deterministic::create (struct) at e06-actor-context-state.bot:60:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at e06-actor-context-state.bot:60:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of std::actor::create (struct) at e06-actor-context-state.bot:61:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at e06-actor-context-state.bot:61:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of list (list) at e06-actor-context-state.bot:62:63: escapes (context); plan: rejected (not representable: the native list)
+  call of std::mutable_vector::from_list (mutvec) at e06-actor-context-state.bot:62:32: escapes (context); plan: rejected (not representable: the native std::mutable_vector::from_list)
+  Journal {entries} (struct) at e06-actor-context-state.bot:62:14: transient; plan: rejected (not representable: a struct (only Strings are placed))
+  call of mutable_vector#share (struct) at e06-actor-context-state.bot:62:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (list) at e06-actor-context-state.bot:63:1: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of list (list) at e06-actor-context-state.bot:65:9: result; plan: rejected (not representable: the native list)
+  call of list (list) at e06-actor-context-state.bot:67:9: result; plan: rejected (not representable: the native list)
+  call of list (list) at e06-actor-context-state.bot:69:9: result; plan: rejected (not representable: the native list)
+unit note<int>
+unit counter<int, std::actor::Inbox[int]> -- may suspend
+  suspension call of std::actor::listen at e06-actor-context-state.bot:23:10: live bindings 1, pending operands 0, objects kept 0
+  suspension call of std::actor::receive at e06-actor-context-state.bot:28:13: live bindings 4, pending operands 0, objects kept 3
+  call of std::actor::listen (struct) at e06-actor-context-state.bot:23:10: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at e06-actor-context-state.bot:25:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at e06-actor-context-state.bot:26:14: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [7, 7] {7}: at most 1 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e06-actor-context-state.bot:26:14: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::receive (payload) at e06-actor-context-state.bot:28:13: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at e06-actor-context-state.bot:33:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit feeder<int, std::actor::Address[int]> -- may suspend
+  suspension call of std::actor::deliver at e06-actor-context-state.bot:37:9: live bindings 3, pending operands 0, objects kept 0
+  call of std::actor::exit (struct) at e06-actor-context-state.bot:39:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><int>
+  call of std::actor::open (struct) at e06-actor-context-state.bot:42:32: escapes (callee error); plan: rejected (not confined to its innermost region)
+  closure (closure) at e06-actor-context-state.bot:44:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e06-actor-context-state.bot:44:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at e06-actor-context-state.bot:44:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at e06-actor-context-state.bot:45:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  closure (closure) at e06-actor-context-state.bot:48:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e06-actor-context-state.bot:48:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at e06-actor-context-state.bot:48:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at e06-actor-context-state.bot:49:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::run<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at e06-actor-context-state.bot:51:5: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::shutdown<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at e06-actor-context-state.bot:52:5: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::take_outcomes (list) at e06-actor-context-state.bot:54:16: escapes (error); plan: rejected (not confined to its innermost region)
+  loop (list) at e06-actor-context-state.bot:55:11: result; plan: rejected (not representable: a list (only Strings are placed))
+  call of std::list::append (list) at e06-actor-context-state.bot:57:5: result; plan: rejected (not representable: the native std::list::append)
+unit the coroutine of counter constructed at e06-actor-context-state.bot:44:9 -- may suspend
+  suspension call of counter at e06-actor-context-state.bot:44:35: live bindings 0, pending operands 0, objects kept 0
+  call of counter (struct) at e06-actor-context-state.bot:44:35: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of feeder constructed at e06-actor-context-state.bot:48:9 -- may suspend
+  suspension call of feeder at e06-actor-context-state.bot:48:35: live bindings 0, pending operands 0, objects kept 0
+  call of feeder (struct) at e06-actor-context-state.bot:48:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+
+owner classes: transient 1, segment 1, persistent 3, result 10, escapes 22, unknown 0
+native, scratch storage on: heap allocations 956, heap bytes 60691, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 956, heap bytes 60691, collections 0
+coroutines: stacksMapped 4, stacksReused 0, released 4, releasedSuspended 0, sweptSuspended 0
+String sites lowering emitted a placement for: 0
