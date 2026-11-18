@@ -124,7 +124,7 @@ const fn address_word_words(word: super::value::AddressWord) -> &'static [u64] {
 const ADDRESS_WORD_MARK: u64 = u64::from_le_bytes(*b"CPTRWORD");
 
 /// The fingerprint's words before the helpers' (`abi_words`).
-const ABI_SCALAR_WORDS: [u64; 27] = {
+const ABI_SCALAR_WORDS: [u64; 28] = {
     use super::{bytesobj, strobj, value, vm};
     [
         std::mem::size_of::<Vm>() as u64,
@@ -132,8 +132,6 @@ const ABI_SCALAR_WORDS: [u64; 27] = {
         vm::VM_SS_LIMIT_OFFSET as u64,
         vm::VM_CONSTS_OFFSET as u64,
         vm::VM_ALLOC_SITE_OFFSET as u64,
-        vm::VM_NATIVE_ROOTS_PTR_OFFSET as u64,
-        vm::VM_NATIVE_ROOTS_LEN_OFFSET as u64,
         vm::VM_STATICS_OFFSET as u64,
         // Where generated code finds the running Vm's context area
         // (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md): code of a runtime that
@@ -158,6 +156,13 @@ const ABI_SCALAR_WORDS: [u64; 27] = {
         // frame walk, or the shadow stack): a `fallback-roots` build's code
         // never runs on a runtime of the other plan.
         super::framewalk::NATIVE_FRAME_ROOTS as u64,
+        // The general coroutine mechanism the code was generated for
+        // (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md): code
+        // lowered to resumable frames runs only on a runtime that runs them,
+        // with the frame layout its frame operations write.
+        super::resumable::RESUMABLE as u64,
+        super::resumable::FRAME_CALLEE_OFFSET as u64,
+        super::resumable::FRAME_SLOTS_OFFSET as u64,
         // The program record's layout (runtime::program's LinkedProgram):
         // a runtime that reads the record's words elsewhere -- its startup
         // policy among them -- refuses it here, before it reads them.

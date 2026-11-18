@@ -93,6 +93,32 @@ proc cfClifHelpers {text} {
     return [lsort -unique $used]
 }
 
+# HELPERS, the general mechanism's yield helper as the stackful runtime
+# names it (rt_co_yield), in the driver's own mechanism's terms: a resumable
+# yield is its two halves, rt_co_suspend and rt_co_msg
+# (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md). Sorted.
+proc cfGeneralHelpers {helpers} {
+    if {[testConstraint nativeResumableCoroutines] && "rt_co_yield" in $helpers} {
+        set helpers [concat [lsearch -all -inline -not -exact $helpers rt_co_yield] rt_co_suspend rt_co_msg]
+    }
+    return [lsort $helpers]
+}
+
+# The NIR coroutine operations OPS (`op coNAME` words) as the stackful
+# runtime has them: the resumable lowering writes each `coyield` as its two
+# halves, `cosuspend` and `comsg`.
+proc cfStackfulOps {ops} {
+    set out {}
+    foreach op $ops {
+        switch -- $op {
+            {op cosuspend} { lappend out {op coyield} }
+            {op comsg} {}
+            default { lappend out $op }
+        }
+    }
+    return [lsort $out]
+}
+
 proc cfGcStress {script} {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
@@ -175,22 +201,33 @@ test cf-nir-no-coroutine-operations {the fused consumer's NIR has no coroutine o
     }
 } -cleanup {unset -nocomplain nir before fused ops failed boxes made} -result {{{cocreate corelease coresume0 costart} {cofailed coresume0} 1} {{cocreate corelease coresume0 costart} {cofailed coresume0} 1} {{cocreate corelease coresume coresume0 costart} {cofailed coresume0} 1} {{cocreate corelease coresume costart} {cofailed coresume0} 1}}
 
-test cf-clif-no-coroutine-helpers {natively the fused program refers to no coroutine helper but the failure path's (rt_co_failed, rt_co_resume0); the general program refers to create, start, resume, release and (its producers) yield} -constraints nativeCoroutines -body {
+test cf-clif-no-coroutine-helpers {natively the fused program refers to no coroutine helper but the failure path's (rt_co_failed, rt_co_resume0); the general program refers to create, start, resume, release and (its producers) yield -- a resumable yield's two halves on the resumable mechanism (cfGeneralHelpers)} -constraints nativeCoroutines -body {
     lmap name {lcg grid tokens utf8} {
         set text [cfText $name]
         list [cfClifHelpers $text] [withoutCoroutineFusion {cfClifHelpers $text}]
     }
-} -cleanup {unset -nocomplain text} -result {{{rt_co_failed rt_co_resume0} {rt_co_create rt_co_release rt_co_resume0 rt_co_start rt_co_yield}} {{rt_co_failed rt_co_resume0} {rt_co_create rt_co_release rt_co_resume0 rt_co_start rt_co_yield}} {{rt_co_failed rt_co_resume0} {rt_co_create rt_co_release rt_co_resume rt_co_resume0 rt_co_start rt_co_yield}} {{rt_co_failed rt_co_resume0} {rt_co_create rt_co_release rt_co_resume rt_co_start rt_co_yield}}}
+} -cleanup {unset -nocomplain text} -result [list \
+    [list {rt_co_failed rt_co_resume0} [cfGeneralHelpers {rt_co_create rt_co_release rt_co_resume0 rt_co_start rt_co_yield}]] \
+    [list {rt_co_failed rt_co_resume0} [cfGeneralHelpers {rt_co_create rt_co_release rt_co_resume0 rt_co_start rt_co_yield}]] \
+    [list {rt_co_failed rt_co_resume0} [cfGeneralHelpers {rt_co_create rt_co_release rt_co_resume rt_co_resume0 rt_co_start rt_co_yield}]] \
+    [list {rt_co_failed rt_co_resume0} [cfGeneralHelpers {rt_co_create rt_co_release rt_co_resume rt_co_start rt_co_yield}]]]
 
-test cf-no-coroutine-at-run-time {a fused run allocates no coroutine and maps, reuses and releases no stack (the allocation report has no coroutine section); the general runtime allocates one coroutine per construction and runs each on a stack} -constraints nativeCoroutines -body {
+test cf-no-coroutine-at-run-time {a fused run allocates no coroutine and maps, reuses and releases no stack and makes no frame (the allocation report has no coroutine section); the general mechanism allocates one coroutine per construction and runs each on a stack (stackful: the stacks mapped) or on frames (resumable: frames made, no stack mapped)} -constraints nativeCoroutines -body {
     lmap name {lcg grid tokens utf8} {
         set hir [surface::compile [cfText $name] -warnings off]
         set fused [native::allocationReport $hir summary]
         set general [withoutCoroutineFusion {native::allocationReport $hir summary}]
-        list [dict exists $fused byKind Coroutine] [dict exists $fused coroutines] \
-            [dict get $general byKind Coroutine allocations] [dict get $general coroutines stacksMapped]
+        set mechanism [if {[testConstraint nativeStackfulCoroutines]} {
+            dict get $general coroutines stacksMapped
+        } else {
+            list frames [expr {[dict get $general byKind ResumeFrame allocations] > 0}] stacks [dict get $general coroutines stacksMapped]
+        }]
+        list [dict exists $fused byKind Coroutine] [dict exists $fused coroutines] [dict exists $fused byKind ResumeFrame] \
+            [dict get $general byKind Coroutine allocations] $mechanism
     }
-} -cleanup {unset -nocomplain hir fused general} -result {{0 0 1 1} {0 0 1 1} {0 0 11 2} {0 0 6 1}}
+} -cleanup {unset -nocomplain hir fused general mechanism} -result [lmap {n stacks} {1 1 1 1 11 2 6 1} {
+    list 0 0 0 $n [expr {[testConstraint nativeStackfulCoroutines] ? $stacks : {frames 1 stacks 0}}]
+}]
 
 test cf-failure-allocates-the-cache {a fused coroutine that fails allocates exactly one object, its cached failure (cofailed: the two failing runs of case-failure, two objects), and still maps no stack} -constraints nativeCoroutines -body {
     set hir [surface::compile [cfText case-failure] -warnings off]
@@ -206,11 +243,11 @@ test cf-fused-nir-reads-back {the fused NIR the driver prints is valid NIR: it r
     }
 } -cleanup {unset -nocomplain hir text} -result {{ok 1} {ok 1} {ok 1}}
 
-test cf-fusion-off {BOTLISH_NATIVE_COROUTINE_FUSION=0 turns the pass off: no site is considered, and the program keeps every coroutine operation the lowering wrote} -body {
+test cf-fusion-off {BOTLISH_NATIVE_COROUTINE_FUSION=0 turns the pass off: no site is considered, and the program keeps every coroutine operation the lowering wrote (on the resumable mechanism each yield as its two halves: cfStackfulOps)} -body {
     set hir [surface::compile [cfText lcg] -warnings off]
     set ops {nir fused}
     foreach text [list [native::nir $hir] [withoutCoroutineFusion {native::fusedNir $hir}]] {
-        lappend ops [lsort [regexp -all -inline {op co[a-z0-9]+} $text]]
+        lappend ops [cfStackfulOps [regexp -all -inline {op co[a-z0-9]+} $text]]
     }
     list [withoutCoroutineFusion {native::fusion $hir}] [expr {[lindex $ops 2] eq [lindex $ops 3]}] [llength [lindex $ops 2]]
 } -cleanup {unset -nocomplain hir ops text} -result {{} 1 9}

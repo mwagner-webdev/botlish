@@ -743,7 +743,7 @@ test aotr-no-jit-driver {the driver built without its JIT: capabilities jit 0; i
     lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_BIN $aotrNoJitDriver] -backend cranelift $program] - jerr jstatus
     list $capabilities $refused [string match "*function *" $clif] [string equal $out [aotrPrinted x]] $status \
         $jstatus [string match "*(NATIVE UNSUPPORTED jit)*" $jerr] [aotrLeft $temp]
-} -cleanup {file delete -force $dir} -result [list "jit 0\naot-run 1" {1 1 1 1} 1 1 0 1 1 {}]
+} -cleanup {file delete -force $dir} -result [list "jit 0\naot-run 1\nroots native-frame\ncoroutines stackful" {1 1 1 1} 1 1 0 1 1 {}]
 
 # --- the command line ---------------------------------------------------------------
 

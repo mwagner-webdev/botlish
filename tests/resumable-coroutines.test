@@ -1,0 +1,250 @@
+# resumable-coroutines.test -- WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+# MILESTONE-1.md: general coroutines as resumable heap frames
+# (codegen/resumable.rs, runtime/resumable.rs) and the ShadowOnly root plan
+# (codegen/roots.rs), the native backend's mechanism where no stack switch
+# exists -- the `fallback-roots` build, and WebAssembly next.
+#
+# * Semantics on every backend and by the driver's own coroutine mechanism
+#   (nativeCoroutines: stackful on a shipped driver, resumable on a
+#   `fallback-roots` one): the corpus of tests/resumable -- interleaved and
+#   escaping handles, nested and deep yields, errors, cleanup order (cleanups
+#   that allocate and re-enter Botlish code), abandonment, contexts across
+#   suspension, scalar parameters and results, capturing yielding closures
+#   -- each file's `# expect:`
+#   value (the reference interpreter's) on interp, compile,
+#   cranelift-generic, cranelift and cranelift-unfused (fusion off: every
+#   coroutine on the general mechanism), and natively under GC stress.
+# * The ShadowOnly root plan's leaf re-entry regression
+#   (audit/wasm-architecture/corpus/leaf-reentry.bot: a leaf's roots lost
+#   while an operation re-entered Botlish code), plain and under GC stress,
+#   on both root plans.
+# * The resumable mechanism's own evidence (nativeResumableCoroutines): what
+#   the driver says it is, the lowered NIR (no `coyield`, a frame shape per
+#   yielding function, validated and read back), frames per resume, the
+#   declared recognizer's tail recursion, reclamation, precision at a
+#   suspension point, and the invariants a code generation bug would break.
+#
+# canary: covers native/src/codegen/resumable.rs native/src/runtime/resumable.rs native/src/runtime/capabilities.rs
+# canary: covers native/src/codegen/roots.rs native/src/runtime/coroutine.rs tests/resumable/*
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+# The text of tests/resumable/NAME.bot (tests/resources/coro.bot for coro).
+proc rcPath {name} {
+    if {$name eq "coro"} {
+        return [file join $::projectRoot tests resources coro.bot]
+    }
+    return [file join $::projectRoot tests resumable $name.bot]
+}
+
+proc rcText {name} {
+    set f [open [rcPath $name] r]
+    fconfigure $f -encoding utf-8
+    set text [read $f]
+    close $f
+    return $text
+}
+
+# The HIR of corpus file NAME, compiled beside its directory's modules.
+proc rcHir {name} {
+    return [surface::readProgramFile [rcPath $name] -warnings off]
+}
+
+# The value NAME's `# expect:` line states (the reference interpreter's);
+# tests/resources/coro.bot, tests/resources.test's own program, is not
+# edited: its value is the one resources.test states.
+proc rcExpect {name} {
+    if {$name eq "coro"} {
+        return {[101, 102, 100, 111, 119, 110, 300, 401, 400, 500, 599, 600, 601]}
+    }
+    regexp -line {^# expect: (.*)$} [rcText $name] -> expect
+    return $expect
+}
+
+# NAME's outcome (without the log) on BACKEND.
+proc rcOutcome {backend name} {
+    return [lrange [outcomeUnderHir $backend [rcHir $name]] 0 end-1]
+}
+
+# Whether NAME has its expected value on every backend in BACKENDS.
+proc rcAgrees {name backends} {
+    set want [list value [rcExpect $name]]
+    set got [lmap b $backends {rcOutcome $b $name}]
+    if {[lsort -unique $got] ne [list $want]} {
+        return "$name: [lmap b $backends o $got {list $b $o}]"
+    }
+    return ok
+}
+
+proc rcGcStress {script} {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set saved [expr {$had ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        if {$had} { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved } else { unset ::env(BOTLISH_NATIVE_GC_STRESS) }
+    }
+}
+
+# The allocation report of corpus file NAME on the general mechanism (fusion
+# off: the frames under test are the general mechanism's).
+proc rcReport {name} {
+    return [withoutCoroutineFusion {native::allocationReport [rcHir $name] summary}]
+}
+
+# Kind KIND's counter KEY in REPORT (0 when the report has no such kind).
+proc rcKind {report kind key} {
+    if {![dict exists $report byKind $kind]} {
+        return 0
+    }
+    return [dict get $report byKind $kind $key]
+}
+
+# The resumable lowering's report of corpus file NAME, fusion off.
+proc rcLowered {name} {
+    return [withoutCoroutineFusion {native::resumable [rcHir $name]}]
+}
+
+# The NIR every native consumer compiles for NAME, fusion off.
+proc rcFusedNir {name} {
+    return [withoutCoroutineFusion {native::fusedNir [rcHir $name]}]
+}
+
+# The corpus files every backend runs at their own size (the interpreter
+# keeps up with them), and those only the native backends run (a million
+# resumes, ten thousand suspended coroutines, collections over hundreds of
+# thousands of objects: minutes on the reference interpreter, which agreed
+# when their `# expect:` lines were recorded).
+set ::rcEverywhere {interleaved nested escape errors cleanup-gc contexts deep scalars closures reclaim tail-calls running-frame leaf-reentry coro}
+set ::rcNativeOnly {retention generator many precision loop-calls}
+
+# ---------------------------------------------------------------------------
+# Semantics, by the driver's own mechanism
+
+test rc-corpus-agree {every corpus file has its expected (the interpreter's) value on interp, compile, cranelift-generic, cranelift and cranelift-unfused} -constraints nativeCoroutines -body {
+    lmap name $::rcEverywhere {
+        rcAgrees $name {interp compile cranelift-generic cranelift cranelift-unfused}
+    }
+} -result [lrepeat 14 ok]
+
+test rc-corpus-agree-native {the large corpus files have their expected values natively, fused and on the general mechanism} -constraints nativeCoroutines -body {
+    lmap name $::rcNativeOnly {
+        rcAgrees $name {cranelift cranelift-unfused}
+    }
+} -result {ok ok ok ok ok}
+
+test rc-corpus-gc-stress {under GC stress (a collection at every allocation), every corpus file but the quadratic precision probe has its expected value natively, on the general mechanism and fused} -constraints nativeCoroutines -body {
+    rcGcStress {
+        lmap name [concat $::rcEverywhere {retention many}] {
+            rcAgrees $name {cranelift-unfused cranelift}
+        }
+    }
+} -result [lrepeat 16 ok]
+
+test rc-dfa-tail-agree {a declared recognizer fed one symbol per resume (its lowering yields, then calls itself in tail position): the interpreter's value at 1,000 symbols, and the native value at 1,000,000, fused and not} -constraints nativeCoroutines -body {
+    set small [string map {count(1000000) count(1000)} [rcText dfa-tail]]
+    list [sourceAgree $small {interp cranelift-unfused cranelift}] [rcOutcome cranelift dfa-tail] [rcOutcome cranelift-unfused dfa-tail]
+} -cleanup {unset -nocomplain small} -result {{value {[1, 0]}} {value {[1, 0]}} {value {[1, 0]}}}
+
+# ---------------------------------------------------------------------------
+# The ShadowOnly root plan's leaf re-entry (invariant I9)
+
+test rc-leaf-reentry {a function with no Botlish call keeps a List live across an operation that runs Botlish code (std::mutable_array::generate's factory, itself a leaf with a root slot that allocates): 340, plainly and in five runs under GC stress, on either root plan} -constraints nativeCoroutines -body {
+    set plain [rcOutcome cranelift leaf-reentry]
+    set stressed [rcGcStress {lsort -unique [lmap i {1 2 3 4 5} {rcOutcome cranelift leaf-reentry}]}]
+    list $plain $stressed
+} -cleanup {unset -nocomplain plain stressed} -result {{value 340} {{value 340}}}
+
+test rc-leaf-reentry-shadow-frames {on the ShadowOnly plan every function with a root slot keeps it in the shadow stack, leaf or not -- nothing is published anywhere else -- and a function without one reserves nothing} -constraints nativeShadowOnlyRoots -body {
+    set report [native::roots [rcHir leaf-reentry]]
+    set rows {}
+    foreach block [split [string map [list \n\n \x01] $report] \x01] {
+        if {![regexp {function \d+ "([^"]*)"} $block -> name]} continue
+        regexp {shadow slots: (\d+)} $block -> slots
+        regexp -line {storage: (.*)$} $block -> storage
+        lappend rows [list $name $storage [expr {$slots > 0}]]
+    }
+    set rows
+} -cleanup {unset -nocomplain report rows block name slots storage} -result {{<program> {runtime stack} 1} {label {runtime stack} 1} {outer {runtime stack} 1}}
+
+# ---------------------------------------------------------------------------
+# The resumable mechanism's own evidence
+
+test rc-capabilities {the driver says its runtime keeps roots in the shadow stack and runs coroutines as resumable frames: what a test lane checks it exercises, never a job's name} -constraints nativeResumableCoroutines -body {
+    list [native::driverCapability roots] [native::driverCapability coroutines] [testConstraint nativeStackfulCoroutines]
+} -result {shadow-only resumable 0}
+
+test rc-nir-lowered {the lowered NIR: no coyield left, a frame shape on every yielding function (its hidden frame parameter last), suspensions as frsave/frrestore -- and it reads back and validates: what a WebAssembly backend consumes} -constraints nativeResumableCoroutines -body {
+    set nir [rcFusedNir nested]
+    set shapes [regexp -all -inline -line {^func \d+ "([^"]*)" params=(\d+) .*resumable="(\d+ \d+)"} $nir]
+    set lowered [lmap {- name params shape} $shapes {list $name $params $shape}]
+    set check [native::Driver check $nir]
+    list [regexp {op coyield} $nir] $lowered [regexp -all {\mfrsave\M} $nir] [regexp -all {\mfrrestore\M} $nir] $check
+} -cleanup {unset -nocomplain nir shapes lowered check} -result {0 {{leaf 2 {1 0}} {middle 2 {2 0}} {down 3 {1 0}} {driver 2 {2 2}} {{} 1 {0 0}} {{} 1 {0 0}}} 9 9 ok}
+
+test rc-lowering-report {the lowering's census of the corpus: yields, yielding calls, self tail calls reusing their frame, scalar results boxed} -constraints nativeResumableCoroutines -body {
+    lmap name {nested deep scalars dfa-tail tail-calls} {
+        set r [rcLowered $name]
+        list $name [dict get $r yields] [dict get $r calls] [dict get $r tails] [dict get $r boxed]
+    }
+} -cleanup {unset -nocomplain r} -result {{nested 3 6 0 0} {deep 2 5 1 0} {scalars 3 9 0 1} {dfa-tail 2 4 2 0} {tail-calls 3 3 2 0}}
+
+test rc-frames-per-resume {a generator resumed 1,000,000 times reuses its activations' frames: two frames in all, however often it suspends} -constraints nativeResumableCoroutines -body {
+    set report [rcReport generator]
+    list [rcKind $report ResumeFrame allocations] [dict get $report coroutines stacksMapped]
+} -cleanup {unset -nocomplain report} -result {2 0}
+
+test rc-dfa-tail-frames {a declared recognizer's yielding tail recursion reuses the finished activation's frame: a handful of frames for 1,000,000 symbols, never one per symbol} -constraints nativeResumableCoroutines -body {
+    set frames [rcKind [rcReport dfa-tail] ResumeFrame allocations]
+    expr {$frames > 0 && $frames < 16 ? "few" : $frames}
+} -cleanup {unset -nocomplain frames} -result few
+
+test rc-loop-call-frames {a yielding call made anew in every iteration (100,000 activations of one callee, 600 more at two sites calling one function) reuses the frame of the activation that returned before it: a handful of frames, never one per call -- an event loop's yield_now per dispatch allocates nothing} -constraints nativeResumableCoroutines -body {
+    set frames [rcKind [rcReport loop-calls] ResumeFrame allocations]
+    expr {$frames > 0 && $frames < 16 ? "few" : $frames}
+} -cleanup {unset -nocomplain frames} -result few
+
+test rc-tail-call-frames {a loop written as yielding tail recursion -- 300 iterations each calling a yielding function and yielding, 300 more only yielding -- continues one activation per loop: its own frame and its call site's recycled callee frame, never a frame per iteration} -constraints nativeResumableCoroutines -body {
+    set frames [rcKind [rcReport tail-calls] ResumeFrame allocations]
+    expr {$frames > 0 && $frames < 16 ? "few" : $frames}
+} -cleanup {unset -nocomplain frames} -result few
+
+test rc-running-frame-untraced {a resumed frame retains nothing while its activation runs (I4): under GC stress, a List saved by a yield and dead soon after the resume does not raise the peak live heap while an equally large List is built -- the peak is the one of the same program with the List dead before the yield} -constraints nativeResumableCoroutines -body {
+    set text [rcText running-frame]
+    set control [string map [list "    yield 0\n    count = std::list::length(big)\n" "    count = std::list::length(big)\n    yield 0\n"] $text]
+    if {$control eq $text} { error "the control program was not derived" }
+    set peaks [rcGcStress {
+        list [dict get [rcReport running-frame] total peakLiveBytes] \
+            [dict get [withoutCoroutineFusion {native::allocationReport [surface::compile $control -warnings off] summary}] total peakLiveBytes]
+    }]
+    lassign $peaks peak reference
+    expr {$peak <= $reference * 5 / 4 ? "untraced" : $peaks}
+} -cleanup {unset -nocomplain text control peaks peak reference} -result untraced
+
+test rc-many-suspended {10,000 coroutines suspended at once hold two frames each -- suspended state scales with live activations, no stack is ever made} -constraints nativeResumableCoroutines -body {
+    set report [rcReport many]
+    list [rcKind $report ResumeFrame allocations] [dict get $report coroutines stacksMapped] [dict get $report coroutines released]
+} -cleanup {unset -nocomplain report} -result {20000 0 10000}
+
+test rc-reclaimed {coroutines released at their last use while suspended, completed and dropped at scope end leave no frame live once collections run (I8), and none is left to a sweep} -constraints nativeResumableCoroutines -body {
+    set reports [list [rcReport reclaim] [rcGcStress {rcReport reclaim}]]
+    lmap report $reports {
+        list [rcKind $report ResumeFrame allocations] [rcKind $report ResumeFrame currentLiveObjects] \
+            [dict get $report coroutines releasedSuspended] [dict get $report coroutines sweptSuspended]
+    }
+} -cleanup {unset -nocomplain reports report} -result {{9000 0 2000 0} {9000 0 2000 0}}
+
+test rc-precision {a List dead at the suspension point is not kept by the suspended frame (I4): of 200,000 Strings, only the main program's own churn is live after its collections} -constraints nativeResumableCoroutines -body {
+    set report [rcReport precision]
+    set live [rcKind $report String currentLiveObjects]
+    list [rcKind $report ResumeFrame allocations] [expr {$live < 50000 ? "precise" : $live}]
+} -cleanup {unset -nocomplain report live} -result {2 precise}
+
+cleanupTests

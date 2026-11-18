@@ -1,0 +1,20 @@
+# e16b-static-binding (audit/storage-execution-owner/probes/e16b-static-binding.bot)
+
+value: interp value 35; native value 35
+
+unit <program>
+  closure (closure) at e16b-static-binding.bot:9:8: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  closure (closure) at e16b-static-binding.bot:15:1: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e16b-static-binding.bot:15:1: transient; plan: rejected (not representable: the native coroutine#create)
+unit tick<generic> -- may suspend
+  suspension call of coroutine#yield at e16b-static-binding.bot:11:9: live bindings 2, pending operands 0, objects kept 0
+unit tick<int> -- may suspend
+  suspension call of coroutine#yield at e16b-static-binding.bot:11:9: live bindings 2, pending operands 0, objects kept 0
+unit the coroutine of tick constructed at e16b-static-binding.bot:15:1 -- may suspend
+  suspension call of tick at e16b-static-binding.bot:15:27: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 3, segment 0, persistent 0, result 0, escapes 0, unknown 0
+native, scratch storage on: heap allocations 3, heap bytes 192, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 3, heap bytes 192, collections 0
+coroutines: stacksMapped 1, stacksReused 0, released 1, releasedSuspended 0, sweptSuspended 0
+String sites lowering emitted a placement for: 0

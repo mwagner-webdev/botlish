@@ -1,0 +1,79 @@
+# Cleanups that allocate -- a collection at every allocation under GC
+# stress -- and re-enter Botlish code through a runtime operation (res.bot's
+# release: a MutableArray's factory), run by the frames of coroutines
+# suspended two activations deep that complete, fail, and are abandoned
+# (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md, section 7). The
+# Log is the releases (each id followed by what its cleanup built, 20) and
+# notes in the order they ran: the reference interpreter's order on every
+# backend and coroutine mechanism.
+# expect: [101, 102, 100, 20, 102, 150, 20, 201, 299, 200, 20, 250, 20, 300, 20, 350, 20, 399, 504]
+import res
+
+struct Go:
+    n: int
+
+error Bad
+
+fn leafy(base: int, context log: res::Log, resume Go) -> int:
+    r = res::open(base)
+    m = yield base
+    res::note(base + m.n)
+    m2 = yield base + 1
+    res::note(base + m2.n)
+    base + 2
+
+fn middle(base: int, context log: res::Log, resume Go) -> int:
+    r = res::open(base + 50)
+    v = leafy(base)
+    res::note(v)
+    v
+
+fn failing(base: int, context log: res::Log, resume Go) -> int errors Bad:
+    r = res::open(base)
+    m = yield base
+    if m.n > 0:
+        fail Bad
+    0
+
+fn outer_failing(base: int, context log: res::Log, resume Go) -> int errors Bad:
+    r = res::open(base + 50)
+    failing(base)
+
+# Completion: notes 101 and 102, the leaf's release (100), the middle's
+# note (102) and release (150).
+fn complete(context log: res::Log) -> int:
+    coroutine {step, first} = middle(100)
+    a = step(Go {n: 1})
+    b = step(Go {n: 2})
+    first + a + b
+
+# Abandonment after one resume: note 201, the caller's note 299, then the
+# innermost release (200) before the middle's (250).
+fn abandon(context log: res::Log) -> int:
+    coroutine {step, first} = middle(200)
+    a = step(Go {n: 1})
+    res::note(299)
+    a
+
+# Failure two activations deep: both releases (300, then 350) before the
+# caller's handler (399).
+fn fails(context log: res::Log) -> int:
+    coroutine {step, first} = outer_failing(300):
+        on Bad:
+            return -1
+    step(Go {n: 1}):
+        on Bad:
+            res::note(399)
+            0
+
+fn main(context log: res::Log) -> List[int] errors IndexNotFound:
+    c = complete()
+    a = abandon()
+    f = fails()
+    res::note(c + a + f)
+    res::lines()
+
+with context res::create()
+main():
+    on IndexNotFound:
+        []

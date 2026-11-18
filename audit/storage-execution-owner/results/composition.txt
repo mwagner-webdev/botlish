@@ -1,0 +1,1 @@
+composition: 400 programs, no interleaving above the bound; the bound reached in 400; the broken rule (one shared stack) exceeded in 185

@@ -1,0 +1,221 @@
+# actors (tests/actor/actors.bot)
+
+unit <program>
+  call of std::event_loop::create (struct) at actors.bot:288:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at actors.bot:288:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of std::event_loop::deterministic::create (struct) at actors.bot:289:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at actors.bot:289:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of std::actor::create (struct) at actors.bot:290:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at actors.bot:290:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (list) at actors.bot:291:1: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of list (list) at actors.bot:293:9: result; plan: rejected (not representable: the native list)
+  call of list (list) at actors.bot:295:9: result; plan: rejected (not representable: the native list)
+  call of list (list) at actors.bot:297:9: result; plan: rejected (not representable: the native list)
+unit say<str, str, int>
+  call of std::str::concat (str) at actors.bot:45:26: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::str::concat (str) at actors.bot:45:26: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::int::to_string (str) at actors.bot:45:63: escapes (callee); plan: rejected (not confined to its innermost region)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at actors.bot:45:26: escapes (callee); plan: rejected (not confined to its innermost region)
+unit sent_name<enum>
+unit op<enum, int, int, std::actor::Address[Reply]>
+  Op {kind, amount, req, reply} (struct) at actors.bot:58:5: result; plan: rejected (not representable: a struct (only Strings are placed))
+unit counter<str, std::actor::Inbox[Op], std::actor::Address[Line]> -- may suspend
+  suspension call of std::actor::listen at actors.bot:65:10: live bindings 2, pending operands 0, objects kept 0
+  suspension call of std::actor::receive at actors.bot:69:13: live bindings 4, pending operands 0, objects kept 5
+  suspension call of std::actor::sleep at actors.bot:78:13: live bindings 5, pending operands 0, objects kept 6
+  suspension call of std::actor::send at actors.bot:82:17: live bindings 5, pending operands 0, objects kept 7
+  suspension call of std::actor::send at actors.bot:86:5: live bindings 1, pending operands 0, objects kept 11
+  call of std::actor::listen (struct) at actors.bot:65:10: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at actors.bot:67:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  Count {total, handled} (struct) at actors.bot:68:39: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::receive (struct) at actors.bot:69:13: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  Count {total, handled} (struct) at actors.bot:75:13: escapes (carried); plan: rejected (it may suspend: a region is never live across a suspension)
+  Count {total, handled} (struct) at actors.bot:80:13: escapes (carried); plan: rejected (it may suspend: a region is never live across a suspension)
+  Reply {req, value} (struct) at actors.bot:82:30: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  Count {total, handled} (struct) at actors.bot:85:13: escapes (carried); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at actors.bot:86:29: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at actors.bot:86:64: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at actors.bot:86:29: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at actors.bot:86:29: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at actors.bot:86:125: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at actors.bot:86:29: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  Line {text} (struct) at actors.bot:86:17: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at actors.bot:87:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit logger<std::actor::Inbox[Line]> -- may suspend
+  suspension call of std::actor::listen at actors.bot:91:10: live bindings 0, pending operands 0, objects kept 0
+  suspension call of std::actor::receive at actors.bot:95:16: live bindings 2, pending operands 0, objects kept 1
+  call of std::actor::listen (struct) at actors.bot:91:10: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at actors.bot:93:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::receive (struct) at actors.bot:95:16: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at actors.bot:98:23: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at actors.bot:101:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit client<str, int, int, std::actor::Address[Op], std::actor::Inbox[Reply], std::actor::Address[Reply], std::actor::Address[Line]> -- may suspend
+  suspension call of std::actor::listen at actors.bot:108:10: live bindings 6, pending operands 0, objects kept 0
+  suspension call of std::actor::deliver at actors.bot:112:13: live bindings 8, pending operands 0, objects kept 2
+  suspension call of std::actor::pause at actors.bot:115:9: live bindings 7, pending operands 0, objects kept 1
+  suspension call of std::actor::deliver at actors.bot:117:5: live bindings 4, pending operands 0, objects kept 2
+  suspension call of std::actor::receive at actors.bot:118:9: live bindings 3, pending operands 0, objects kept 1
+  suspension call of std::actor::send at actors.bot:125:5: live bindings 1, pending operands 0, objects kept 4
+  call of std::actor::listen (struct) at actors.bot:108:10: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at actors.bot:110:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of op (struct) at actors.bot:112:24: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at actors.bot:114:23: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at actors.bot:114:23: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of op (struct) at actors.bot:117:16: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::receive (struct) at actors.bot:118:9: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  Reply {req, value} (struct) at actors.bot:120:13: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at actors.bot:125:29: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  Line {text} (struct) at actors.bot:125:17: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at actors.bot:126:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit flooder<std::actor::Address[Op], std::actor::Address[Reply]> -- may suspend
+  suspension call of std::actor::send at actors.bot:132:5: live bindings 2, pending operands 0, objects kept 1
+  suspension call of std::actor::send at actors.bot:134:17: live bindings 4, pending operands 1, objects kept 2
+  suspension call of std::actor::deliver at actors.bot:137:20: live bindings 3, pending operands 1, objects kept 2
+  suspension call of std::actor::deliver at actors.bot:142:5: live bindings 1, pending operands 0, objects kept 1
+  call of op (struct) at actors.bot:132:13: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of list (list) at actors.bot:133:23: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of op (struct) at actors.bot:134:25: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of op (struct) at actors.bot:137:31: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at actors.bot:138:28: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at actors.bot:138:28: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of op (struct) at actors.bot:142:16: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at actors.bot:143:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit chatty<str, int, std::actor::Inbox[Op], std::actor::Address[Op], std::actor::Address[Reply], bool> -- may suspend
+  suspension call of std::actor::listen at actors.bot:148:10: live bindings 5, pending operands 0, objects kept 0
+  suspension call of std::actor::send at actors.bot:152:9: live bindings 5, pending operands 0, objects kept 2
+  suspension call of std::actor::receive at actors.bot:154:13: live bindings 6, pending operands 0, objects kept 1
+  suspension call of std::actor::send at actors.bot:157:9: live bindings 6, pending operands 0, objects kept 2
+  call of std::actor::listen (struct) at actors.bot:148:10: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at actors.bot:150:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of op (struct) at actors.bot:152:19: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::receive (struct) at actors.bot:154:13: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of op (struct) at actors.bot:157:19: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at actors.bot:160:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit quiet<std::actor::Inbox[Op]> -- may suspend
+  suspension call of std::actor::listen at actors.bot:163:10: live bindings 0, pending operands 0, objects kept 0
+  suspension call of std::actor::receive at actors.bot:166:9: live bindings 0, pending operands 0, objects kept 1
+  call of std::actor::listen (struct) at actors.bot:163:10: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at actors.bot:165:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::receive (struct) at actors.bot:166:9: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at actors.bot:168:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at actors.bot:170:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit quiet_sender<std::actor::Address[Op], std::actor::Address[Reply]> -- may suspend
+  suspension call of std::actor::pause at actors.bot:173:5: live bindings 2, pending operands 0, objects kept 0
+  suspension call of std::actor::pause at actors.bot:174:5: live bindings 2, pending operands 0, objects kept 0
+  suspension call of std::actor::send at actors.bot:176:5: live bindings 0, pending operands 0, objects kept 1
+  call of op (struct) at actors.bot:176:13: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at actors.bot:177:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit ending_name<enum>
+unit main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><generic>
+  call of std::actor::open (struct) at actors.bot:188:32: escapes (callee error); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at actors.bot:189:38: escapes (callee error); plan: rejected (not confined to its innermost region)
+  closure (closure) at actors.bot:191:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at actors.bot:191:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at actors.bot:191:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at actors.bot:192:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at actors.bot:197:32: escapes (error); plan: rejected (not confined to its innermost region)
+  call of op (struct) at actors.bot:199:85: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::str::concat (str) at actors.bot:199:17: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::str::append_char (str) at actors.bot:199:17: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at actors.bot:200:38: escapes (callee error); plan: rejected (not confined to its innermost region)
+  call of std::str::concat (str) at actors.bot:205:17: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::str::append_char (str) at actors.bot:205:17: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of op (struct) at actors.bot:206:84: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::str::concat (str) at actors.bot:206:17: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::str::append_char (str) at actors.bot:206:17: escapes (callee); plan: rejected (not confined to its innermost region)
+  closure (closure) at actors.bot:211:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at actors.bot:211:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at actors.bot:211:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at actors.bot:212:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of op (struct) at actors.bot:214:30: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at actors.bot:215:31: escapes (callee error); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at actors.bot:216:31: escapes (callee error); plan: rejected (not confined to its innermost region)
+  closure (closure) at actors.bot:218:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at actors.bot:218:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at actors.bot:218:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at actors.bot:219:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  closure (closure) at actors.bot:222:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at actors.bot:222:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at actors.bot:222:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at actors.bot:223:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at actors.bot:227:34: escapes (callee error); plan: rejected (not confined to its innermost region)
+  closure (closure) at actors.bot:229:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at actors.bot:229:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at actors.bot:229:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at actors.bot:230:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  closure (closure) at actors.bot:233:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at actors.bot:233:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at actors.bot:233:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at actors.bot:234:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at actors.bot:238:28: escapes (callee error); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at actors.bot:239:28: escapes (callee error); plan: rejected (not confined to its innermost region)
+  closure (closure) at actors.bot:241:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at actors.bot:241:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at actors.bot:241:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at actors.bot:242:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  closure (closure) at actors.bot:245:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at actors.bot:245:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at actors.bot:245:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at actors.bot:246:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at actors.bot:248:30: escapes (callee error); plan: rejected (not confined to its innermost region)
+  closure (closure) at actors.bot:250:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at actors.bot:250:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at actors.bot:250:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at actors.bot:251:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  closure (closure) at actors.bot:254:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at actors.bot:254:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at actors.bot:254:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at actors.bot:255:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::run<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at actors.bot:260:5: escapes (error); plan: rejected (not confined to its innermost region)
+  call of op (struct) at actors.bot:262:30: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of op (struct) at actors.bot:263:30: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::run<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at actors.bot:264:5: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::shutdown<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at actors.bot:267:17: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::take_outcomes (list) at actors.bot:270:16: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::int::to_string (str) at actors.bot:272:53: escapes (inherited); plan: rejected (not confined to its innermost region)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at actors.bot:272:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::str::append_char (str) at actors.bot:272:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::str::concat (str) at actors.bot:272:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::str::append_char (str) at actors.bot:272:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::int::to_string (str) at actors.bot:272:153: escapes (inherited); plan: rejected (not confined to its innermost region)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at actors.bot:272:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::actor::stats (struct) at actors.bot:273:10: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::stats (struct) at actors.bot:285:34: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::trace (list) at actors.bot:286:5: escapes (error result); plan: rejected (not confined to its innermost region)
+unit the coroutine of logger constructed at actors.bot:191:9 -- may suspend
+  suspension call of logger at actors.bot:191:35: live bindings 0, pending operands 0, objects kept 0
+  call of logger (struct) at actors.bot:191:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of counter constructed at actors.bot:211:9 -- may suspend
+  suspension call of counter at actors.bot:211:35: live bindings 0, pending operands 0, objects kept 0
+  call of counter (struct) at actors.bot:211:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of client constructed at actors.bot:218:9 -- may suspend
+  suspension call of client at actors.bot:218:35: live bindings 0, pending operands 0, objects kept 0
+  call of client (struct) at actors.bot:218:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of client constructed at actors.bot:222:9 -- may suspend
+  suspension call of client at actors.bot:222:35: live bindings 0, pending operands 0, objects kept 0
+  call of client (struct) at actors.bot:222:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of counter constructed at actors.bot:229:9 -- may suspend
+  suspension call of counter at actors.bot:229:35: live bindings 0, pending operands 0, objects kept 0
+  call of counter (struct) at actors.bot:229:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of flooder constructed at actors.bot:233:9 -- may suspend
+  suspension call of flooder at actors.bot:233:35: live bindings 0, pending operands 0, objects kept 0
+  call of flooder (struct) at actors.bot:233:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of chatty constructed at actors.bot:241:9 -- may suspend
+  suspension call of chatty at actors.bot:241:35: live bindings 0, pending operands 0, objects kept 0
+  call of chatty (struct) at actors.bot:241:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of chatty constructed at actors.bot:245:9 -- may suspend
+  suspension call of chatty at actors.bot:245:35: live bindings 0, pending operands 0, objects kept 0
+  call of chatty (struct) at actors.bot:245:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of quiet constructed at actors.bot:250:9 -- may suspend
+  suspension call of quiet at actors.bot:250:35: live bindings 0, pending operands 0, objects kept 0
+  call of quiet (struct) at actors.bot:250:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of quiet_sender constructed at actors.bot:254:9 -- may suspend
+  suspension call of quiet_sender at actors.bot:254:35: live bindings 0, pending operands 0, objects kept 0
+  call of quiet_sender (struct) at actors.bot:254:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+
+owner classes: transient 0, segment 2, persistent 10, result 18, escapes 123, unknown 0

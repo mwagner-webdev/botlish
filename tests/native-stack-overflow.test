@@ -201,14 +201,15 @@ test ns-co-resumer-holds-references {the resumer holds a String, a List and a st
     }
 } -result [lrepeat 2 {NATIVE LIMIT STACK}]
 
-test ns-co-fused {fused, a coroutine's recursion runs on its consumer's stack: the overflow at its start and after two yields is the thread stack's, NATIVE LIMIT STACK as on the general runtime, and a depth beyond a coroutine stack's 8 MiB returns its value} -constraints {nativeStackGuard nativeCoroutines} -body {
+test ns-co-fused {fused, a coroutine's recursion runs on its consumer's stack: the overflow at its start and after two yields is the thread stack's, NATIVE LIMIT STACK as on the general runtime, and a depth beyond a coroutine stack's 8 MiB returns its value -- unfused too where coroutines are resumable frames, which run on their resumer's stack (nativeResumableCoroutines), NATIVE LIMIT STACK where the general runtime gives each coroutine a stack} -constraints {nativeStackGuard nativeCoroutines} -body {
     set fresh "${messages}${down}fn w(n: int, resume M) -> V:\n    k = down(n)\n    m = yield V {n: k}\n    return V {n: m.n}\ncoroutine {step, first} = w(DEPTH)\nfirst.n\n"
     set later "${messages}${down}fn w(n: int, resume M) -> V:\n    m = yield V {n: n}\n    m2 = yield V {n: m.n}\n    return V {n: down(m2.n)}\ncoroutine {step, first} = w(1)\na = step(M {n: 2})\nb = step(M {n: DEPTH})\na.n + b.n\n"
     list [lmap text [list $fresh $later] {
         lsort -unique [lmap entry [native::fusion [surface::compile [string map {DEPTH 1} $text] -warnings off]] {lindex $entry 0}]
     }] [nsBoth [string map {DEPTH 100000000} $fresh]] [nsBoth [string map {DEPTH 100000000} $later]] \
         [nsBoth [string map {DEPTH 2000000} $fresh]] [withoutCoroutineFusion {nsBoth [string map {DEPTH 2000000} $fresh]}]
-} -cleanup {unset -nocomplain fresh later} -result [list {fused fused} [lrepeat 2 {NATIVE LIMIT STACK}] [lrepeat 2 {NATIVE LIMIT STACK}] [lrepeat 2 {value 2000000}] [lrepeat 2 {NATIVE LIMIT STACK}]]
+} -cleanup {unset -nocomplain fresh later} -result [list {fused fused} [lrepeat 2 {NATIVE LIMIT STACK}] [lrepeat 2 {NATIVE LIMIT STACK}] [lrepeat 2 {value 2000000}] \
+    [lrepeat 2 [if {[testConstraint nativeStackfulCoroutines]} {string cat "NATIVE LIMIT STACK"} else {string cat "value 2000000"}]]]
 
 # main -> a -> b -> c, each suspended and resumed at least once.
 set nested "${messages}${down}fn c(n: int, resume M) -> V:
@@ -280,14 +281,23 @@ b.n
     return [list $lo $hi]
 }
 
-test ns-co-edge {at the edge of a coroutine's stack every depth either returns or is NATIVE LIMIT STACK, and the edge lies between a thousand and ten million levels} -constraints {nativeStackGuard nativeCoroutines} -body {
+# Where a coroutine's recursion ends: a coroutine stack's 8 MiB where
+# coroutines switch stacks (nativeStackfulCoroutines: under ten million
+# levels); the resumer's own thread stack where they are resumable frames,
+# whose activations run on it (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+# MILESTONE-1.md: no stack per coroutine) -- beyond ten million levels, still
+# bounded by the bisection's 100,000,000.
+set ::nsCoroutineEdgeRange [if {[testConstraint nativeStackfulCoroutines]} {list 1000 10000000} else {list 10000000 100000000}]
+
+test ns-co-edge {at the edge of a coroutine's recursion every depth either returns or is NATIVE LIMIT STACK, and the edge lies between a thousand and ten million levels where coroutines have stacks of their own, beyond that (the thread's stack) where they are resumable frames} -constraints {nativeStackGuard nativeCoroutines} -body {
+    lassign $::nsCoroutineEdgeRange low high
     withoutCoroutineFusion {
         lmap options {{} {-specialize 0}} {
             lassign [nsCoroutineEdge $options] lo hi
-            expr {[string is integer -strict $lo] && $lo > 1000 && $hi < 10000000 ? "edge" : [list $lo $hi]}
+            expr {[string is integer -strict $lo] && $lo > $low && $hi < $high ? "edge" : [list $lo $hi]}
         }
     }
-} -result {edge edge}
+} -cleanup {unset -nocomplain low high} -result {edge edge}
 
 # ---------------------------------------------------------------------------
 # Under GC stress (a collection before every allocation), with small stacks

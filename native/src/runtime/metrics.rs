@@ -41,14 +41,14 @@
 use super::show::tcl_list;
 use super::value::{
     KIND_BIGINT, KIND_BYTES, KIND_CLOSURE, KIND_COROUTINE, KIND_DECIMAL, KIND_FLOAT, KIND_LIST, KIND_LISTPLAN, KIND_MUTARRAY, KIND_MUTBYTES, KIND_MUTVEC,
-    KIND_NATIVE, KIND_RAWF32, KIND_RAWF64, KIND_RESULT, KIND_SET, KIND_STR, KIND_STRPLAN, KIND_STRUCT, KIND_ENUMCASE,
+    KIND_NATIVE, KIND_RAWF32, KIND_RAWF64, KIND_RESULT, KIND_SET, KIND_STR, KIND_STRPLAN, KIND_STRUCT, KIND_ENUMCASE, KIND_FRAME,
 };
 use std::collections::HashMap;
 use std::time::Duration;
 
 /// One more than the largest `Header::kind` value: `by_kind`/`static_by_kind`
 /// are indexed directly by kind byte (index 0 unused).
-pub const KIND_COUNT: usize = 22;
+pub const KIND_COUNT: usize = 23;
 
 pub fn kind_name(kind: u8) -> &'static str {
     match kind {
@@ -72,6 +72,7 @@ pub fn kind_name(kind: u8) -> &'static str {
         KIND_RAWF32 => "RawFloat",
         KIND_RAWF64 => "RawDouble",
         KIND_ENUMCASE => "EnumCase",
+        KIND_FRAME => "ResumeFrame",
         _ => "?",
     }
 }
@@ -621,6 +622,11 @@ impl Metrics {
         // MILESTONE-1.md): a payload-free case is never allocated.
         if self.by_kind[KIND_ENUMCASE as usize].allocations > 0 {
             kinds.push(KIND_ENUMCASE);
+        }
+        // And resumable coroutines' frames (runtime/resumable.rs): only a
+        // program whose coroutines suspended on a resumable runtime.
+        if self.by_kind[KIND_FRAME as usize].allocations > 0 {
+            kinds.push(KIND_FRAME);
         }
         // And raw C floating values (RAW-C-FLOAT-FFI-MILESTONE-1.md).
         for kind in [KIND_RAWF32, KIND_RAWF64] {

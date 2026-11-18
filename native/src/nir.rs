@@ -504,6 +504,33 @@ pub enum OpCode {
     /// (runtime/coroutine.rs's `reraise`). Allocates (a safepoint), never
     /// fails, never runs code and holds no stack.
     CoFailed,
+    /// Resumable coroutines (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+    /// MILESTONE-1.md; runtime/resumable.rs). Only codegen::resumable writes
+    /// these, and only into a function with a frame shape (`Function::frame`),
+    /// together with `frsave` and `frrestore` (Inst::FrameSave/FrameRestore).
+    ///
+    /// `%f = op frensure %f`: %f itself when it is a frame (an activation
+    /// that suspends again reuses its frame), else a new frame of the
+    /// function's own shape. Allocates (a safepoint); never fails.
+    FrEnsure,
+    /// `%b = op frisframe %v`: Bool, %v is a frame object: a suspension
+    /// result or a hidden frame argument, never a program value. Inline.
+    FrIsFrame,
+    /// `%k = op frpoint %f`: frame %f's resume point (raw; 0: not
+    /// suspended). Inline load.
+    FrPoint,
+    /// `%c = op frcallee %f`: takes frame %f's suspended callee frame,
+    /// leaving UNIT in its place: the frame the re-entered call continues
+    /// with. Inline load and store.
+    FrCallee,
+    /// `%u = op cosuspend %v`: stores a yield's outward value in the running
+    /// coroutine, before its activations return their frames. Fails only
+    /// outside a coroutine (a defensive check, as `coyield`'s).
+    CoSuspend,
+    /// `%d = op comsg`: a resumed yield's value, the resume message. Fails
+    /// when the coroutine is being abandoned: the pending abandonment then
+    /// unwinds through the frames' release pads, exactly as natively.
+    CoMsg,
     /// C addresses (C-ABI-TYPES.md; runtime/value.rs's immediate C address
     /// word). `cptrnull`: the null pointer (a constant word). `cptrisnull
     /// %p`: Bool, %p is null (a word comparison; no memory is read).
@@ -1152,6 +1179,12 @@ op_spellings! {
     "corelease" => CoRelease,
     "coabandon" => CoAbandon,
     "cofailed" => CoFailed,
+    "frensure" => FrEnsure,
+    "frisframe" => FrIsFrame,
+    "frpoint" => FrPoint,
+    "frcallee" => FrCallee,
+    "cosuspend" => CoSuspend,
+    "comsg" => CoMsg,
     "affinedrop" => AffineDrop,
     "affinedroprun" => AffineDropRun,
     "cleanupcall" => CleanupCall,
@@ -1284,7 +1317,8 @@ impl OpCode {
         use OpCode::*;
         match self {
             ListNew | CleanupTable => None,
-            Argv | CPtrNull | CoFailed | EnumUnmatched | ScratchTake | ScratchMark => Some(0),
+            Argv | CPtrNull | CoFailed | EnumUnmatched | ScratchTake | ScratchMark | CoMsg => Some(0),
+            FrEnsure | FrIsFrame | FrPoint | FrCallee | CoSuspend => Some(1),
             ScratchReset | ScratchReq | ScratchDest => Some(1),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
             StrLen | StrLower | ListLen | ListFlat | TreeChildren | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
@@ -1316,7 +1350,7 @@ impl OpCode {
         matches!(self, OpCode::RUnbox | OpCode::RIAdd | OpCode::RISub | OpCode::RIMul
             | OpCode::RIShr | OpCode::RIShl | OpCode::RIAnd | OpCode::RIOr | OpCode::RIXor
             | OpCode::RIMod | OpCode::RIModTotal | OpCode::RTabLoad8 | OpCode::RTabLoad16
-            | OpCode::ShortLen | OpCode::AsciiLen)
+            | OpCode::ShortLen | OpCode::AsciiLen | OpCode::FrPoint)
     }
 
     /// 1 if OP's operands are raw (untagged) machine integers, not Values.
@@ -1595,6 +1629,33 @@ pub enum Inst {
     /// failure continues exactly as if this `handle` were not there --
     /// never constructing a new error the way Raise/Fail do.
     Reraise,
+    /// `frsave %f K [callee %c] tagged %a... raw %x...`
+    /// (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md, written only
+    /// by codegen::resumable): the activation suspends at its resume point K
+    /// (1-based). Frame %f (from `frensure`, of the function's shape) takes
+    /// the registers live after the suspension -- TAGGED into its tagged
+    /// slots 0.., RAW (every unboxed kind) into its raw slots 0.. -- K as its
+    /// point, `tagged.len()` as the number of slots the collector traces,
+    /// and the suspended callee's frame %c (a call site; UNIT at a yield).
+    /// A plan register among TAGGED is consumed: the frame owns the plan
+    /// until `frrestore` defines the register again. Inline stores; never
+    /// allocates, never fails.
+    FrameSave { frame: Reg, point: u32, callee: Option<Reg>, tagged: Vec<Reg>, raw: Vec<Reg> },
+    /// `frrestore %f tagged %a... raw %x...`: defines the registers a
+    /// suspension point saved, from frame %f's slots in the same order, and
+    /// marks the frame running (point 0, nothing traced: the activation's
+    /// own roots are its registers again). Inline loads; never allocates,
+    /// never fails.
+    FrameRestore { frame: Reg, tagged: Vec<Reg>, raw: Vec<Reg> },
+}
+
+/// A resumable function's frame shape (`Function::frame`): how many tagged
+/// and how many raw slots its frame object has -- the most any one of its
+/// suspension points saves of each (codegen::resumable).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameShape {
+    pub tagged: u32,
+    pub raw: u32,
 }
 
 /// One piece of an `Inst::Construct`, in source order.
@@ -1749,6 +1810,13 @@ pub struct Function {
     /// roots, never stored to the shadow stack. Derived once at parse time;
     /// codegen and root analysis read this, never the two declarations.
     pub scalar_regs: Vec<bool>,
+    /// A resumable function's frame shape (`resumable="TAGGED RAW"`,
+    /// WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md): set only by
+    /// codegen::resumable, on a function that may yield. Its last parameter
+    /// is then the hidden frame parameter (tagged: UNIT for a fresh
+    /// activation, else the frame it continues), and a suspension returns
+    /// the activation's frame as its (first) result.
+    pub frame: Option<FrameShape>,
 }
 
 impl Function {
@@ -1791,6 +1859,20 @@ impl Function {
                     | Inst::CallValue { .. }
             )
         })
+    }
+
+    /// Whether this function may reserve a frame in a ShadowOnly shadow stack
+    /// (codegen::roots): it makes a Botlish call (a depth token where
+    /// there is no stack guard), or it has a GC safepoint, the only place a
+    /// register needs a root slot. Conservative: a function with a
+    /// safepoint but no root needs none.
+    pub fn may_reserve_shadow_slots(&self) -> bool {
+        self.has_botlish_call()
+            || self.body.iter().any(|inst| match inst {
+                Inst::Op { op, .. } => crate::runtime::ops::op_may_allocate(*op),
+                Inst::Closure { .. } | Inst::Construct { .. } | Inst::StructNew { .. } | Inst::ForeignCall { .. } => true,
+                _ => false,
+            })
     }
 
     /// Whether this function uses the packed-ASCII ABI anywhere.
@@ -2230,6 +2312,11 @@ pub struct Program {
     /// safety"). The NIR text never says so: the driver decides it when it
     /// emits a library.
     pub stack_limit_checked: bool,
+    /// The runtime this program's code is generated for (runtime::
+    /// capabilities): what its call effects assume of a function's
+    /// prologue, and whether its coroutines are lowered to resumable frames
+    /// (codegen::resumable). `parse` sets this driver's own runtime's.
+    pub capabilities: crate::runtime::capabilities::RuntimeCapabilities,
 }
 
 #[derive(Debug)]
@@ -2388,6 +2475,7 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
         errors: Vec::new(),
         call_effects: true,
         stack_limit_checked: false,
+        capabilities: crate::runtime::capabilities::RuntimeCapabilities::host(),
     };
     let mut current: Option<Function> = None;
     let mut seen_header = false;
@@ -2543,18 +2631,20 @@ pub fn check_stack_limit(program: &mut Program) {
 fn summarize_call_effects(program: &mut Program, enabled: bool) {
     let n = program.functions.len();
     let mut local = vec![(false, false); n];
-    // Where the shadow stack's depth check bounds recursion (the fallback
-    // plan), a function making a Botlish call fails with NATIVE LIMIT STACK
-    // from its own prologue (codegen::roots's `depth_reservation`), so its
-    // callers must check: wherever native frames hold the roots the stack
-    // guard ends an exhausted run instead, and no call fails for it.
-    let depth_checked = crate::runtime::native_stack::depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
-    // A native library's functions check their stack pointer instead
+    // Where nothing but the shadow stack's end bounds recursion (no stack
+    // guard: runtime::capabilities's `prologue_may_fail`), a function that
+    // reserves shadow slots fails with NATIVE LIMIT STACK from its own
+    // prologue (codegen::roots: a depth token for every Botlish call, a
+    // frame for every root slot), so its callers must check. Wherever the
+    // guard exists an exhausted stack -- the guard's fault, or a full shadow
+    // array -- is terminal instead, and no call fails for it.
+    let depth_checked = program.capabilities.prologue_may_fail();
+    // A native library's functions check their stack pointer
     // (`check_stack_limit`; codegen::roots's `stack_check`): the same
-    // failure from the same functions.
-    let stack_checked = program.stack_limit_checked && crate::runtime::framewalk::NATIVE_FRAME_ROOTS;
+    // failure from the functions that make a Botlish call.
+    let stack_checked = program.stack_limit_checked;
     for (i, f) in program.functions.iter().enumerate() {
-        local[i].0 = (depth_checked || stack_checked) && f.has_botlish_call();
+        local[i].0 = (stack_checked && f.has_botlish_call()) || (depth_checked && f.may_reserve_shadow_slots());
         for inst in &f.body {
             match inst {
                 Inst::Guard { .. } | Inst::GuardBool { .. }
@@ -3061,6 +3151,17 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
     }
     let scalar_regs: Vec<bool> =
         (0..regs as usize).map(|r| raw_regs[r] || short_regs[r] || ascii_regs[r] || i64_regs[r] || u64_regs[r]).collect();
+    // A resumable function's frame shape (codegen::resumable): two counts.
+    let frame = match kv.get("resumable") {
+        None => None,
+        Some(text) => {
+            let counts: Vec<u32> = text.split_whitespace().filter_map(|w| w.parse().ok()).collect();
+            match counts.as_slice() {
+                [tagged, raw] if text.split_whitespace().count() == 2 => Some(FrameShape { tagged: *tagged, raw: *raw }),
+                _ => return p.err(format!("bad resumable frame shape {text:?}: expected \"TAGGED RAW\"")),
+            }
+        }
+    };
     Ok(Function {
         id,
         name: name.clone(),
@@ -3088,6 +3189,7 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         i64_regs,
         u64_regs,
         scalar_regs,
+        frame,
     })
 }
 
@@ -3476,6 +3578,42 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
         "pusherrorexit" => Inst::PushErrorExit(label(1)?),
         "poperrorexit" => Inst::PopErrorExit,
         "reraise" => Inst::Reraise,
+        // `frsave %f K [callee %c] tagged %a... raw %x...` and
+        // `frrestore %f tagged %a... raw %x...` (Inst::FrameSave/Restore).
+        "frsave" | "frrestore" => {
+            let save = head == "frsave";
+            let frame = reg(1)?;
+            let mut i = 2;
+            let point = if save {
+                i += 1;
+                num(2)?
+            } else {
+                0
+            };
+            let mut callee = None;
+            if save && tokens.get(i).and_then(word) == Some("callee") {
+                callee = Some(reg(i + 1)?);
+                i += 2;
+            }
+            if tokens.get(i).and_then(word) != Some("tagged") {
+                return p.err(format!("{head}: expected `tagged`"));
+            }
+            i += 1;
+            let mut tagged = Vec::new();
+            while let Some(Token::Reg(r)) = tokens.get(i) {
+                tagged.push(*r);
+                i += 1;
+            }
+            if tokens.get(i).and_then(word) != Some("raw") {
+                return p.err(format!("{head}: expected `raw`"));
+            }
+            let raw = regs_from(i + 1)?;
+            if save {
+                Inst::FrameSave { frame, point, callee, tagged, raw }
+            } else {
+                Inst::FrameRestore { frame, tagged, raw }
+            }
+        }
         other => return p.err(format!("unknown instruction {other}")),
     })
 }
@@ -3511,6 +3649,51 @@ fn validate_scratch(program: &Program, f: &Function) -> Result<(), String> {
                 }
             }
             _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// The resumable lowering's protocol (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+/// MILESTONE-1.md, codegen::resumable), structurally: frame operations only
+/// in a function with a frame shape, whose last parameter is its hidden,
+/// tagged frame parameter; no `coyield` left in a lowered program (a
+/// lowered function suspends by returning its frame, so a stack-switching
+/// yield anywhere would need a mechanism the runtime does not have); every
+/// `frsave`/`frrestore` within its frame's shape, a resume point positive.
+fn validate_resumable(program: &Program, f: &Function) -> Result<(), String> {
+    let lowered = program.functions.iter().any(|g| g.frame.is_some());
+    for inst in &f.body {
+        let frame_op = match inst {
+            Inst::Op { op, .. } => matches!(op, OpCode::FrEnsure | OpCode::FrIsFrame | OpCode::FrPoint | OpCode::FrCallee | OpCode::CoSuspend | OpCode::CoMsg),
+            Inst::FrameSave { .. } | Inst::FrameRestore { .. } => true,
+            _ => false,
+        };
+        if frame_op && f.frame.is_none() {
+            return Err(format!("{inst:?}: a frame operation in a function without a frame shape (resumable=)"));
+        }
+        if lowered && matches!(inst, Inst::Op { op: OpCode::CoYield, .. }) {
+            return Err("coyield in a program lowered to resumable frames".into());
+        }
+        if let (Some(shape), Inst::FrameSave { tagged, raw, .. } | Inst::FrameRestore { tagged, raw, .. }) = (f.frame, inst) {
+            if tagged.len() > shape.tagged as usize || raw.len() > shape.raw as usize {
+                return Err(format!("{inst:?} exceeds the frame's shape ({} tagged, {} raw)", shape.tagged, shape.raw));
+            }
+        }
+        if let Inst::FrameSave { point: 0, .. } = inst {
+            return Err("frsave at resume point 0 (points are 1-based)".into());
+        }
+    }
+    if f.frame.is_some() {
+        if f.id == 0 || f.params == 0 {
+            return Err("a frame shape needs a hidden frame parameter (and the program function has none)".into());
+        }
+        let p = (f.params - 1) as usize;
+        if f.kind_of(p as Reg) != RegKind::Tagged || f.plan_regs[p] {
+            return Err(format!("the hidden frame parameter %{p} must be an ordinary tagged register"));
+        }
+        if f.scalar_result() || f.plan_result {
+            return Err("a resumable function's result is a tagged Value (a suspension returns its frame)".into());
         }
     }
     Ok(())
@@ -3649,6 +3832,9 @@ fn validate_selected(program: &Program, only: Option<usize>) -> Result<(), NirEr
             return fail(ctx(format!("parameter register %{i} is declared a C word")));
         }
         if let Err(m) = validate_scratch(program, f) {
+            return fail(ctx(m));
+        }
+        if let Err(m) = validate_resumable(program, f) {
             return fail(ctx(m));
         }
         let mut labels = HashSet::new();
@@ -3852,6 +4038,14 @@ fn validate_selected(program: &Program, only: Option<usize>) -> Result<(), NirEr
                     }
                     used.extend(rs);
                 }
+                Inst::FrameSave { frame, tagged, raw, .. } | Inst::FrameRestore { frame, tagged, raw, .. } => {
+                    used.push(*frame);
+                    if let Inst::FrameSave { callee: Some(c), .. } = inst {
+                        used.push(*c);
+                    }
+                    used.extend(tagged);
+                    used.extend(raw);
+                }
             }
             if let Some(r) = used.iter().find(|r| **r >= f.regs) {
                 return fail(ctx(format!("register %{r} out of range")));
@@ -4000,6 +4194,18 @@ fn validate_selected(program: &Program, only: Option<usize>) -> Result<(), NirEr
                 // any operand in the catch-all below.
                 // A switch dispatches on a raw Int (checked above).
                 Inst::Switch { .. } => {}
+                // A frame's slots (validate_resumable checks the rest): the
+                // frame and a callee frame are tagged, TAGGED tagged, RAW
+                // of the unboxed kinds.
+                Inst::FrameSave { frame, tagged, raw, .. } | Inst::FrameRestore { frame, tagged, raw, .. } => {
+                    let callee = if let Inst::FrameSave { callee: Some(c), .. } = inst { Some(*c) } else { None };
+                    if let Some(r) = std::iter::once(*frame).chain(callee).chain(tagged.iter().copied()).find(|r| kind(*r) != RegKind::Tagged) {
+                        return fail(ctx(format!("frame operand %{r} is {}, must be tagged", kind(r).name())));
+                    }
+                    if let Some(r) = raw.iter().find(|r| kind(**r) == RegKind::Tagged) {
+                        return fail(ctx(format!("raw frame slot operand %{r} is tagged")));
+                    }
+                }
                 Inst::Tail { args } | Inst::TailEnv { args, .. } => {
                     if let Some((i, a)) = args.iter().enumerate().find(|(i, a)| kind(**a) != kind(*i as Reg)) {
                         return fail(ctx(format!(
@@ -4203,6 +4409,15 @@ fn validate_plans(program: &Program, only: Option<usize>) -> Result<(), NirError
                 Inst::Br { cond, .. } => used.push(*cond),
                 Inst::Switch { value, .. } => used.push(*value),
                 Inst::RetMulti(rs) => used.extend(rs),
+                // A suspension saves a live plan in its frame (consumed: the
+                // frame owns it until `frrestore` defines the register
+                // again); the frame and the callee frame are no plans.
+                Inst::FrameSave { frame, callee, tagged, .. } => {
+                    used.push(*frame);
+                    used.extend(callee.iter().copied());
+                    consumed.extend(tagged.iter().copied().filter(|r| plan[*r as usize]));
+                }
+                Inst::FrameRestore { frame, .. } => used.push(*frame),
             }
             if let Some(r) = used.iter().find(|r| plan[**r as usize]) {
                 return fail(ctx(format!("plan register %{r} used where an ordinary value is required")));
@@ -4302,6 +4517,7 @@ fn check_plan_linearity(f: &Function, consumes: &[Vec<Reg>]) -> Result<(), Strin
             let defs: Vec<Reg> = match inst {
                 Inst::Tail { .. } | Inst::TailEnv { .. } => (0..f.params).collect(),
                 Inst::CallMulti { dsts, .. } | Inst::CallEnvMulti { dsts, .. } => dsts.clone(),
+                Inst::FrameRestore { tagged, raw, .. } => tagged.iter().chain(raw).copied().collect(),
                 other => def_of(other).into_iter().collect(),
             };
             for d in defs {
@@ -4428,19 +4644,22 @@ mod effect_tests {
         let p = parse(text).unwrap();
         assert!(p.functions.iter().all(|f| f.may_gc));
         // Every function here makes a Botlish call, so it fails exactly
-        // where the shadow stack's depth check bounds recursion.
-        let depth_checked = crate::runtime::native_stack::depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
+        // where the shadow stack's end is the only bound on recursion.
+        let depth_checked = p.capabilities.prologue_may_fail();
         assert!(p.functions.iter().all(|f| f.may_error == depth_checked));
     }
 
-    /// WINDOWS-X86-64-MILESTONE-1.md, section 3: where the depth check
-    /// bounds recursion (the fallback plan), a function that cannot otherwise
-    /// fail still fails with NATIVE LIMIT STACK from its prologue once it
-    /// makes a Botlish call, so its raw result carries a status word and its
+    /// WINDOWS-X86-64-MILESTONE-1.md, section 3; WASM-RESUMABLE-COROUTINES-
+    /// SHADOW-ROOTS-MILESTONE-1.md, "Overflow": where nothing but the shadow
+    /// stack bounds recursion (no stack guard), a function that cannot
+    /// otherwise fail still fails with NATIVE LIMIT STACK from its prologue
+    /// once it may reserve shadow slots -- a Botlish call's depth token, or a
+    /// safepoint's root -- so its raw result carries a status word and its
     /// callers check it (a caller that did not added the error sentinel as an
-    /// Int). A function without one has no reservation and stays infallible;
-    /// and where the stack guard bounds recursion, so does every function
-    /// here.
+    /// Int). A function with neither reserves nothing and stays infallible;
+    /// and wherever the stack guard exists -- both root plans of every host
+    /// the native backend runs on -- an exhausted stack is terminal and so
+    /// does every function here.
     #[test]
     fn a_botlish_call_fails_exactly_where_depth_is_checked() {
         let text = concat!(
@@ -4452,21 +4671,24 @@ mod effect_tests {
             "func 2 \"leaf\" params=1 env=0 regs=1 pnames=\"n\" captures=0 rawregs=\"\"\n",
             "    ret %0\nend\n"
         );
-        let p = parse(text).unwrap();
-        let depth_checked = crate::runtime::native_stack::depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
+        let mut p = parse(text).unwrap();
         let effects: Vec<bool> = p.functions.iter().map(|f| f.may_error).collect();
-        assert_eq!(effects, vec![depth_checked, depth_checked, false]);
+        assert_eq!(effects, vec![false, false, false], "the host runtime has the stack guard");
+        // A ShadowOnly runtime without the guard (WebAssembly's shape before
+        // its host maps the engine's trap): the depth token makes every
+        // Botlish call fallible.
+        use crate::runtime::capabilities::RuntimeCapabilities;
+        p.capabilities = RuntimeCapabilities { frame_roots: false, stack_guard: false, stack_switching: false, resumable: true };
+        resummarize(&mut p);
+        let effects: Vec<bool> = p.functions.iter().map(|f| f.may_error).collect();
+        assert_eq!(effects, vec![true, true, false]);
         let checked: Vec<bool> = p.functions[1]
             .body
             .iter()
             .filter_map(|inst| if let Inst::Call { may_error, .. } = inst { Some(*may_error) } else { None })
             .collect();
-        assert_eq!(checked, vec![false, depth_checked]);
-        // Only the fallback plan checks depth: on every host with
-        // native-frame roots the stack guard ends an exhausted run, Windows
-        // included since WINDOWS-X86-64-MILESTONE-4.md (where until then the
-        // stack-limit check made every Botlish call fallible).
-        assert_eq!(depth_checked, cfg!(feature = "fallback-roots"));
+        assert_eq!(checked, vec![false, true]);
+        assert!(!RuntimeCapabilities::host().prologue_may_fail(), "every native host has the guard, on both root plans");
     }
 
     #[test]

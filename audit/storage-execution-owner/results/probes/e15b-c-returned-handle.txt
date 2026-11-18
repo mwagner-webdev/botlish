@@ -1,0 +1,19 @@
+# e15b-c-returned-handle (audit/storage-execution-owner/probes/e15b-c-returned-handle.bot)
+
+value: interp value 6; native value 6
+
+unit <program>
+  call of make (coroutine) at e15b-c-returned-handle.bot:18:5: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+unit gen<int> -- may suspend
+  suspension call of coroutine#yield at e15b-c-returned-handle.bot:11:9: live bindings 1, pending operands 0, objects kept 0
+unit make<int>
+  closure (closure) at e15b-c-returned-handle.bot:15:5: result; plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e15b-c-returned-handle.bot:15:5: result; plan: rejected (not representable: the native coroutine#create)
+unit the coroutine of gen constructed at e15b-c-returned-handle.bot:15:5 -- may suspend
+  suspension call of gen at e15b-c-returned-handle.bot:15:31: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 1, segment 0, persistent 0, result 2, escapes 0, unknown 0
+native, scratch storage on: heap allocations 2, heap bytes 144, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 2, heap bytes 144, collections 0
+coroutines: stacksMapped 1, stacksReused 0, released 1, releasedSuspended 1, sweptSuspended 0
+String sites lowering emitted a placement for: 0

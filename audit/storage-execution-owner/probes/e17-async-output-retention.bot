@@ -1,0 +1,43 @@
+# E17 -- asynchronous output retention: when can an output buffer be
+# recycled? A request handler (a coroutine) builds a response and hands it
+# out (a yield); the consumer does not "send" it at once but queues it for a
+# later flush, as a network layer with backpressure would. The response
+# outlives the handler's segment and its whole request: the facts say it
+# escapes (`yield`), so no region of the handler may hold it. Copying it
+# synchronously (p16: a `read noescape` exposure for one C call) and
+# lending it to an operation that completes later (e17b: rejected,
+# FOREIGN-BORROW) are the two foreign-call contracts.
+import std::coroutine
+import std::int
+import std::mutable_vector
+import std::str
+
+struct Req:
+    id: int
+
+fn handler(first: str, resume Req) -> str:
+    fold k from 0 to 1000000 with intermediate last first:
+        r = yield last
+        scratch = std::int::to_string(r.id).concat(" scratch")
+        "HTTP/1.1 200 OK\r\n\r\n".concat(std::int::to_string(r.id + std::str::length(scratch)))
+
+fn empty_queue() -> MutableVector[str]:
+    std::mutable_vector::from_list([])
+
+fn drive(n: int) -> int:
+    queue = empty_queue()
+    coroutine {step, first} = handler("")
+    sent = fold i from 0 to n with intermediate acc std::str::length(first):
+        response = step(Req {id: i})
+        queue.push(response)
+        if std::mutable_vector::length(queue) < 4:
+            continue
+        flushed = fold j from 0 to 4 with intermediate bytes 0:
+            out = queue.pop():
+                on IndexNotFound:
+                    break
+            bytes + std::str::length(out)
+        acc + flushed
+    sent + std::mutable_vector::length(queue)
+
+drive(1000)

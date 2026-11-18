@@ -1,0 +1,18 @@
+# Repeated suspension and resumption: one generator resumed 1,000,000
+# times. Its activation suspends at the same point every time and reuses
+# its frame: steady-state suspension allocates nothing.
+# expect: 499999499999
+import std::coroutine
+
+fn gen(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        yield i
+        acc + i
+    -1
+
+fn drain(n: int) -> int:
+    coroutine {step: g, first: f} = gen(n)
+    fold i from 0 to n with intermediate acc f:
+        acc + g()
+
+drain(1000000)

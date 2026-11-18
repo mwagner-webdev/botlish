@@ -1,0 +1,25 @@
+# e01-sequential-owner (audit/storage-execution-owner/probes/e01-sequential-owner.bot)
+
+value: interp value 4910885; native value 4910885
+
+unit <program>
+unit worker<int> -- may suspend
+  suspension call of coroutine#yield at e01-sequential-owner.bot:16:15: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at e01-sequential-owner.bot:19:15: live bindings 2, pending operands 0, objects kept 2
+  call of std::int::to_string (str) at e01-sequential-owner.bot:17:19: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at e01-sequential-owner.bot:17:19: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at e01-sequential-owner.bot:18:17: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at e01-sequential-owner.bot:18:17: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+unit drive<int>
+  call of coroutine#create (coroutine) at e01-sequential-owner.bot:24:5: transient; plan: rejected (not representable: the native coroutine#create)
+  Job {id} (struct) at e01-sequential-owner.bot:26:18: escapes (carried); plan: rejected (not representable: a struct (only Strings are placed))
+  Job {id} (struct) at e01-sequential-owner.bot:27:18: escapes (carried); plan: rejected (not representable: a struct (only Strings are placed))
+unit the coroutine of worker constructed at e01-sequential-owner.bot:24:5 -- may suspend
+  suspension call of worker at e01-sequential-owner.bot:24:31: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 1, segment 2, persistent 2, result 0, escapes 2, unknown 0
+native, scratch storage on: heap allocations 4000, heap bytes 125560, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 4000, heap bytes 125560, collections 0
+String sites lowering emitted a placement for: 0

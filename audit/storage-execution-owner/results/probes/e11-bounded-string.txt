@@ -1,0 +1,14 @@
+# e11-bounded-string (audit/storage-execution-owner/probes/e11-bounded-string.bot)
+
+value: interp value 98890; native value 98890
+
+unit <program>
+unit label<int>
+  call of std::int::to_string (str) at e11-bounded-string.bot:10:14: transient; plan: selected
+    operand range [0, 9999]: at most 4 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e11-bounded-string.bot:11:14: transient; plan: selected
+
+owner classes: transient 2, segment 0, persistent 0, result 0, escapes 0, unknown 0
+native, scratch storage on: heap allocations 0, heap bytes 0, collections 0; scratch placements 20000, regions 10000, reservations 1, peak in use 72 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 20000, heap bytes 637780, collections 0
+String sites lowering emitted a placement for: 2

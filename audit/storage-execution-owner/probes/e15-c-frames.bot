@@ -1,0 +1,40 @@
+# E15 -- C coroutine frames: which storage requirements are already
+# explicit and measurable? This program is in the freestanding C backend's
+# subset (Ints, structs of Ints, coroutines; no String): two independent
+# instances of one resumable counter, and a coroutine whose yielding
+# function makes two sequential yielding calls (their frames overlaid in
+# one union). Every frame is a fixed-size C struct in the constructing
+# function's storage (main.tcl -emit-c; examples/c-freestanding/
+# frame-sizes.sh measures it).
+import std::coroutine
+
+struct Tick:
+    by: int
+
+fn counter(start: int, resume Tick) -> int:
+    total = fold i from 0 to 3 with intermediate acc start:
+        t = yield acc
+        acc + t.by
+    total
+
+fn inner(base: int) -> int:
+    yield base
+    yield base + 1
+    base * 2
+
+fn outer(seed: int) -> int:
+    first = inner(seed)
+    second = inner(seed * 10)
+    first + second
+
+coroutine {step: a, first: a0} = counter(10)
+coroutine {step: b, first: b0} = counter(100)
+a1 = a(Tick {by: 1})
+b1 = b(Tick {by: 5})
+a2 = a(Tick {by: 1})
+coroutine {step: o, first: o0} = outer(1)
+o1 = o()
+o2 = o()
+o3 = o()
+o4 = o()
+a0 + b0 + a1 + b1 + a2 + o0 + o1 + o2 + o3 + o4

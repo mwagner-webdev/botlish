@@ -1,0 +1,53 @@
+# tests/dfa.test's dfaDriverProgram at 1,000,000 symbols: a declared recognizer
+# fed one symbol per resume. Its lowering, number#run, yields and then calls
+# itself in tail position once per symbol (tools/dfa-tail.sh).
+# expect: [1, 0]
+import std::dfa
+import std::coroutine
+import std::mutable_array
+
+class digit = '0'..'9'
+
+dfa number over ascii:
+    start:
+        digit -> more
+    more:
+        digit -> more
+        ' ' -> accept before
+        end -> accept
+
+dfa wide over unicode:
+    start:
+        0x10000..0x10FFFF 'x' -> more
+    more:
+        0x10000..0x10FFFF 'x' -> more
+        ' ' -> accept before
+        end -> accept
+
+fn count(n: int) -> int errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd:
+    coroutine {step} = number(49)
+    i = std::mutable_array::create(1, 0)
+    loop:
+        if std::mutable_array::at(i, 0) >= n:
+            break
+        std::mutable_array::set(i, 0, std::mutable_array::at(i, 0) + 1)
+        step(std::dfa::Symbol {code: 53})
+    step(std::dfa::Symbol {code: 32})
+
+fn w() -> int errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd:
+    coroutine {step} = wide(120)
+    step(std::dfa::Symbol {code: 128512})
+    step(std::dfa::Symbol {code: -1})
+
+r = count(1000000):
+    on std::dfa::UnrecognizedInput:
+        -1
+    on std::dfa::UnexpectedEnd:
+        -2
+s = w():
+    on std::dfa::UnrecognizedInput:
+        -1
+    on std::dfa::UnexpectedEnd:
+        -2
+[r, s]
+

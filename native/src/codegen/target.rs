@@ -202,31 +202,20 @@ pub fn check_host(program: &crate::nir::Program) -> Result<(), String> {
 }
 
 /// What a target's Botlish runtime provides that generated code is shaped
-/// by (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md, "Emitting is not
-/// running"): where the GC roots of a Botlish frame are kept (stack maps and
-/// the frame walk, runtime::framewalk's NATIVE_FRAME_ROOTS, or the fallback
-/// plan's shadow stack), whether an exhausted stack is the guard's
-/// (runtime::native_stack's `native_stack_overflow_supported`: no depth
-/// check, stack probes) and whether coroutines switch stacks
-/// (runtime::coroutine's STACK_SWITCHING: fusion). Code generation reads
-/// this driver's own runtime's constants for all three, so code is made for
-/// a target only when that target's runtime has the same ones
-/// (`check_emit`); the ABI fingerprint holds the root plan too.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RuntimeCapabilities {
-    pub frame_roots: bool,
-    pub stack_guard: bool,
-    pub stack_switching: bool,
-}
+/// by (runtime::capabilities): where the GC roots of a Botlish frame are
+/// kept (stack maps and the frame walk, or the ShadowOnly shadow stack),
+/// whether an exhausted stack is the guard's (no depth check, stack probes),
+/// and which general mechanism runs coroutines -- stack switching or
+/// resumable frames (codegen::resumable) -- which is also where fusion runs.
+/// Code generation reads one such value; code is made for a target only when
+/// that target's runtime has this driver's (`check_emit`); the ABI
+/// fingerprint holds the root plan and the coroutine mechanism too.
+pub use crate::runtime::capabilities::RuntimeCapabilities;
 
-/// The capabilities of this driver's own runtime: the constants code
-/// generation reads.
+/// The capabilities of this driver's own runtime: what its code generation
+/// assumes.
 pub fn host_runtime() -> RuntimeCapabilities {
-    RuntimeCapabilities {
-        frame_roots: crate::runtime::framewalk::NATIVE_FRAME_ROOTS,
-        stack_guard: crate::runtime::native_stack::native_stack_overflow_supported(),
-        stack_switching: crate::runtime::coroutine::STACK_SWITCHING,
-    }
+    RuntimeCapabilities::host()
 }
 
 /// The capabilities of TARGET's Botlish runtime as its release build has
@@ -237,7 +226,7 @@ pub fn host_runtime() -> RuntimeCapabilities {
 /// and emits for no other target.
 pub fn runtime_capabilities(target: &Triple) -> Option<RuntimeCapabilities> {
     use target_lexicon::{Architecture, Environment};
-    let full = RuntimeCapabilities { frame_roots: true, stack_guard: true, stack_switching: true };
+    let full = RuntimeCapabilities { frame_roots: true, stack_guard: true, stack_switching: true, resumable: false };
     let aarch64 = matches!(target.architecture, Architecture::Aarch64(_));
     let x86_64 = target.architecture == Architecture::X86_64;
     match target.operating_system {

@@ -1,0 +1,31 @@
+# E14 -- recursive activation: what makes storage requirements grow with
+# recursion depth? `nest` keeps a String across its recursive call, so one
+# String per level is live at the deepest point; the storage plan gives a
+# recursive unit no region (a mark per activation), and a bounded owner
+# would need a depth bound. `walk` is a recursive yielding chain: natively
+# its frames are on its coroutine's stack (stackful); the C backend refuses
+# it (FrameCycles: no finite frame).
+import std::coroutine
+import std::int
+import std::str
+
+fn nest(n: int) -> int:
+    s = std::int::to_string(n).concat(" level")
+    if n == 0:
+        return std::str::length(s)
+    std::str::length(s) + nest(n - 1)
+
+fn walk(n: int) -> int:
+    if n == 0:
+        return 0
+    yield n
+    1 + walk(n - 1)
+
+fn drive(n: int) -> int:
+    coroutine {step, first} = walk(3)
+    a = step()
+    b = step()
+    c = step()
+    nest(n) + first + a + b + c
+
+drive(200)

@@ -1,0 +1,23 @@
+# e13b-c-nested-owners (audit/storage-execution-owner/probes/e13b-c-nested-owners.bot)
+
+value: interp value 103; native value 103
+
+unit <program>
+  call of coroutine#create (coroutine) at e13b-c-nested-owners.bot:23:1: transient; plan: rejected (not representable: the native coroutine#create)
+unit child<int> -- may suspend
+  suspension call of coroutine#yield at e13b-c-nested-owners.bot:11:5: live bindings 1, pending operands 0, objects kept 0
+  suspension call of coroutine#yield at e13b-c-nested-owners.bot:12:5: live bindings 1, pending operands 0, objects kept 0
+unit parent<int> -- may suspend
+  suspension call of coroutine#yield at e13b-c-nested-owners.bot:17:5: live bindings 2, pending operands 0, objects kept 2
+  suspension call of coroutine#yield at e13b-c-nested-owners.bot:19:5: live bindings 2, pending operands 0, objects kept 2
+  closure (closure) at e13b-c-nested-owners.bot:16:5: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of coroutine#create (coroutine) at e13b-c-nested-owners.bot:16:5: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of child constructed at e13b-c-nested-owners.bot:16:5 -- may suspend
+  suspension call of child at e13b-c-nested-owners.bot:16:31: live bindings 0, pending operands 0, objects kept 0
+unit the coroutine of parent constructed at e13b-c-nested-owners.bot:23:1 -- may suspend
+  suspension call of parent at e13b-c-nested-owners.bot:23:27: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 1, segment 0, persistent 2, result 0, escapes 0, unknown 0
+native, scratch storage on: heap allocations 0, heap bytes 0, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 0, heap bytes 0, collections 0
+String sites lowering emitted a placement for: 0

@@ -475,28 +475,28 @@
 # ---------------------------------------------------------------------------
 # What the guard lets the compiler leave out, on every host with it
 
-@@ effects-fallible-again a Botlish call is fallible again where native frames hold the roots: callers check for an error the guard makes impossible
+@@ effects-fallible-again a Botlish call is fallible again where the stack guard exists (both root plans of every native host): callers check for an error the guard makes impossible
 ## native/src/nir.rs
 <<<<
-        local[i].0 = (depth_checked || stack_checked) && f.has_botlish_call();
+        local[i].0 = (stack_checked && f.has_botlish_call()) || (depth_checked && f.may_reserve_shadow_slots());
 ====
         local[i].0 = f.has_botlish_call();
 >>>>
 
-@@ effects-infallible-on-fallback a Botlish call proven infallible on the fallback plan, whose shadow stack's depth check can fail it: callers do not check
+@@ effects-infallible-on-fallback a function that reserves shadow slots proven infallible on a ShadowOnly runtime without the guard, whose shadow stack's bound can fail it: callers do not check (nir's call-effect test of such a runtime)
 ## native/src/nir.rs
 <<<<
-        local[i].0 = (depth_checked || stack_checked) && f.has_botlish_call();
+        local[i].0 = (stack_checked && f.has_botlish_call()) || (depth_checked && f.may_reserve_shadow_slots());
 ====
-        local[i].0 = (false && depth_checked || stack_checked) && f.has_botlish_call();
+        local[i].0 = (stack_checked && f.has_botlish_call()) || (false && depth_checked && f.may_reserve_shadow_slots());
 >>>>
 
 @@ depth-reserved-on-native-frames a function with a Botlish call reserves depth where native frames hold the roots, as the stack-limit check did
 ## native/src/codegen/roots.rs
 <<<<
-    let depth_reservation = has_call && crate::runtime::native_stack::depth_checked(native_frame_supported);
+        RootMode::NativeFrame => (RootStorage::NativeFrame, false),
 ====
-    let depth_reservation = has_call;
+        RootMode::NativeFrame => (RootStorage::NativeFrame, has_call),
 >>>>
 
 @@ stack-probes-disabled generated code does not probe a frame larger than a page: a large frame steps over the system's guard
@@ -569,15 +569,7 @@
             }
 >>>>
 
-@@ fallback-runs-coroutines the fallback root plan starts native coroutines: its shadow stack would hold a suspended coroutine's roots out of order
-## native/src/runtime/coroutine.rs
-<<<<
-        if !super::framewalk::NATIVE_FRAME_ROOTS {
-            return vm(p).fail(RtError::Unsupported(
-====
-        if !super::framewalk::NATIVE_FRAME_ROOTS && false {
-            return vm(p).fail(RtError::Unsupported(
->>>>
+@@ fallback-runs-coroutines the fallback root plan runs coroutines on stacks of their own (stack switching) instead of resumable frames: its one LIFO shadow stack would hold a suspended coroutine's roots out of order
 ## native/src/runtime/coroutine.rs
 <<<<
 )) && super::framewalk::NATIVE_FRAME_ROOTS;

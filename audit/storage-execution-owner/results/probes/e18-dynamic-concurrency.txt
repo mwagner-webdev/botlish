@@ -1,0 +1,28 @@
+# e18-dynamic-concurrency (audit/storage-execution-owner/probes/e18-dynamic-concurrency.bot)
+
+value: interp value 406; native value 406
+
+unit <program>
+  call of argv (list) at e18-dynamic-concurrency.bot:30:8: transient; plan: rejected (not representable: the native argv)
+  call of list (list) at e18-dynamic-concurrency.bot:32:9: transient; plan: rejected (not representable: the native list)
+unit request<int> -- may suspend
+  suspension call of coroutine#yield at e18-dynamic-concurrency.bot:14:5: live bindings 1, pending operands 0, objects kept 2
+  call of std::int::to_string (str) at e18-dynamic-concurrency.bot:13:33: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 73786976294838206463]: at most 20 characters (ASCII) -- a native String block of at most 48 bytes (no sign) [inference]
+  call of std::str::concat (str) at e18-dynamic-concurrency.bot:13:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at e18-dynamic-concurrency.bot:15:22: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+unit empty_pending<generic>
+  call of list (list) at e18-dynamic-concurrency.bot:18:36: result; plan: rejected (not representable: the native list)
+  call of std::mutable_vector::from_list (mutvec) at e18-dynamic-concurrency.bot:18:5: result; plan: rejected (not representable: the native std::mutable_vector::from_list)
+unit burst<int>
+  call of empty_pending (mutvec) at e18-dynamic-concurrency.bot:21:15: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  closure (closure) at e18-dynamic-concurrency.bot:23:9: escapes (carried); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e18-dynamic-concurrency.bot:23:9: escapes (carried); plan: rejected (not representable: the native coroutine#create)
+unit the coroutine of request constructed at e18-dynamic-concurrency.bot:23:9 -- may suspend
+  suspension call of request at e18-dynamic-concurrency.bot:23:35: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 3, segment 1, persistent 2, result 2, escapes 2, unknown 0
+native, scratch storage on: heap allocations 164, heap bytes 8145, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 164, heap bytes 8145, collections 0
+coroutines: stacksMapped 32, stacksReused 0, released 32, releasedSuspended 0, sweptSuspended 0
+String sites lowering emitted a placement for: 0

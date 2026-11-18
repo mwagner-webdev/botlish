@@ -1,0 +1,41 @@
+# res.bot -- the resource of tests/resumable/cleanup-gc.bot
+# (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md, section 7): a Res
+# owns a number; its cleanup allocates -- Strings, and a MutableArray whose
+# factory the runtime calls, Botlish code run under an operation -- and logs
+# the number and what it built, so the Log's lines are the releases in the
+# order they ran, with the programs' own notes between.
+import std::int
+import std::list
+import std::mutable_array
+import std::mutable_vector
+import std::str
+
+opaque resource struct Res:
+    id: int
+
+opaque context struct Log:
+    lines: MutableVector[int]
+
+fn create() -> Log:
+    Log {lines: std::mutable_vector::from_list([])}
+
+fn label(i: int) -> str:
+    std::str::concat("c", std::int::to_string(i))
+
+cleanup fn release(r: Res, context log: Log):
+    {id} = r
+    names = std::mutable_array::generate(12, label)
+    words = loop i from 0 to 8:
+        std::str::concat(std::int::to_string(id), std::int::to_string(i))
+    log.lines.push(id)
+    log.lines.push(std::mutable_array::capacity(names) + std::list::length(words))
+
+fn open(n: int) -> Res:
+    Res {id: n}
+
+fn note(n: int, context log: Log):
+    log.lines.push(n)
+
+fn lines(context log: Log) -> List[int] errors IndexNotFound:
+    loop i from 0 to log.lines.length():
+        log.lines.at(i)

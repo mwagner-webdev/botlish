@@ -1,0 +1,12 @@
+# e09_lease -- a module for E09b: a resource whose cleanup counts nothing
+# and runs no I/O (a lexically scoped obligation, released where its
+# owner's scope ends).
+opaque resource struct Lease:
+    id: int
+
+cleanup fn give_back(l: Lease):
+    {id} = l
+    unit
+
+fn take(n: int) -> Lease:
+    Lease {id: n}

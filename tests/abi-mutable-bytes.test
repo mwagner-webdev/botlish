@@ -879,7 +879,7 @@ test abi-mutable-bytes-machine-code-read-function {the machine code of std::linu
     set id [nirFunctionId [native::nir [bytesHir $text]] std::linux::sys::read]
     set calls [machineCalls $exe botlish_fn_$id]
     set targets [lmap c $calls {lindex $c 0}]
-    set helpers [lsearch -all -inline -regexp $targets {^rt_}]
+    set helpers [withoutShadowOverflow [lsearch -all -inline -regexp $targets {^rt_}]]
     list $helpers \
         [llength [lsearch -all -regexp $targets {^(read|recv|recvfrom|pread|pread64|readv|syscall)(@plt)?$}]] \
         [expr {[lsearch -regexp $targets {^botlish_fn_[0-9]+$}] >= 0}]
@@ -889,7 +889,7 @@ test abi-mutable-bytes-detach-function-machine-code {the detach (std::abi::bytes
     set text [readProgram 8]
     set exe [buildExecutable machine $text]
     set id [nirFunctionId [native::nir [bytesHir $text]] std::abi::bytes::detach]
-    lmap c [machineCalls $exe botlish_fn_$id] {lindex $c 0}
+    withoutShadowOverflow [lmap c [machineCalls $exe botlish_fn_$id] {lindex $c 0}]
 } -result rt_mbytes_clone
 
 # strace is optional corroboration: the kernel itself reports the arguments of

@@ -1,0 +1,66 @@
+# Errors crossing coroutine boundaries: before the first yield (at the
+# construction), after a yield (at a resume), through a deep yield, handled
+# inside the coroutine, and raised again by a failed coroutine on every
+# later resume.
+# expect: [42, 0, [7, 8, -7, -1007, 1], [1, 2, 1, 1, 1], [5, 6, 500, 501]]
+import std::coroutine
+
+error Boom:
+    code: int
+
+fn early(n: int) -> int errors Boom:
+    if n > 0:
+        fail Boom {code: n}
+    yield 0
+    0
+
+fn later(n: int) -> int errors Boom:
+    yield n
+    yield n + 1
+    if n > 3:
+        fail Boom {code: n}
+    n
+
+fn deep(n: int) -> int errors Boom:
+    later(n)
+
+fn inside(n: int) -> int:
+    a = later(n):
+        on Boom {code}:
+            code * 100
+    yield a
+    a + 1
+
+fn start_early(n: int) -> int:
+    coroutine {first: v} = early(n):
+        on Boom {code}:
+            return code + 40
+    v
+
+fn drive_deep(n: int) -> List[int]:
+    coroutine {step: d, first: d0} = deep(n):
+        on Boom {code}:
+            return [-99]
+    d1 = d():
+        on Boom {code}:
+            -code
+    d2 = d():
+        on Boom {code}:
+            -code
+    d3 = d():
+        on Boom {code}:
+            -code - 1000
+    done = if std::coroutine::done?(d):
+        1
+    else:
+        0
+    [d0, d1, d2, d3, done]
+
+fn drive_inside(n: int) -> List[int]:
+    coroutine {step: h, first: h0} = inside(n)
+    h1 = h()
+    h2 = h()
+    h3 = h()
+    [h0, h1, h2, h3]
+
+[start_early(2), start_early(0), drive_deep(7), drive_deep(1), drive_inside(5)]

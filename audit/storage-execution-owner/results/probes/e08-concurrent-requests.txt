@@ -1,0 +1,29 @@
+# e08-concurrent-requests (audit/storage-execution-owner/probes/e08-concurrent-requests.bot)
+
+value: interp value 28025; native value 28025
+
+unit <program>
+unit request<int> -- may suspend
+  suspension call of coroutine#yield at e08-concurrent-requests.bot:13:5: live bindings 2, pending operands 0, objects kept 2
+  call of std::int::to_string (str) at e08-concurrent-requests.bot:12:33: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 799]: at most 3 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e08-concurrent-requests.bot:12:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at e08-concurrent-requests.bot:14:13: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at e08-concurrent-requests.bot:14:40: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 1598]: at most 4 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e08-concurrent-requests.bot:14:13: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+unit empty_pending<generic>
+  call of list (list) at e08-concurrent-requests.bot:18:36: result; plan: rejected (not representable: the native list)
+  call of std::mutable_vector::from_list (mutvec) at e08-concurrent-requests.bot:18:5: result; plan: rejected (not representable: the native std::mutable_vector::from_list)
+unit round<int>
+  call of empty_pending (mutvec) at e08-concurrent-requests.bot:21:15: transient; plan: rejected (its callee takes no destination: nothing it returns can be placed in its caller's region)
+  closure (closure) at e08-concurrent-requests.bot:23:9: escapes (carried); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e08-concurrent-requests.bot:23:9: escapes (carried); plan: rejected (not representable: the native coroutine#create)
+unit the coroutine of request constructed at e08-concurrent-requests.bot:23:9 -- may suspend
+  suspension call of request at e08-concurrent-requests.bot:23:35: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 1, segment 3, persistent 2, result 2, escapes 2, unknown 0
+native, scratch storage on: heap allocations 5000, heap bytes 232160, collections 12; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 5000, heap bytes 232160, collections 12
+coroutines: stacksMapped 8, stacksReused 792, released 800, releasedSuspended 0, sweptSuspended 0
+String sites lowering emitted a placement for: 0

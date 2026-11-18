@@ -1,0 +1,35 @@
+# e02-nested-calls (audit/storage-execution-owner/probes/e02-nested-calls.bot)
+
+value: interp value 542688; native value 542688
+
+unit <program>
+unit inner<int>
+  call of std::int::to_string (str) at e02-nested-calls.bot:11:9: transient; plan: selected
+    operand range [0, 999]: at most 3 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e02-nested-calls.bot:11:9: transient; plan: selected
+unit outer<int>
+  call of std::int::to_string (str) at e02-nested-calls.bot:15:9: transient; plan: selected
+    operand range [0, 999]: at most 3 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e02-nested-calls.bot:15:9: transient; plan: selected
+unit inner_y<int> -- may suspend
+  suspension call of coroutine#yield at e02-nested-calls.bot:21:5: live bindings 1, pending operands 0, objects kept 0
+  call of std::int::to_string (str) at e02-nested-calls.bot:20:9: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 999]: at most 3 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e02-nested-calls.bot:20:9: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+unit outer_y<int> -- may suspend
+  suspension call of inner_y at e02-nested-calls.bot:27:31: live bindings 1, pending operands 1, objects kept 2
+  call of std::int::to_string (str) at e02-nested-calls.bot:25:9: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 999]: at most 3 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e02-nested-calls.bot:25:9: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at e02-nested-calls.bot:26:9: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 2997]: at most 4 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+unit drive<int>
+  closure (closure) at e02-nested-calls.bot:32:9: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e02-nested-calls.bot:32:9: transient; plan: rejected (not representable: the native coroutine#create)
+unit the coroutine of outer_y constructed at e02-nested-calls.bot:32:9 -- may suspend
+  suspension call of outer_y at e02-nested-calls.bot:32:35: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 6, segment 3, persistent 2, result 0, escapes 0, unknown 0
+native, scratch storage on: heap allocations 5000, heap bytes 156188, collections 0; scratch placements 4000, regions 2000, reservations 1, peak in use 104 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 9000, heap bytes 279748, collections 0
+String sites lowering emitted a placement for: 4

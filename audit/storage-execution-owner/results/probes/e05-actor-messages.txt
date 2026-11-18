@@ -1,0 +1,70 @@
+# e05-actor-messages (audit/storage-execution-owner/probes/e05-actor-messages.bot)
+
+value: interp value {[4835, 1490]}; native value {[4835, 1490]}
+
+unit <program>
+  call of std::event_loop::create (struct) at e05-actor-messages.bot:67:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at e05-actor-messages.bot:67:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of std::event_loop::deterministic::create (struct) at e05-actor-messages.bot:68:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at e05-actor-messages.bot:68:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of std::actor::create (struct) at e05-actor-messages.bot:69:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at e05-actor-messages.bot:69:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (list) at e05-actor-messages.bot:70:1: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of list (list) at e05-actor-messages.bot:72:9: result; plan: rejected (not representable: the native list)
+  call of list (list) at e05-actor-messages.bot:74:9: result; plan: rejected (not representable: the native list)
+  call of list (list) at e05-actor-messages.bot:76:9: result; plan: rejected (not representable: the native list)
+unit server<std::actor::Inbox[Req]> -- may suspend
+  suspension call of std::actor::listen at e05-actor-messages.bot:23:10: live bindings 0, pending operands 0, objects kept 0
+  suspension call of std::actor::receive at e05-actor-messages.bot:27:13: live bindings 2, pending operands 0, objects kept 1
+  suspension call of std::actor::send at e05-actor-messages.bot:32:9: live bindings 3, pending operands 0, objects kept 8
+  call of std::actor::listen (struct) at e05-actor-messages.bot:23:10: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at e05-actor-messages.bot:25:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::receive (struct) at e05-actor-messages.bot:27:13: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at e05-actor-messages.bot:30:16: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at e05-actor-messages.bot:30:16: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at e05-actor-messages.bot:31:16: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at e05-actor-messages.bot:31:45: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at e05-actor-messages.bot:31:16: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  Resp {id, body} (struct) at e05-actor-messages.bot:32:22: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at e05-actor-messages.bot:34:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit client<int, std::actor::Address[Req], std::actor::Inbox[Resp], std::actor::Address[Resp]> -- may suspend
+  suspension call of std::actor::listen at e05-actor-messages.bot:37:10: live bindings 3, pending operands 0, objects kept 0
+  suspension call of std::actor::deliver at e05-actor-messages.bot:42:9: live bindings 6, pending operands 0, objects kept 4
+  suspension call of std::actor::receive at e05-actor-messages.bot:43:13: live bindings 6, pending operands 0, objects kept 3
+  call of std::actor::listen (struct) at e05-actor-messages.bot:37:10: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at e05-actor-messages.bot:39:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at e05-actor-messages.bot:41:16: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 199]: at most 3 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e05-actor-messages.bot:41:16: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  Req {id, text, reply} (struct) at e05-actor-messages.bot:42:20: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::receive (struct) at e05-actor-messages.bot:43:13: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at e05-actor-messages.bot:47:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><int>
+  call of std::actor::open (struct) at e05-actor-messages.bot:50:32: escapes (callee error); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at e05-actor-messages.bot:51:32: escapes (callee error); plan: rejected (not confined to its innermost region)
+  closure (closure) at e05-actor-messages.bot:53:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e05-actor-messages.bot:53:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at e05-actor-messages.bot:53:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at e05-actor-messages.bot:54:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  closure (closure) at e05-actor-messages.bot:57:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e05-actor-messages.bot:57:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at e05-actor-messages.bot:57:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at e05-actor-messages.bot:58:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::run<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at e05-actor-messages.bot:60:5: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::shutdown<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at e05-actor-messages.bot:61:5: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::take_outcomes (list) at e05-actor-messages.bot:63:16: escapes (error); plan: rejected (not confined to its innermost region)
+  loop (list) at e05-actor-messages.bot:64:5: result; plan: rejected (not representable: a list (only Strings are placed))
+unit the coroutine of server constructed at e05-actor-messages.bot:53:9 -- may suspend
+  suspension call of server at e05-actor-messages.bot:53:35: live bindings 0, pending operands 0, objects kept 0
+  call of server (struct) at e05-actor-messages.bot:53:35: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of client constructed at e05-actor-messages.bot:57:9 -- may suspend
+  suspension call of client at e05-actor-messages.bot:57:35: live bindings 0, pending operands 0, objects kept 0
+  call of client (struct) at e05-actor-messages.bot:57:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+
+owner classes: transient 0, segment 1, persistent 6, result 10, escapes 26, unknown 0
+native, scratch storage on: heap allocations 3361, heap bytes 174210, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 3361, heap bytes 174210, collections 0
+coroutines: stacksMapped 4, stacksReused 0, released 4, releasedSuspended 0, sweptSuspended 0
+String sites lowering emitted a placement for: 0

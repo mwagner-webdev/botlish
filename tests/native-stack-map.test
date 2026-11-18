@@ -120,11 +120,11 @@ proc underGcStress {body} {
 # generated CLIF text is unaffected by GC-stress mode (structural, not
 # behavioral). See NATIVE-STACK-MAPS.md for its before/after assembly.
 
-test stack-map-fib-1 {fib<int> uses native roots where native frames hold them (nativeFrameRoots) and target-specific overflow protection: the depth reservation goes only with both those and the guard} -body {
+test stack-map-fib-1 {fib<int> uses native roots where native frames hold them (nativeFrameRoots), the shadow stack elsewhere, and target-specific overflow protection: the depth reservation only where no stack guard bounds recursion (nativeStackGuard), on either root plan} -body {
     set report [native::roots [sourceIrHir [file join $::projectRoot bench fib.ir]]]
     list [storageOf $report fib] [depthReservationOf $report fib]
 } -result [list [if {[testConstraint nativeFrameRoots]} {string cat "native frame"} else {string cat "runtime stack"}] \
-    [expr {[testConstraint nativeStackGuard] && [testConstraint nativeFrameRoots] ? "no" : "yes"}]]
+    [expr {[testConstraint nativeStackGuard] ? "no" : "yes"}]]
 
 test stack-map-fib-2 {fib<int> has no depth helper where the native stack guard is (nativeStackGuard: Linux x86-64 and AArch64, macOS AArch64, Windows x86-64)} -body {
     set hir [sourceIrHir [file join $::projectRoot bench fib.ir]]

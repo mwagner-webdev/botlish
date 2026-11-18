@@ -35,8 +35,23 @@ use std::rc::Rc;
 /// (core::process::defaultArgv), never the launching process's own.
 pub const DEFAULT_ARGV: &[&str] = &["botlish-runner"];
 
-/// Fallback shadow stack capacity in Value slots.
+/// The shadow stack's least capacity in Value slots (32 MiB).
 const SHADOW_STACK_SLOTS: usize = 1 << 22;
+
+/// The ShadowOnly plan's shadow array for a Vm whose code runs on STACK
+/// (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md, section 6.3): as
+/// many bytes as that stack has, and never fewer than SHADOW_STACK_SLOTS
+/// slots. Where native frames hold roots, each root slot takes 8 bytes of
+/// its function's native frame, so a recursion's roots never outgrow its
+/// thread's stack, which the guard bounds; a shadow array as large as the
+/// stack therefore admits every recursion the native-frame plan admits and
+/// is full no sooner than the stack would be (`rt_shadow_overflow` reports
+/// it the guard's way). The array is a zeroed allocation: reserved, not
+/// touched, so only the slots a run reaches become resident.
+fn shadow_slots(stack: Option<&NativeStack>) -> usize {
+    let stack_slots = stack.map_or(0, |s| (s.high_bound - s.low_bound) / std::mem::size_of::<Value>());
+    stack_slots.max(SHADOW_STACK_SLOTS)
+}
 
 pub struct FunctionInfo {
     pub arity: usize,
@@ -165,20 +180,6 @@ pub struct Vm {
     /// it), meaning "the pieces of your result may go to my region". 0
     /// everywhere else, so a function entered any other way reads 0.
     pub scratch_dest: u32,
-    /// The currently active `RootStorage::NativeFrame` function's own root
-    /// block (null when none is active): codegen::clif's prologue publishes
-    /// its Cranelift stack slot's address and slot count here instead of
-    /// participating in `ss_top`/`ss_limit`/`shadow` below, and restores
-    /// whatever was here on entry before returning (see codegen::roots's
-    /// `RootStorage` doc for why at most one such registration can ever be
-    /// active at a time). Scanned by `collect_with` alongside the shadow
-    /// stack, the pending error, and `temp_roots` -- a fourth, minimal root
-    /// source, not a replacement for any of the others.
-    pub native_roots_ptr: *mut Value,
-    /// A plain word (not `u32`) so generated code can store/reload it with
-    /// the same I64 op it already uses for `native_roots_ptr`, without a
-    /// second width.
-    pub native_roots_len: u64,
     /// The lowest stack pointer a frame that checks its stack may run at
     /// (codegen::clif's `prologue_stack_limit`): set only in a native
     /// library's instance (`check_stack_limit`), whose code checks it in
@@ -304,10 +305,10 @@ pub struct Vm {
     /// program). `collect_with` walks the
     /// native call stack through it (runtime::framewalk) to discover every
     /// active `RootStorage::NativeFrame` function's roots on the x86-64
-    /// stack-map path -- a fifth root source, alongside the shadow stack,
-    /// `native_roots_ptr`/`_len` (the fallback path's own, narrower
-    /// mechanism), the pending error, and `temp_roots`; see `collect_with`'s
-    /// own doc for why these never double-trace the same logical root.
+    /// stack-map path -- a root source alongside the shadow stack (the
+    /// ShadowOnly plan's), the pending error, and `temp_roots`; see
+    /// `collect_with`'s own doc for why these never double-trace the same
+    /// logical root.
     /// Starts as an empty table (`ProgramMap::new()`), which simply finds no
     /// roots -- harmless for the brief window before a program is compiled.
     framemap: std::sync::Arc<ProgramMap>,
@@ -370,8 +371,6 @@ pub const VM_CONSTS_OFFSET: i32 = offset_of!(Vm, consts) as i32;
 pub const VM_ALLOC_SITE_OFFSET: i32 = offset_of!(Vm, alloc_site) as i32;
 pub const VM_SCRATCH_REQUEST_OFFSET: i32 = offset_of!(Vm, scratch_request) as i32;
 pub const VM_SCRATCH_DEST_OFFSET: i32 = offset_of!(Vm, scratch_dest) as i32;
-pub const VM_NATIVE_ROOTS_PTR_OFFSET: i32 = offset_of!(Vm, native_roots_ptr) as i32;
-pub const VM_NATIVE_ROOTS_LEN_OFFSET: i32 = offset_of!(Vm, native_roots_len) as i32;
 pub const VM_STATICS_OFFSET: i32 = offset_of!(Vm, statics_ptr) as i32;
 pub const VM_STACK_LIMIT_OFFSET: i32 = offset_of!(Vm, stack_limit) as i32;
 pub const VM_CONTEXT_OFFSET: i32 = offset_of!(Vm, context_ptr) as i32;
@@ -382,7 +381,6 @@ impl Vm {
         // recursion (codegen::roots's `depth_reservation`): not needed where
         // native frames hold the roots, whose recursion the stack guard
         // bounds (runtime::platform).
-        let mut shadow = if super::framewalk::NATIVE_FRAME_ROOTS { Vec::new() } else { vec![0u64; SHADOW_STACK_SLOTS] };
         // Typed: on a host outside the list the block is a bare `None`.
         let native_stack: Option<NativeStack> = {
             #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
@@ -390,8 +388,9 @@ impl Vm {
             #[cfg(not(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
             { None }
         };
+        let mut shadow = if super::framewalk::NATIVE_FRAME_ROOTS { Vec::new() } else { vec![0u64; shadow_slots(native_stack.as_ref())] };
         let base = if shadow.is_empty() { std::ptr::null_mut() } else { shadow.as_mut_ptr() };
-        let limit = if shadow.is_empty() { base } else { unsafe { base.add(SHADOW_STACK_SLOTS) } };
+        let limit = if shadow.is_empty() { base } else { unsafe { base.add(shadow.len()) } };
         Box::new(Vm {
             ss_top: base,
             ss_limit: limit,
@@ -399,8 +398,6 @@ impl Vm {
             alloc_site: 0,
             scratch_request: 0,
             scratch_dest: 0,
-            native_roots_ptr: std::ptr::null_mut(),
-            native_roots_len: 0,
             stack_limit: 0,
             stack_limit_checked: false,
             statics_ptr: std::ptr::null_mut(),
@@ -738,20 +735,11 @@ impl Vm {
         } else {
             unsafe { std::slice::from_raw_parts(self.ss_base, self.ss_top.offset_from(self.ss_base) as usize) }
         };
-        // The currently active RootStorage::NativeFrame function's own root
-        // block, if any (see that field's doc): empty when no such function
-        // is on the call stack right now (native_roots_ptr null, or -- same
-        // thing -- native_roots_len 0). Fallback path only (non-x86-64, or
-        // any function `roots::plan` still routes there): on the stack-map
-        // path below, `native_roots_ptr`/`_len` are never written at all
-        // (codegen::clif's `prologue_native_frame`), so this is always empty
-        // there -- see `native_frame_roots` below for why this is not a
-        // double-count either way.
-        let native = if self.native_roots_ptr.is_null() {
-            &[][..]
-        } else {
-            unsafe { std::slice::from_raw_parts(self.native_roots_ptr, self.native_roots_len as usize) }
-        };
+        // The shadow stack above is the ShadowOnly plan's only root storage
+        // for running code (codegen::roots): every function with a root slot
+        // keeps its frame there, leaf or not, so a function an operation
+        // re-enters Botlish code under can never hide an older activation's
+        // roots (invariant I9: there is no per-function published block).
         // Every `RootStorage::NativeFrame` function currently suspended
         // anywhere on the native call stack, on the x86-64 stack-map path
         // (runtime::framewalk; a no-op elsewhere -- see that module's own
@@ -760,11 +748,9 @@ impl Vm {
         // covered by this walk never also stores a real Value into the
         // shadow array `stack` above (`codegen::clif::Translator::def`
         // stores to exactly one physical location per rooted register, and
-        // `RootPlan::storage` picks that location once, never both), and
-        // never also publishes to `native_roots_ptr`/`_len` (this module's
-        // own comment above) -- so this walk's roots, `stack`'s, and
-        // `native`'s are three disjoint sets of memory locations, never the
-        // same logical root scanned twice.
+        // `RootPlan::storage` picks that location once, never both) -- so
+        // this walk's roots and `stack`'s are disjoint sets of memory
+        // locations, never the same logical root scanned twice.
         let mut native_frame_roots = Vec::new();
         // The running stacks (COROUTINES.md): the current one from here, then
         // every resumer of the running coroutine chain from the point it
@@ -802,7 +788,6 @@ impl Vm {
         let roots = stack
             .iter()
             .copied()
-            .chain(native.iter().copied())
             .chain(native_frame_roots)
             .chain(error_values)
             .chain(self.declared_payload.iter().copied())
@@ -851,8 +836,6 @@ impl Vm {
 
     pub fn reset(&mut self) {
         self.ss_top = self.ss_base;
-        self.native_roots_ptr = std::ptr::null_mut();
-        self.native_roots_len = 0;
         self.error = None;
         self.declared_error = 0;
         self.declared_payload.clear();

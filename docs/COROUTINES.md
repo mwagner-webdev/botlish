@@ -708,10 +708,33 @@ dictionary, slot or indirect call.
   running stack; the coroutine object holds the fiber and the frame its
   switch left, from which Windows' unwinder walks it:
   WINDOWS-X86-64-MILESTONE-5.md.)
+* Native without a stack switch (the `fallback-roots` build, and
+  WebAssembly next: WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md):
+  no stack per coroutine. Every function that may yield is lowered to a
+  state machine over a heap frame (`codegen/resumable.rs`); a suspension
+  saves exactly the registers live after it into the activation's frame
+  and *returns* the frame through every activation of the yielding call
+  chain, and a resume calls the chain again from its outermost frame. A
+  suspended coroutine is its frame chain (`CoroutineObj::frame`, each frame
+  holding its suspended callee's: `runtime/resumable.rs`'s `FrameObj`,
+  32 bytes plus a word per saved register); an activation that suspends
+  again reuses its frame, so does the next call at a call site whose callee
+  returned, and a yielding self tail call continues the same activation
+  (its frame and its call sites' recycled ones) as the next iteration.
 
 ### 42. GC tracing of suspended state
 
-Native (`runtime/heap.rs`, `runtime/vm.rs`, `runtime/framewalk.rs`):
+Native without a stack switch (resumable frames,
+WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md): a frame is an
+ordinary heap object reachable only through its coroutine (or the frame of
+its caller, or the registers of the activation running with it); the
+collector traces its suspended callee and the tagged slots of its current
+suspension point, never a raw slot, and a running activation's frame traces
+nothing (its values are on the shadow stack). The running code's roots are
+on one LIFO shadow stack, which a suspension leaves exactly where the
+segment found it.
+
+Native with stack switching (`runtime/heap.rs`, `runtime/vm.rs`, `runtime/framewalk.rs`):
 
 * running coroutines form a chain (`Vm::co_current`, each one's `resumer`);
   every running coroutine object is a root, and the collector walks the

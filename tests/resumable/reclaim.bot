@@ -1,0 +1,46 @@
+# Reclamation (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md,
+# invariant I8): 1,000 coroutines suspended two activations deep and
+# released at their handles' last use, 1,000 resumed to completion and 1,000
+# abandoned at their scope's end, then collections. Frames are ordinary heap
+# objects reachable only through their coroutine: once released, completed
+# or abandoned, none stays live (the allocation report's ResumeFrame
+# currentLiveObjects is 0 after the churn's collections).
+# expect: [499500, 505390, 500500, 4000]
+import std::coroutine
+import std::int
+import std::list
+import std::str
+
+fn inner(i: int) -> int:
+    xs = [i, i + 1, i + 2]
+    yield i
+    std::list::length(xs) + i
+
+fn holder(i: int) -> int:
+    tag = std::int::to_string(i)
+    v = inner(i)
+    v + std::str::length(tag)
+
+fn dropped(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        coroutine {first: f} = holder(i)
+        acc + f
+
+fn finished(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        coroutine {step: s, first: f} = holder(i)
+        acc + s()
+
+fn abandoned(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        coroutine {step: s, first: f} = holder(i)
+        g = f + 1
+        acc + g
+
+fn churn(rounds: int) -> int:
+    fold i from 0 to rounds with intermediate acc 0:
+        junk = loop j from 0 to 20:
+            std::str::concat("junk", std::int::to_string(i + j))
+        acc + std::list::length(junk)
+
+[dropped(1000), finished(1000), abandoned(1000), churn(200)]

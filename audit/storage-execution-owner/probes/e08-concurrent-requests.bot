@@ -1,0 +1,34 @@
+# E08 -- concurrent requests: a dispatcher opens K request coroutines (K a
+# constant here), each keeping its own parsed head across its suspension,
+# and resumes them only after all K are open: K request states coexist. The
+# storage that must be retained grows with K; a sequential worker (E07)
+# needs one request's worth.
+import std::coroutine
+import std::int
+import std::mutable_vector
+import std::str
+
+fn request(id: int) -> int:
+    head = "GET /items/".concat(std::int::to_string(id))
+    yield std::str::length(head)
+    reply = head.concat(" -> ").concat(std::int::to_string(id * 2))
+    std::str::length(reply)
+
+fn empty_pending() -> MutableVector[Coroutine{args: [], return: int, errors: []}]:
+    std::mutable_vector::from_list([])
+
+fn round(base: int) -> int:
+    pending = empty_pending()
+    opened = fold k from 0 to 8 with intermediate acc 0:
+        coroutine {step, first} = request(base + k)
+        pending.push(step)
+        acc + first
+    finished = fold k from 0 to 8 with intermediate acc 0:
+        h = pending.pop():
+            on IndexNotFound:
+                break
+        acc + h()
+    opened + finished
+
+fold i from 0 to 100 with intermediate acc 0:
+    acc + round(i * 8)

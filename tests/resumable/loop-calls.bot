@@ -1,0 +1,35 @@
+# A yielding call made anew in every iteration of a loop -- an event loop's
+# yield_now per dispatch (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+# MILESTONE-1.md, "Frame reuse"): each call is a fresh activation of its
+# callee, but the call site hands the next call the frame of the activation
+# that just returned, so 100,000 suspensions of 100,000 activations make a
+# handful of frames; and two sites calling one function keep their frames
+# apart.
+# expect: [9999900000, 300]
+import std::coroutine
+
+fn pause(i: int) -> int:
+    yield i
+    i
+
+fn ticker(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        acc + pause(i)
+
+fn two_sites(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        a = pause(i)
+        b = pause(i + 1)
+        acc + b - a
+
+fn drive(n: int) -> int:
+    coroutine {step: s, first: f} = ticker(n)
+    fold i from 0 to n with intermediate acc f:
+        acc + s()
+
+fn drive_two(n: int) -> int:
+    coroutine {step: s, first: f} = two_sites(n)
+    fold i from 0 to n * 2 with intermediate acc 0:
+        s()
+
+[drive(100000), drive_two(300)]

@@ -21,38 +21,32 @@
 //! Register values live in Cranelift variables, so reads never touch
 //! memory.
 //!
-//! Where those physical slots actually live depends on `RootPlan::storage`
-//! (codegen::roots's `RootStorage`, see its own doc), and, for
-//! `NativeFrame`, on `self.stack_maps` (this function's own copy of
-//! `roots::plan`'s `native_frame_supported` argument --
-//! runtime::framewalk's `NATIVE_FRAME_ROOTS`: x86-64 and AArch64 Linux and
-//! macOS, x86-64 Windows):
+//! Where those physical slots actually live depends on the root mode of the
+//! program's runtime (`Symbols::capabilities`, runtime::capabilities's
+//! `RootMode`), one storage for every function (codegen::roots's
+//! `RootStorage`, see its own doc):
 //!
-//!   * `RuntimeStack`: the shared shadow-stack array, indexed via
-//!     `vm.ss_top`/`ss_limit`; at least one slot always, so the shared
-//!     array's bounds check still bounds native recursion depth even for a
-//!     function with zero roots (`prologue_runtime_stack`).
-//!   * `NativeFrame`, x86-64 and AArch64 (`self.stack_maps`, the primary
-//!     path this module implements): this function's own Cranelift-managed
-//!     native stack slot (`self.root_slot`/`self.base`). No publish/restore
-//!     of any kind -- the collector discovers these slots by walking the
-//!     native call stack's frame-pointer chain (rbp, x29; on Windows,
-//!     Windows' unwinder across the Rust frames between) and consulting
-//!     Cranelift `UserStackMapEntry`s
-//!     attached to each safepoint's own `call` instruction
-//!     (`mark_safepoint`, runtime/framewalk.rs). Eligible for every
-//!     function, called or not, recursive or not.
-//!   * `NativeFrame`, fallback (`!self.stack_maps`, any other host, and
-//!     the `fallback-roots` test build): the original, narrower mechanism --
-//!     only eligible for a
-//!     function with no Botlish call, published to `vm.native_roots_ptr`/
-//!     `_len` (`prologue_native_frame`).
+//!   * `NativeFrame` (stack maps: x86-64 and AArch64 Linux and macOS,
+//!     x86-64 Windows): this function's own Cranelift-managed native stack
+//!     slot (`self.root_slot`/`self.base`). No publish/restore of any kind
+//!     -- the collector discovers these slots by walking the native call
+//!     stack's frame-pointer chain (rbp, x29; on Windows, Windows' unwinder
+//!     across the Rust frames between) and consulting Cranelift
+//!     `UserStackMapEntry`s attached to each safepoint's own `call`
+//!     instruction (`mark_safepoint`, runtime/framewalk.rs).
+//!   * `RuntimeStack` (ShadowOnly: the `fallback-roots` build, and
+//!     WebAssembly next; WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+//!     MILESTONE-1.md): the Vm's one LIFO shadow array, indexed via
+//!     `vm.ss_top`/`ss_limit`, for every function with at least one slot,
+//!     leaf or not (`prologue_runtime_stack`); a function with none touches
+//!     no shadow state. Nothing is ever published anywhere else.
 //!
-//! Where native frames hold the roots the stack guard handles native
-//! overflow (runtime::platform: Linux, macOS and, since
-//! WINDOWS-X86-64-MILESTONE-4.md, Windows), so a calling function has no
-//! Botlish-specific depth instructions; the fallback plan's `RuntimeStack`
-//! frames are bounded by the shadow array's end.
+//! The stack guard handles native overflow on both plans (runtime::platform:
+//! Linux, macOS and, since WINDOWS-X86-64-MILESTONE-4.md, Windows), so a
+//! calling function has no Botlish-specific depth instructions; a full
+//! shadow array is reported the guard's way (`rt_shadow_overflow`). Only a
+//! runtime without the guard keeps the depth token (a slot for every
+//! function with a Botlish call).
 //!
 //! Whichever combination applies, `self.base` is simply "the address slot 0
 //! lives at" for the rest of this file: `def`/`def_raw`/`zero_root_slots`
@@ -66,9 +60,10 @@ use super::roots::{self, RootPlan, RootStorage};
 use super::{BackendError, Const, ConstPool, Site};
 use crate::nir::{self, Inst, OpCode, Reg};
 use crate::runtime::ops::helpers;
+use crate::runtime::resumable::{FRAME_CALLEE_OFFSET, FRAME_NTAGGED_OFFSET, FRAME_POINT_OFFSET, FRAME_SLOTS_OFFSET};
 use crate::runtime::value::*;
 use crate::runtime::vm::{
-    VM_ALLOC_SITE_OFFSET, VM_CONSTS_OFFSET, VM_NATIVE_ROOTS_LEN_OFFSET, VM_NATIVE_ROOTS_PTR_OFFSET,
+    VM_ALLOC_SITE_OFFSET, VM_CONSTS_OFFSET,
     VM_CONTEXT_OFFSET, VM_SCRATCH_DEST_OFFSET, VM_SCRATCH_REQUEST_OFFSET, VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STACK_LIMIT_OFFSET, VM_STATICS_OFFSET,
 };
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
@@ -85,6 +80,10 @@ use std::collections::HashMap;
 const I64: ir::Type = types::I64;
 
 pub struct Symbols {
+    /// The runtime the program's code is generated for (nir::Program's
+    /// `capabilities`): where roots live (`RootMode`) and whether frame
+    /// operations exist (codegen::resumable).
+    pub capabilities: crate::runtime::capabilities::RuntimeCapabilities,
     /// Whether every function with a Botlish call checks its stack pointer
     /// (nir::Program's `stack_limit_checked`: a native library's program;
     /// codegen::roots's `stack_check`).
@@ -510,6 +509,7 @@ pub(super) fn module_error(e: cranelift_module::ModuleError) -> BackendError {
 pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool, local: bool) -> Result<Symbols, BackendError> {
     let direct_helpers = export && module.isa().name() == "x64";
     let mut symbols = Symbols {
+        capabilities: program.capabilities,
         stack_limit: program.stack_limit_checked,
         status_result: vec![],
         direct: vec![],
@@ -851,29 +851,20 @@ struct Translator<'a, 'b, M: Module> {
     labels: HashMap<nir::Label, ir::Block>,
     vm: ir::Value,
     base: ir::Value,
-    /// Fallback path (`!self.stack_maps`) `RootStorage::NativeFrame` with
-    /// `num_slots > 0` only: the previous contents of `vm.native_roots_ptr`/
-    /// `_len` (whatever the caller, or no one, had published there), saved
-    /// once in the prologue and restored at every return path (see
-    /// `restore_root_frame`). None on the stack-map path (nothing is ever
-    /// published there at all -- see this file's header), for `RuntimeStack`
-    /// (which restores `ss_top` from `base` instead), and for a `NativeFrame`
-    /// function with zero physical slots (nothing was ever published, so
-    /// nothing needs saving).
-    saved_native_roots: Option<(ir::Value, ir::Value)>,
+    /// Whether this function reserved a frame in the ShadowOnly shadow array
+    /// (`RootStorage::RuntimeStack` with at least one slot): every path out
+    /// of it then restores `ss_top` to `base` (`restore_root_frame`). A
+    /// function with no slot touches no shadow state at all.
+    shadow_frame: bool,
     /// The stack-map path's own Cranelift stack slot backing `self.base`,
     /// for `mark_safepoint` to attach `UserStackMapEntry`s against (needs
     /// the raw `ir::StackSlot`, not just its address). `Some` only when
     /// `self.stack_maps` and `self.plan.num_slots > 0` (mirrors
     /// `self.base`'s own validity on that path).
     root_slot: Option<ir::StackSlot>,
-    /// Whether this compile targets the x86-64 native-stack-map path (see
-    /// this file's header): `module.isa().name() == "x64"`, computed once,
-    /// mirroring `Symbols::direct_helpers`'s own check. Never itself
-    /// changes `self.plan` (already computed with the same value as
-    /// `roots::plan`'s `native_frame_supported` argument) -- only which of
-    /// the two `RootStorage::NativeFrame` sub-mechanisms `prologue_root_
-    /// frame`/`restore_root_frame`/`mark_safepoint` use.
+    /// Whether this compile keeps roots in native frames found by stack maps
+    /// (RootMode::NativeFrame, see this file's header): `mark_safepoint`
+    /// attaches stack-map entries only then.
     stack_maps: bool,
     body: ir::Block,
     error_exit: ir::Block,
@@ -963,21 +954,20 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         let body = b.create_block();
         let error_exit = b.create_block();
         let placeholder = ir::Value::from_u32(0);
-        // The native-stack-map frame-walker (runtime/framewalk.rs) is
-        // implemented for x86-64 and AArch64, verified against this repo's
-        // pinned Cranelift and its own generated assembly (see this file's
-        // header, and `define`'s safepoint extraction for AArch64's
-        // frame-pointer-relative roots), and runs on the hosts whose Rust
-        // frames it can climb: runtime::framewalk's NATIVE_FRAME_ROOTS, the
-        // one capability roots::report, the walk and Vm::new's shadow stack
-        // read too. Every other host -- Windows -- keeps the original,
-        // narrower RootStorage::NativeFrame rule (roots::plan's own doc).
-        let stack_maps = crate::runtime::framewalk::NATIVE_FRAME_ROOTS;
+        // The root mode of the program's runtime (runtime::capabilities):
+        // the native-stack-map frame walk (runtime/framewalk.rs, implemented
+        // for x86-64 and AArch64, verified against this repo's pinned
+        // Cranelift and its own generated assembly; see `define`'s safepoint
+        // extraction for AArch64's frame-pointer-relative roots), or the
+        // ShadowOnly shadow stack -- the same capability roots::report, the
+        // walk and Vm::new's shadow stack read.
+        let mode = symbols.capabilities.root_mode();
+        let stack_maps = mode == roots::RootMode::NativeFrame;
         assert!(
             !stack_maps || matches!(module.isa().name(), "x64" | "aarch64"),
             "native-frame roots on an ISA the frame walk does not know"
         );
-        let plan = roots::plan_with_stack_check(f, stack_maps, symbols.stack_limit);
+        let plan = roots::plan_with_stack_check(f, mode, symbols.stack_limit);
         let listget_fast = std::env::var("BOTLISH_NATIVE_LISTGET_FAST_OPT").ok().as_deref() != Some("0");
         let mutarray_inline = std::env::var("BOTLISH_NATIVE_MUTARRAY_INLINE_OPT").ok().as_deref() != Some("0");
         let root_init_opt = std::env::var("BOTLISH_NATIVE_ROOT_INIT_OPT").ok().as_deref() != Some("0");
@@ -1001,7 +991,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             labels: HashMap::new(),
             vm: placeholder,
             base: placeholder,
-            saved_native_roots: None,
+            shadow_frame: false,
             root_slot: None,
             stack_maps,
             body,
@@ -1110,17 +1100,17 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         if self.plan.stack_check {
             self.prologue_stack_limit();
         }
+        if self.plan.num_slots == 0 {
+            // Nothing to reserve or zero: no root candidates at all, and no
+            // depth token (`RootPlan::plan`'s num_slots). `self.base`/
+            // `self.root_slot` stay the unused placeholders `new` set them
+            // to: `def`/`def_raw`/`mark_safepoint` never read them when no
+            // register has a slot, and `restore_root_frame` below never
+            // touches them either (`self.shadow_frame` stays false).
+            return;
+        }
         match self.plan.storage {
             RootStorage::RuntimeStack => self.prologue_runtime_stack(),
-            RootStorage::NativeFrame if self.plan.num_slots == 0 => {
-                // Nothing to reserve or zero: no root candidates at all (see
-                // `RootPlan::plan`'s num_slots, which applies no floor
-                // here). `self.base`/`self.root_slot` stay the unused
-                // placeholders `new` set them to: `def`/`def_raw`/
-                // `mark_safepoint` never read them when no register has a
-                // slot, and `restore_root_frame` below never touches them
-                // either (`self.saved_native_roots` stays None).
-            }
             RootStorage::NativeFrame => self.prologue_native_frame(),
         }
     }
@@ -1150,15 +1140,18 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         self.b.switch_to_block(setup);
     }
 
-    /// `RootStorage::RuntimeStack`'s prologue: reserve and clear this
-    /// frame's slots in the shared shadow-stack array, exactly as before
-    /// this milestone. `self.plan.num_slots` (codegen::roots), not
-    /// `f.regs`: only registers that are both managed-capable and live
-    /// across a GC safepoint get a slot at all, and two such registers
-    /// share one when their safepoint-live ranges never overlap (see
-    /// roots.rs's module doc). At least one slot always, regardless of
-    /// rooting needs, so the shadow stack still bounds native recursion
-    /// depth (see RootPlan::num_slots's doc).
+    /// `RootStorage::RuntimeStack`'s prologue (the ShadowOnly root mode,
+    /// WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md): reserve and
+    /// clear this frame's slots in the Vm's one shadow array -- bump
+    /// `ss_top`, check `ss_limit` before any slot is written, and restore
+    /// `ss_top` on every exit (`restore_root_frame`), so the array stays
+    /// strictly LIFO across calls, runtime operations that run Botlish code,
+    /// error paths and coroutine segments (a suspension *returns*). Only for
+    /// a function with at least one slot (`prologue_root_frame`):
+    /// `self.plan.num_slots` (codegen::roots), the colored roots plus the
+    /// depth token where the mode has one. A full array is
+    /// `rt_shadow_overflow`: the guard's terminal NATIVE LIMIT STACK where
+    /// the runtime has the guard, an in-band failure otherwise.
     fn prologue_runtime_stack(&mut self) {
         let slots = self.plan.num_slots as i64;
         self.base = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_SS_TOP_OFFSET);
@@ -1168,38 +1161,28 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         let overflow = self.b.create_block();
         let setup = self.b.create_block();
         self.b.ins().brif(over, overflow, &[], setup, &[]);
+        self.b.set_cold_block(overflow);
 
         self.b.switch_to_block(overflow);
-        self.call_helper("rt_stack_overflow", &[self.vm]);
+        self.call_helper("rt_shadow_overflow", &[self.vm]);
         self.return_zeros();
 
         self.b.switch_to_block(setup);
         self.b.ins().store(MemFlagsData::trusted(), top, self.vm, VM_SS_TOP_OFFSET);
+        self.shadow_frame = true;
         self.zero_root_slots(slots);
     }
 
     /// `RootStorage::NativeFrame`'s prologue for a function with at least
     /// one physical root slot: allocates ONE Cranelift explicit stack slot
-    /// (this function's own native frame, not the shared shadow array) to
-    /// hold every physical slot contiguously. What happens next depends on
-    /// `self.stack_maps`:
-    ///
-    ///   * stack-map path (`self.stack_maps`, primary): nothing more is
-    ///     published anywhere -- `self.root_slot` alone is enough for
-    ///     `mark_safepoint` to attach this frame's `UserStackMapEntry`s at
-    ///     each safepoint, and the collector discovers them at collection
-    ///     time by walking the native call stack (runtime/framewalk.rs),
-    ///     not by consulting anything this prologue writes to `Vm`.
-    ///   * fallback path (`!self.stack_maps`): publishes this slot's
-    ///     address and count to `vm.native_roots_ptr`/`_len` (so the
-    ///     collector can find it -- see runtime/heap.rs's and vm.rs's
-    ///     module docs) and saves whatever was published there before, so
-    ///     `restore_root_frame` can put it back. Sound as a plain
-    ///     save/restore pair (not a list): on this path `RootStorage::
-    ///     NativeFrame` still implies no Botlish call (roots::plan's own
-    ///     doc), so at most one such registration can ever be active along
-    ///     any single call chain.
+    /// (this function's own native frame) to hold every physical slot
+    /// contiguously. Nothing is published anywhere: `self.root_slot` alone
+    /// is enough for `mark_safepoint` to attach this frame's
+    /// `UserStackMapEntry`s at each safepoint, and the collector discovers
+    /// them at collection time by walking the native call stack
+    /// (runtime/framewalk.rs).
     fn prologue_native_frame(&mut self) {
+        debug_assert!(self.stack_maps, "native-frame storage exists only with stack maps");
         let slots = self.plan.num_slots as i64;
         let slot = self.b.create_sized_stack_slot(StackSlotData::new(
             StackSlotKind::ExplicitSlot,
@@ -1208,14 +1191,6 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         ));
         self.root_slot = Some(slot);
         self.base = self.b.ins().stack_addr(I64, slot, 0);
-        if !self.stack_maps {
-            let saved_ptr = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_NATIVE_ROOTS_PTR_OFFSET);
-            let saved_len = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_NATIVE_ROOTS_LEN_OFFSET);
-            self.saved_native_roots = Some((saved_ptr, saved_len));
-            self.b.ins().store(MemFlagsData::trusted(), self.base, self.vm, VM_NATIVE_ROOTS_PTR_OFFSET);
-            let count = self.iconst(slots as u64);
-            self.b.ins().store(MemFlagsData::trusted(), count, self.vm, VM_NATIVE_ROOTS_LEN_OFFSET);
-        }
         self.zero_root_slots(slots);
     }
 
@@ -1240,24 +1215,14 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     }
 
     /// Restores whatever this frame's prologue displaced, on every path out
-    /// of the function (each `Ret`/`RetMulti` and the shared `error_exit`):
-    /// `RuntimeStack` pops the shared shadow-stack array back to this
-    /// frame's own base (root storage and depth bound combined, as before
-    /// this milestone); `NativeFrame` restores the fallback path's
-    /// `vm.native_roots_ptr`/`_len` publish when it made one (nothing to do
-    /// on the stack-map path, which never publishes anything -- see
-    /// `prologue_native_frame`'s own doc).
+    /// of the function (each `Ret`/`RetMulti` -- a resumable suspension's
+    /// too, which returns the activation's frame -- and the shared
+    /// `error_exit`): a ShadowOnly frame pops the shadow array back to this
+    /// frame's own base (invariant I1's half in generated code); native-frame
+    /// storage has nothing to undo.
     fn restore_root_frame(&mut self) {
-        match self.plan.storage {
-            RootStorage::RuntimeStack => {
-                self.b.ins().store(MemFlagsData::trusted(), self.base, self.vm, VM_SS_TOP_OFFSET);
-            }
-            RootStorage::NativeFrame => {
-                if let Some((ptr, len)) = self.saved_native_roots {
-                    self.b.ins().store(MemFlagsData::trusted(), ptr, self.vm, VM_NATIVE_ROOTS_PTR_OFFSET);
-                    self.b.ins().store(MemFlagsData::trusted(), len, self.vm, VM_NATIVE_ROOTS_LEN_OFFSET);
-                }
-            }
+        if self.shadow_frame {
+            self.b.ins().store(MemFlagsData::trusted(), self.base, self.vm, VM_SS_TOP_OFFSET);
         }
     }
 
@@ -1866,6 +1831,55 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         *self.error_exit_stack.last().expect("error_exit_stack is never empty")
     }
 
+    /// `frensure %f` (codegen::resumable): %f when it is a frame -- an
+    /// activation suspending again reuses its own frame, so steady-state
+    /// suspension allocates nothing -- else a new frame of this function's
+    /// shape (`rt_frame_new`, the one allocating path: a safepoint).
+    fn frame_ensure(&mut self, fr: ir::Value) -> ir::Value {
+        let shape = self.f.frame.expect("frensure in a function without a frame shape (nir validates this)");
+        let fresh = self.b.create_block();
+        let done = self.b.create_block();
+        self.b.append_block_param(done, I64);
+        let is_unit = self.b.ins().icmp_imm_s(IntCC::Equal, fr, UNIT as i64);
+        self.b.ins().brif(is_unit, fresh, &[], done, &[BlockArg::Value(fr)]);
+        self.b.switch_to_block(fresh);
+        let nt = self.iconst(shape.tagged as u64);
+        let nr = self.iconst(shape.raw as u64);
+        let made = self.call_allocating("rt_frame_new", &[self.vm, nt, nr], "frensure", KIND_FRAME);
+        self.b.ins().jump(done, &[BlockArg::Value(made)]);
+        self.b.switch_to_block(done);
+        self.b.block_params(done)[0]
+    }
+
+    /// `frisframe %v`: Bool, V is a heap pointer whose header kind is
+    /// KIND_FRAME (a suspension result or a hidden frame argument).
+    fn is_frame(&mut self, v: ir::Value) -> ir::Value {
+        let pointer = self.b.create_block();
+        let done = self.b.create_block();
+        self.b.append_block_param(done, I64);
+        let low = self.b.ins().band_imm_s(v, 7);
+        let aligned = self.b.ins().icmp_imm_s(IntCC::Equal, low, 0);
+        let nonzero = self.b.ins().icmp_imm_s(IntCC::NotEqual, v, 0);
+        let is_pointer = self.b.ins().band(aligned, nonzero);
+        let no = self.iconst(FALSE);
+        self.b.ins().brif(is_pointer, pointer, &[], done, &[BlockArg::Value(no)]);
+        self.b.switch_to_block(pointer);
+        let kind = self.b.ins().uload8(I64, MemFlagsData::trusted(), v, 0);
+        let frame = self.b.ins().icmp_imm_s(IntCC::Equal, kind, KIND_FRAME as i64);
+        let yes = self.iconst(TRUE);
+        let no = self.iconst(FALSE);
+        let flag = self.b.ins().select(frame, yes, no);
+        self.b.ins().jump(done, &[BlockArg::Value(flag)]);
+        self.b.switch_to_block(done);
+        self.b.block_params(done)[0]
+    }
+
+    /// The byte offset of raw slot J of a frame of this function's shape.
+    fn raw_slot_offset(&self, j: usize) -> i32 {
+        let shape = self.f.frame.expect("a frame slot in a function without a frame shape (nir validates this)");
+        FRAME_SLOTS_OFFSET + 8 * (shape.tagged as i32 + j as i32)
+    }
+
     fn check(&mut self, v: ir::Value) {
         let ok = self.b.create_block();
         let target = self.current_error_exit();
@@ -2399,6 +2413,59 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let v = self.b.ins().load(I64, MemFlagsData::trusted(), data, (*slot as i32) * 8);
                 self.def(*dst, v);
             }
+            // A resumable suspension (codegen::resumable): the live
+            // registers into the frame's slots, then its resume point, how
+            // many tagged slots the collector traces, and the suspended
+            // callee. Plain stores: the frame is a fixed-shape object.
+            Inst::FrameSave { frame, point, callee, tagged, raw } => {
+                let fr = self.get(*frame);
+                for (i, r) in tagged.iter().enumerate() {
+                    let v = self.get(*r);
+                    self.b.ins().store(MemFlagsData::trusted(), v, fr, FRAME_SLOTS_OFFSET + 8 * i as i32);
+                }
+                for (j, r) in raw.iter().enumerate() {
+                    let v = self.get(*r);
+                    let offset = self.raw_slot_offset(j);
+                    self.b.ins().store(MemFlagsData::trusted(), v, fr, offset);
+                }
+                let point = self.b.ins().iconst(types::I32, *point as i64);
+                self.b.ins().store(MemFlagsData::trusted(), point, fr, FRAME_POINT_OFFSET);
+                let ntagged = self.b.ins().iconst(types::I32, tagged.len() as i64);
+                self.b.ins().store(MemFlagsData::trusted(), ntagged, fr, FRAME_NTAGGED_OFFSET);
+                let callee = match callee {
+                    Some(c) => self.get(*c),
+                    None => self.iconst(UNIT),
+                };
+                self.b.ins().store(MemFlagsData::trusted(), callee, fr, FRAME_CALLEE_OFFSET);
+            }
+            // A resume point: the saved registers back (stored to their
+            // shadow slots by `def`, so they are this activation's roots
+            // again), and the frame marked running -- nothing in it traced.
+            Inst::FrameRestore { frame, tagged, raw } => {
+                let fr = self.get(*frame);
+                for (i, r) in tagged.iter().enumerate() {
+                    let v = self.b.ins().load(I64, MemFlagsData::trusted(), fr, FRAME_SLOTS_OFFSET + 8 * i as i32);
+                    self.def(*r, v);
+                }
+                for (j, r) in raw.iter().enumerate() {
+                    let offset = self.raw_slot_offset(j);
+                    let v = self.b.ins().load(I64, MemFlagsData::trusted(), fr, offset);
+                    self.def_raw(*r, v);
+                }
+                let zero = self.b.ins().iconst(types::I32, 0);
+                self.b.ins().store(MemFlagsData::trusted(), zero, fr, FRAME_POINT_OFFSET);
+                self.b.ins().store(MemFlagsData::trusted(), zero, fr, FRAME_NTAGGED_OFFSET);
+            }
+            // A stack-switching yield on a runtime that switches no stacks:
+            // the resumable lowering (codegen::resumable) rewrote every one,
+            // so this is a program that skipped it -- refused, never run on a
+            // mechanism the runtime does not have.
+            Inst::Op { op: OpCode::CoYield, .. } if self.symbols.capabilities.resumable => {
+                return Err(BackendError::Bug(format!(
+                    "function {} ({}): coyield on a runtime without a stack switch: the resumable lowering did not run",
+                    self.f.id, self.f.name
+                )));
+            }
             Inst::Op { dst, op, args } => {
                 // Each syscall transport compiles on every target: off its
                 // own Linux architecture its helper fails at run time
@@ -2617,7 +2684,21 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.b.ins().bor_imm_s(shifted, 1)
             }
             ScratchMark => self.call_helper("rt_scratch_mark", &[self.vm]),
-            ScratchReset => self.call_helper("rt_scratch_reset", &[self.vm, a[0]]),
+            ScratchReset => {
+                let v = self.call_helper("rt_scratch_reset", &[self.vm, a[0]]);
+                // ShadowOnly: the region's Strings may still sit in dead
+                // slots of this frame, which the collector scans whole
+                // (RootPlan::scratch_reset_dead).
+                if self.shadow_frame {
+                    if let Some(dead) = self.plan.scratch_reset_dead.get(&self.current_index).cloned() {
+                        let zero = self.b.ins().iconst(I64, 0);
+                        for slot in dead {
+                            self.b.ins().store(MemFlagsData::trusted(), zero, self.base, (slot * 8) as i32);
+                        }
+                    }
+                }
+                v
+            }
             ScratchExit => self.call_helper("rt_scratch_exit", &[self.vm, a[0], a[1]]),
             ScratchReq => {
                 self.scratch_req_next = Some(a[0]);
@@ -2626,6 +2707,39 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             ScratchDest => {
                 self.scratch_dest_next = Some(a[0]);
                 self.iconst(UNIT)
+            }
+            // Resumable coroutines' frame operations (codegen::resumable,
+            // runtime/resumable.rs: the frame's layout is stated there once,
+            // as the FRAME_*_OFFSET constants every access below uses).
+            FrEnsure => self.frame_ensure(a[0]),
+            // The hidden frame parameter is UNIT or a frame, by the frame
+            // ABI (runtime/resumable.rs): one compare tells them apart.
+            FrIsFrame if self.f.frame.is_some() && args[0] + 1 == self.f.params => {
+                let flag = self.b.ins().icmp_imm_s(IntCC::NotEqual, a[0], UNIT as i64);
+                let yes = self.iconst(TRUE);
+                let no = self.iconst(FALSE);
+                self.b.ins().select(flag, yes, no)
+            }
+            FrIsFrame => self.is_frame(a[0]),
+            FrPoint => {
+                let point = self.b.ins().uload32(MemFlagsData::trusted(), a[0], FRAME_POINT_OFFSET);
+                point
+            }
+            FrCallee => {
+                let callee = self.b.ins().load(I64, MemFlagsData::trusted(), a[0], FRAME_CALLEE_OFFSET);
+                let unit = self.iconst(UNIT);
+                self.b.ins().store(MemFlagsData::trusted(), unit, a[0], FRAME_CALLEE_OFFSET);
+                callee
+            }
+            CoSuspend => {
+                let r = self.call_helper("rt_co_suspend", &[self.vm, a[0]]);
+                self.check(r);
+                r
+            }
+            CoMsg => {
+                let r = self.call_helper("rt_co_msg", &[self.vm]);
+                self.check(r);
+                r
             }
             IAdd | ISub | IMul => self.int_arith(op, a[0], a[1]),
             IMod => self.int_mod(a[0], a[1]),

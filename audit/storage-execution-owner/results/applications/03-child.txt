@@ -1,0 +1,44 @@
+# 03-child (examples/event-loop/03-child.bot)
+
+unit <program>
+  call of std::event_loop::create (struct) at 03-child.bot:52:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at 03-child.bot:52:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of std::event_loop::deterministic::create (struct) at 03-child.bot:53:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at 03-child.bot:53:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (list) at 03-child.bot:54:1: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of list (list) at 03-child.bot:56:9: result; plan: rejected (not representable: the native list)
+  call of list (list) at 03-child.bot:58:9: result; plan: rejected (not representable: the native list)
+  call of list (list) at 03-child.bot:60:9: result; plan: rejected (not representable: the native list)
+  call of list (list) at 03-child.bot:62:9: result; plan: rejected (not representable: the native list)
+unit squares<int> -- may suspend
+  suspension call of coroutine#yield at 03-child.bot:21:9: live bindings 1, pending operands 0, objects kept 0
+unit summer<generic> -- may suspend
+  suspension call of std::event_loop::yield_now at 03-child.bot:33:9: live bindings 2, pending operands 0, objects kept 2
+  call of coroutine#create (coroutine) at 03-child.bot:25:5: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::mutable_array::create (mutarray) at 03-child.bot:26:13: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::int::to_string (str) at 03-child.bot:32:62: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at 03-child.bot:32:30: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of squares constructed at 03-child.bot:25:5 -- may suspend
+  suspension call of squares at 03-child.bot:25:31: live bindings 0, pending operands 0, objects kept 0
+unit ticker<int> -- may suspend
+  suspension call of std::event_loop::yield_now at 03-child.bot:39:9: live bindings 1, pending operands 0, objects kept 0
+unit main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><generic>
+  call of coroutine#create (coroutine) at 03-child.bot:43:5: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#create (coroutine) at 03-child.bot:45:5: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of std::event_loop::run<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at 03-child.bot:47:5: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::take_outcomes (list) at 03-child.bot:48:15: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::int::to_string (str) at 03-child.bot:49:45: escapes (inherited); plan: rejected (not confined to its innermost region)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at 03-child.bot:49:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::str::concat (str) at 03-child.bot:49:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::int::to_string (str) at 03-child.bot:49:102: escapes (inherited); plan: rejected (not confined to its innermost region)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at 03-child.bot:49:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::trace (list) at 03-child.bot:50:5: escapes (error result); plan: rejected (not confined to its innermost region)
+unit the coroutine of summer constructed at 03-child.bot:43:5 -- may suspend
+  suspension call of summer at 03-child.bot:43:38: live bindings 0, pending operands 0, objects kept 0
+unit the coroutine of ticker constructed at 03-child.bot:45:5 -- may suspend
+  suspension call of ticker at 03-child.bot:45:38: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 0, segment 0, persistent 2, result 5, escapes 16, unknown 0

@@ -1,0 +1,19 @@
+# E15b -- the C backend's ownership boundary: a function that constructs a
+# coroutine and returns its handle. Natively the handle moves out (its
+# stack goes with it); the C backend refuses it (C UNSUPPORTED), because
+# the frame is an automatic object of the constructing function's C frame
+# and would not outlive its return -- the case caller-provided storage
+# (C-COROUTINE-FRAMES-MILESTONE-1.md, section 23) is for.
+import std::coroutine
+
+fn gen(n: int) -> int:
+    loop i from 0 to n:
+        yield i
+    n
+
+fn make(n: int) -> Coroutine{args: [], return: int, errors: []}:
+    coroutine {step, first} = gen(n)
+    step
+
+h = make(4)
+h() + h() + h()

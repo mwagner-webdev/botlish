@@ -1,0 +1,31 @@
+# e13-nested-owners (audit/storage-execution-owner/probes/e13-nested-owners.bot)
+
+value: interp value 5034557; native value 5034557
+
+unit <program>
+unit child<int> -- may suspend
+  suspension call of coroutine#yield at e13-nested-owners.bot:15:5: live bindings 2, pending operands 0, objects kept 2
+  suspension call of coroutine#yield at e13-nested-owners.bot:16:5: live bindings 1, pending operands 0, objects kept 2
+  call of std::int::to_string (str) at e13-nested-owners.bot:14:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 9990]: at most 4 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e13-nested-owners.bot:14:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+unit parent<int> -- may suspend
+  suspension call of coroutine#yield at e13-nested-owners.bot:22:5: live bindings 2, pending operands 0, objects kept 4
+  suspension call of coroutine#yield at e13-nested-owners.bot:24:5: live bindings 2, pending operands 0, objects kept 4
+  call of std::int::to_string (str) at e13-nested-owners.bot:20:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+    operand range [0, 999]: at most 3 characters (ASCII) -- a native String block of at most 32 bytes (no sign) [inference]
+  call of std::str::concat (str) at e13-nested-owners.bot:20:12: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  closure (closure) at e13-nested-owners.bot:21:5: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of coroutine#create (coroutine) at e13-nested-owners.bot:21:5: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of child constructed at e13-nested-owners.bot:21:5 -- may suspend
+  suspension call of child at e13-nested-owners.bot:21:31: live bindings 0, pending operands 0, objects kept 0
+unit drive<int>
+  closure (closure) at e13-nested-owners.bot:30:9: transient; plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at e13-nested-owners.bot:30:9: transient; plan: rejected (not representable: the native coroutine#create)
+unit the coroutine of parent constructed at e13-nested-owners.bot:30:9 -- may suspend
+  suspension call of parent at e13-nested-owners.bot:30:35: live bindings 0, pending operands 0, objects kept 0
+
+owner classes: transient 2, segment 0, persistent 6, result 0, escapes 0, unknown 0
+native, scratch storage on: heap allocations 4000, heap bytes 126558, collections 0; scratch placements 0, regions 0, reservations 0, peak in use 0 B, stale roots 0, protocol errors 0
+native, scratch storage off: heap allocations 4000, heap bytes 126558, collections 0
+String sites lowering emitted a placement for: 0

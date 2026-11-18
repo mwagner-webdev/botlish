@@ -95,6 +95,7 @@ use super::mutvec::{
     rt_mv_swap, rt_mv_swap_drop, rt_mv_take, rt_mv_take_front, rt_mv_to_list,
 };
 use super::coroutine::{rt_co_abandon, rt_co_create, rt_co_done, rt_co_failed, rt_co_release, rt_co_resume, rt_co_resume0, rt_co_start, rt_co_yield};
+use super::resumable::{rt_co_msg, rt_co_suspend, rt_frame_new};
 use super::error::{semantic_kind, RtError};
 use super::ffifixture::{
     rt_ffi_fixture_copy, rt_ffi_fixture_fill, rt_ffi_fixture_fill_checked, rt_ffi_fixture_mixed, rt_ffi_fixture_read,
@@ -214,6 +215,9 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             // A fused coroutine's cached failure (codegen::fusion): one
             // terminal coroutine object.
             | CoFailed
+            // A resumable activation's frame, made at its first suspension
+            // (codegen::resumable, runtime/resumable.rs).
+            | FrEnsure
             // Releases that run Botlish code (LEXICAL-RESOURCE-CLEANUP-
             // EXPLORATION-MILESTONE-1.md, runtime/affine.rs): a cleanup, an
             // abandonment's release pads -- and the drop forms of a
@@ -360,7 +364,11 @@ pub fn op_may_error(op: OpCode) -> bool {
         // A segment ends with the body's unhandled error; a yield outside a
         // running coroutine is a defensive runtime check a checked program
         // never reaches.
-        | CoStart | CoResume | CoResume0 | CoYield)
+        | CoStart | CoResume | CoResume0 | CoYield
+        // A resumable yield's halves (codegen::resumable): the same
+        // defensive check, and a resumed yield of an abandoned coroutine
+        // fails with the abandonment.
+        | CoSuspend | CoMsg)
 }
 
 pub type GenericEntry = extern "C" fn(*mut Vm, Value, *const Value) -> Value;
@@ -407,6 +415,25 @@ pub extern "C" fn rt_raise(p: *mut Vm, kind: Value, message: Value) -> Value {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_stack_overflow(p: *mut Vm) -> Value {
+    vm(p).fail(RtError::StackOverflow)
+}
+
+/// The ShadowOnly root plan's shadow array is full (codegen::clif's
+/// `prologue_runtime_stack`; WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+/// MILESTONE-1.md, "Overflow"): detected before the frame stores anything.
+/// Where the runtime has the native stack guard, this is the guard's own
+/// contract -- NATIVE LIMIT STACK is terminal: the driver's result line (or
+/// an executable's line on standard error) and the end of the process, no
+/// handler, no call effect (runtime::platform's `report_fatal`). Elsewhere
+/// (a host the shadow stack alone bounds) the failure is in-band: the
+/// functions that reserve shadow slots are fallible there (nir's call
+/// effects, codegen::target's `prologue_may_fail`).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_shadow_overflow(p: *mut Vm) -> Value {
+    #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+    if super::native_stack::native_stack_overflow_supported() {
+        super::platform::report_fatal(super::platform::OVERFLOW_LINE, super::platform::OVERFLOW_LINE);
+    }
     vm(p).fail(RtError::StackOverflow)
 }
 
@@ -4390,6 +4417,9 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         // A fused coroutine's failure cache exists only in the code the
         // fusion pass writes (codegen::fusion).
         | CoFailed
+        // A resumable function's frame operations exist only in the code
+        // the resumable lowering writes (codegen::resumable).
+        | FrEnsure | FrIsFrame | FrPoint | FrCallee | CoSuspend | CoMsg
         // The fixed-layout ops exist only in the straight-line code of one
         // statically known layout (native/lower.tcl's LayoutParse /
         // LayoutEmit): a binary operation is never a value.
@@ -4613,6 +4643,10 @@ runtime_helpers! {
     (rt_co_release, 2),
     (rt_co_abandon, 2),
     (rt_co_failed, 1),
+    (rt_frame_new, 3),
+    (rt_co_suspend, 2),
+    (rt_co_msg, 1),
+    (rt_shadow_overflow, 1),
     (rt_affine_drop, 3),
     (rt_affine_drop_run, 3),
     (rt_cleanup_call, 3),

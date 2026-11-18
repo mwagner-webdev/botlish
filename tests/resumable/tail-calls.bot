@@ -1,0 +1,41 @@
+# A loop written as yielding tail recursion (WASM-RESUMABLE-COROUTINES-
+# SHADOW-ROOTS-MILESTONE-1.md, "Frame reuse"): `walk` calls a yielding
+# function in every iteration, yields itself as well and keeps a String
+# live around the loop; `count` only yields. The resumable lowering makes
+# each self tail call the next iteration of the same activation
+# (codegen/resumable.rs's loop_self_tail_calls), so the loop keeps its own
+# frame and its call site the callee frame it recycles: a handful of
+# frames however many iterations (tests/resumable-coroutines.test's
+# rc-tail-call-frames), on the interpreter's values.
+# expect: [180303, 45150]
+import std::coroutine
+import std::str
+
+fn helper(i: int) -> int:
+    yield i
+    i + 1
+
+fn walk(i: int, n: int, acc: int, tag: str) -> int:
+    if i == n:
+        return acc + std::str::length(tag)
+    v = helper(i)
+    yield v * 2
+    return walk(i + 1, n, acc + v, tag)
+
+fn count(i: int, n: int) -> int:
+    if i == n:
+        return n
+    yield i
+    return count(i + 1, n)
+
+fn drive_walk(n: int) -> int:
+    coroutine {step: s, first: f} = walk(0, n, 0, "abc")
+    fold i from 0 to n * 2 with intermediate acc f:
+        acc + s()
+
+fn drive_count(n: int) -> int:
+    coroutine {step: s, first: f} = count(0, n)
+    fold i from 0 to n with intermediate acc f:
+        acc + s()
+
+[drive_walk(300), drive_count(300)]

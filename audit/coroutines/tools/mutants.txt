@@ -404,12 +404,12 @@
 <<<<
             CO_SUSPENDED => {
                 (*co).value = message;
-                segment(p, co)
+                if super::resumable::RESUMABLE { super::resumable::segment(p, co) } else { segment(p, co) }
             }
 ====
             CO_SUSPENDED => {
                 let _ = message;
-                segment(p, co)
+                if super::resumable::RESUMABLE { super::resumable::segment(p, co) } else { segment(p, co) }
             }
 >>>>
 
@@ -539,9 +539,9 @@
 ## native/src/runtime/coroutine.rs
 <<<<
     co.stack = None;
-    co.thunk = UNIT;
+    // A resumable coroutine's frame chain goes with it (invariant I8):
 ====
-    co.thunk = UNIT;
+    // A resumable coroutine's frame chain goes with it (invariant I8):
 >>>>
 
 # ---------------------------------------------------------------------------

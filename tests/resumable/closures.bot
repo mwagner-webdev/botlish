@@ -1,0 +1,62 @@
+# Capturing yielding closures (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+# MILESTONE-1.md, "Frame hand-off ABI"): a yielding nested function that
+# captures is a closure its callers call directly with its environment
+# (`callenv`), never a function value. Suspended inside it, its caller's
+# frame keeps the closure, so the resumed call re-enters the callee with the
+# same captures; a closure capturing a String reads it after every resume,
+# under the collections a second coroutine's work runs between.
+# expect: [76, 3445, [3, 4, 3, 4, 3]]
+import std::coroutine
+import std::int
+import std::list
+import std::str
+
+fn outer(base: int) -> int:
+    fn inner(k: int) -> unit:
+        yield base + k
+        unit
+    fn root() -> int:
+        inner(1)
+        inner(2)
+        0
+    coroutine {step, first} = root()
+    first + step() * 10 + step() * 100
+
+fn deeper(tag: str, n: int) -> int:
+    fn leaf(k: int) -> int:
+        yield std::str::length(tag) + k
+        std::str::length(tag) * k
+    fn middle(k: int) -> int:
+        a = leaf(k)
+        b = leaf(k + 1)
+        a + b
+    fn root() -> int:
+        middle(n) + middle(n + 1)
+    coroutine {step, first} = root()
+    a = step()
+    b = step()
+    c = step()
+    d = step()
+    first * 1000 + a * 100 + b * 10 + c + d * 0
+
+fn churn(rounds: int) -> int:
+    fold i from 0 to rounds with intermediate acc 0:
+        junk = loop j from 0 to 10:
+            std::str::concat("junk", std::int::to_string(i + j))
+        acc + std::list::length(junk)
+
+fn interleaved(tag: str) -> List[int]:
+    fn ticks(m: int) -> int:
+        yield std::str::length(tag)
+        yield std::str::length(tag) + 1
+        m
+    coroutine {step: s, first: s0} = ticks(3)
+    c1 = churn(20)
+    s1 = s()
+    coroutine {step: t, first: t0} = ticks(4)
+    c2 = churn(20)
+    t1 = t()
+    s2 = s()
+    [s0, s1, t0, t1, s2]
+
+[outer(5), deeper("ab", 1), interleaved("abc")]

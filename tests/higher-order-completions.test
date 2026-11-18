@@ -509,8 +509,8 @@ test hoc-affine-error-edge-native {natively: the value on every backend; on the 
 } -body {
     set text [string map {test_hoc_live() 0} $hocCoroutine]
     list [sourceAgree $text] [withoutCoroutineFusion {
-        dict get [native::allocationReport [surface::compile $text -warnings off] summary] coroutines
+        coroutineCounters [dict get [native::allocationReport [surface::compile $text -warnings off] summary] coroutines]
     }]
-} -result {{value {[10, -1, 0]}} {stacksMapped 1 stacksReused 1 released 2 releasedSuspended 1 sweptSuspended 0}}
+} -result [list {value {[10, -1, 0]}} [expectedCoroutineCounters {stacksMapped 1 stacksReused 1} {released 2 releasedSuspended 1 sweptSuspended 0}]]
 
 cleanupTests

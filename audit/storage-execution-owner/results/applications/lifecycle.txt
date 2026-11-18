@@ -1,0 +1,171 @@
+# lifecycle (tests/actor/lifecycle.bot)
+
+unit <program>
+  call of std::event_loop::create (struct) at lifecycle.bot:229:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at lifecycle.bot:229:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of std::event_loop::deterministic::create (struct) at lifecycle.bot:230:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at lifecycle.bot:230:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of std::actor::create (struct) at lifecycle.bot:231:14: escapes (context); plan: rejected (not confined to its innermost region)
+  call of mutable_vector#share (struct) at lifecycle.bot:231:1: escapes (context); plan: rejected (not representable: the native mutable_vector#share)
+  call of main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (list) at lifecycle.bot:232:1: result; plan: rejected (it escapes through the result, and this unit takes no destination: nothing it returns can be placed in its caller's region)
+  call of list (list) at lifecycle.bot:234:9: result; plan: rejected (not representable: the native list)
+  call of list (list) at lifecycle.bot:236:9: result; plan: rejected (not representable: the native list)
+  call of list (list) at lifecycle.bot:238:9: result; plan: rejected (not representable: the native list)
+  call of list (list) at lifecycle.bot:240:9: result; plan: rejected (not representable: the native list)
+unit line<str, int>
+  call of std::int::to_string (str) at lifecycle.bot:36:29: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at lifecycle.bot:36:17: result; plan: rejected (it escapes through the result, and no caller gives this unit a destination)
+  Line {text} (struct) at lifecycle.bot:36:5: result; plan: rejected (not representable: a struct (only Strings are placed))
+unit sent_name<enum>
+unit fragile<std::actor::Inbox[Num], std::actor::Address[Line]> -- may suspend
+  suspension call of std::actor::listen at lifecycle.bot:50:10: live bindings 1, pending operands 0, objects kept 0
+  suspension call of std::actor::receive at lifecycle.bot:54:13: live bindings 3, pending operands 0, objects kept 1
+  suspension call of std::actor::send at lifecycle.bot:58:13: live bindings 0, pending operands 0, objects kept 1
+  call of std::actor::listen (struct) at lifecycle.bot:50:10: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at lifecycle.bot:52:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::receive (struct) at lifecycle.bot:54:13: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of line (struct) at lifecycle.bot:58:22: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  struct {code} (struct) at lifecycle.bot:59:46: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at lifecycle.bot:61:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit clumsy<std::actor::Inbox[Num]> -- may suspend
+  suspension call of std::actor::listen at lifecycle.bot:65:10: live bindings 0, pending operands 0, objects kept 0
+  suspension call of std::actor::receive at lifecycle.bot:70:13: live bindings 3, pending operands 0, objects kept 2
+  call of std::actor::listen (struct) at lifecycle.bot:65:10: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at lifecycle.bot:67:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of list (list) at lifecycle.bot:68:10: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::receive (struct) at lifecycle.bot:70:13: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at lifecycle.bot:74:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit early<std::actor::Inbox[Num], bool> -- may suspend
+  suspension call of std::actor::listen at lifecycle.bot:80:10: live bindings 0, pending operands 0, objects kept 0
+  suspension call of std::actor::receive at lifecycle.bot:83:9: live bindings 0, pending operands 0, objects kept 1
+  struct {code} (struct) at lifecycle.bot:79:42: escapes (error); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::listen (struct) at lifecycle.bot:80:10: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at lifecycle.bot:82:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::receive (struct) at lifecycle.bot:83:9: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at lifecycle.bot:85:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at lifecycle.bot:86:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit stopper<str, std::actor::Inbox[Num], std::actor::Address[Line]> -- may suspend
+  suspension call of std::actor::listen at lifecycle.bot:90:10: live bindings 2, pending operands 0, objects kept 0
+  suspension call of std::actor::receive at lifecycle.bot:94:13: live bindings 4, pending operands 0, objects kept 1
+  suspension call of std::actor::send at lifecycle.bot:96:17: live bindings 1, pending operands 0, objects kept 2
+  suspension call of std::actor::send at lifecycle.bot:99:13: live bindings 1, pending operands 0, objects kept 2
+  call of std::actor::listen (struct) at lifecycle.bot:90:10: persistent; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at lifecycle.bot:92:20: result; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::receive (struct) at lifecycle.bot:94:13: segment; plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at lifecycle.bot:96:31: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of line (struct) at lifecycle.bot:96:26: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at lifecycle.bot:99:27: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of line (struct) at lifecycle.bot:99:22: escapes (inherited); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at lifecycle.bot:102:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit waiter<std::actor::Address[Num], std::actor::Address[Line]> -- may suspend
+  suspension call of std::actor::deliver at lifecycle.bot:106:9: live bindings 1, pending operands 0, objects kept 1
+  suspension call of std::actor::send at lifecycle.bot:107:5: live bindings 0, pending operands 0, objects kept 2
+  Num {n} (struct) at lifecycle.bot:106:20: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::str::concat (str) at lifecycle.bot:107:26: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  Line {text} (struct) at lifecycle.bot:107:14: escapes (callee); plan: rejected (it may suspend: a region is never live across a suspension)
+  call of std::actor::exit (struct) at lifecycle.bot:108:5: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit plain<generic> -- may suspend
+  suspension call of std::event_loop::yield_now at lifecycle.bot:112:5: live bindings 0, pending operands 0, objects kept 0
+  suspension call of std::event_loop::yield_now at lifecycle.bot:113:5: live bindings 0, pending operands 0, objects kept 0
+unit ending_name<enum>
+unit say<str, int>
+  call of std::int::to_string (str) at lifecycle.bot:128:38: escapes (callee); plan: rejected (not confined to its innermost region)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at lifecycle.bot:128:26: escapes (callee); plan: rejected (not confined to its innermost region)
+unit flag<bool>
+unit main<std::event_loop::Driver=std::event_loop::deterministic::Deterministic><generic>
+  call of std::actor::open (struct) at lifecycle.bot:137:32: escapes (callee error); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at lifecycle.bot:141:34: escapes (callee error); plan: rejected (not confined to its innermost region)
+  Num {n} (struct) at lifecycle.bot:142:28: escapes (callee); plan: rejected (not representable: a struct (only Strings are placed))
+  Num {n} (struct) at lifecycle.bot:143:28: escapes (callee); plan: rejected (not representable: a struct (only Strings are placed))
+  Num {n} (struct) at lifecycle.bot:144:28: escapes (callee); plan: rejected (not representable: a struct (only Strings are placed))
+  closure (closure) at lifecycle.bot:146:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at lifecycle.bot:146:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at lifecycle.bot:146:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at lifecycle.bot:147:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  closure (closure) at lifecycle.bot:150:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at lifecycle.bot:150:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at lifecycle.bot:150:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::exit (struct) at lifecycle.bot:152:17: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::actor::spawned (struct) at lifecycle.bot:153:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at lifecycle.bot:157:30: escapes (callee error); plan: rejected (not confined to its innermost region)
+  closure (closure) at lifecycle.bot:159:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at lifecycle.bot:159:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at lifecycle.bot:159:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at lifecycle.bot:160:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  Num {n} (struct) at lifecycle.bot:162:26: escapes (callee); plan: rejected (not representable: a struct (only Strings are placed))
+  Num {n} (struct) at lifecycle.bot:163:26: escapes (callee); plan: rejected (not representable: a struct (only Strings are placed))
+  call of coroutine#create (coroutine) at lifecycle.bot:166:5: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of std::actor::open (struct) at lifecycle.bot:171:30: escapes (callee error); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at lifecycle.bot:172:30: escapes (callee error); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at lifecycle.bot:173:30: escapes (callee error); plan: rejected (not confined to its innermost region)
+  closure (closure) at lifecycle.bot:175:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at lifecycle.bot:175:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at lifecycle.bot:175:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at lifecycle.bot:176:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  closure (closure) at lifecycle.bot:179:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at lifecycle.bot:179:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at lifecycle.bot:179:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at lifecycle.bot:180:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  closure (closure) at lifecycle.bot:183:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at lifecycle.bot:183:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at lifecycle.bot:183:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::spawned (struct) at lifecycle.bot:184:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  Num {n} (struct) at lifecycle.bot:186:26: escapes (callee); plan: rejected (not representable: a struct (only Strings are placed))
+  Num {n} (struct) at lifecycle.bot:187:26: escapes (callee); plan: rejected (not representable: a struct (only Strings are placed))
+  Num {n} (struct) at lifecycle.bot:188:26: escapes (callee); plan: rejected (not representable: a struct (only Strings are placed))
+  Num {n} (struct) at lifecycle.bot:189:26: escapes (callee); plan: rejected (not representable: a struct (only Strings are placed))
+  call of std::event_loop::run<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at lifecycle.bot:190:5: escapes (error); plan: rejected (not confined to its innermost region)
+  Num {n} (struct) at lifecycle.bot:191:96: escapes (callee); plan: rejected (not representable: a struct (only Strings are placed))
+  call of std::event_loop::run<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at lifecycle.bot:194:5: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::actor::open (struct) at lifecycle.bot:199:30: escapes (callee error); plan: rejected (not confined to its innermost region)
+  Num {n} (struct) at lifecycle.bot:200:26: escapes (callee); plan: rejected (not representable: a struct (only Strings are placed))
+  closure (closure) at lifecycle.bot:202:9: escapes (callee); plan: rejected (not representable: a closure (only Strings are placed))
+  call of coroutine#create (coroutine) at lifecycle.bot:202:9: escapes (callee); plan: rejected (not representable: the native coroutine#create)
+  call of coroutine#start (struct) at lifecycle.bot:202:9: escapes (callee); plan: rejected (not representable: the native coroutine#start)
+  call of std::actor::exit (struct) at lifecycle.bot:204:17: escapes (callee); plan: rejected (not confined to its innermost region)
+  call of std::actor::spawned (struct) at lifecycle.bot:205:9: escapes (callee); plan: rejected (not confined to its innermost region)
+  Num {n} (struct) at lifecycle.bot:207:73: escapes (callee); plan: rejected (not representable: a struct (only Strings are placed))
+  call of std::actor::open (struct) at lifecycle.bot:211:36: escapes (error); plan: rejected (not confined to its innermost region)
+  Num {n} (struct) at lifecycle.bot:212:83: escapes (callee); plan: rejected (not representable: a struct (only Strings are placed))
+  call of std::event_loop::run<std::event_loop::Driver=std::event_loop::deterministic::Deterministic> (fresh) at lifecycle.bot:214:5: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::take_outcomes (list) at lifecycle.bot:215:15: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::int::to_string (str) at lifecycle.bot:216:59: escapes (inherited); plan: rejected (not confined to its innermost region)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at lifecycle.bot:216:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::str::append_char (str) at lifecycle.bot:216:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::str::concat (str) at lifecycle.bot:216:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::str::append_char (str) at lifecycle.bot:216:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::int::to_string (str) at lifecycle.bot:216:159: escapes (inherited); plan: rejected (not confined to its innermost region)
+    operand range [-∞, +∞]: no finite bound on the text
+  call of std::str::concat (str) at lifecycle.bot:216:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::actor::drain (list) at lifecycle.bot:217:15: escapes (callee error); plan: rejected (not confined to its innermost region)
+  call of std::str::concat (str) at lifecycle.bot:218:30: escapes (inherited); plan: rejected (not confined to its innermost region)
+  call of std::actor::stats (struct) at lifecycle.bot:219:10: escapes (error); plan: rejected (not confined to its innermost region)
+  call of std::event_loop::trace (list) at lifecycle.bot:227:5: escapes (error result); plan: rejected (not confined to its innermost region)
+unit the coroutine of waiter constructed at lifecycle.bot:146:9 -- may suspend
+  suspension call of waiter at lifecycle.bot:146:35: live bindings 0, pending operands 0, objects kept 0
+  call of waiter (struct) at lifecycle.bot:146:35: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of fragile constructed at lifecycle.bot:150:9 -- may suspend
+  suspension call of fragile at lifecycle.bot:150:35: live bindings 0, pending operands 0, objects kept 0
+  call of fragile (struct) at lifecycle.bot:150:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of clumsy constructed at lifecycle.bot:159:9 -- may suspend
+  suspension call of clumsy at lifecycle.bot:159:35: live bindings 0, pending operands 0, objects kept 0
+  call of clumsy (struct) at lifecycle.bot:159:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of plain constructed at lifecycle.bot:166:5 -- may suspend
+  suspension call of plain at lifecycle.bot:166:38: live bindings 0, pending operands 0, objects kept 0
+unit the coroutine of stopper constructed at lifecycle.bot:175:9 -- may suspend
+  suspension call of stopper at lifecycle.bot:175:35: live bindings 0, pending operands 0, objects kept 0
+  call of stopper (struct) at lifecycle.bot:175:35: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of stopper constructed at lifecycle.bot:179:9 -- may suspend
+  suspension call of stopper at lifecycle.bot:179:35: live bindings 0, pending operands 0, objects kept 0
+  call of stopper (struct) at lifecycle.bot:179:35: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of stopper constructed at lifecycle.bot:183:9 -- may suspend
+  suspension call of stopper at lifecycle.bot:183:35: live bindings 0, pending operands 0, objects kept 0
+  call of stopper (struct) at lifecycle.bot:183:35: result; plan: rejected (it may suspend: a region is never live across a suspension)
+unit the coroutine of early constructed at lifecycle.bot:202:9 -- may suspend
+  suspension call of early at lifecycle.bot:202:35: live bindings 0, pending operands 0, objects kept 0
+  call of early (struct) at lifecycle.bot:202:35: escapes (error result); plan: rejected (it may suspend: a region is never live across a suspension)
+
+owner classes: transient 0, segment 4, persistent 5, result 22, escapes 88, unknown 0

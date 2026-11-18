@@ -1,0 +1,169 @@
+# service.bot -- probe E of RN-OFFLINE-DOMAIN-ARCHITECTURE-CENSUS-MILESTONE-1.md:
+# a persistent Botlish service on a host-owned thread, driven
+# asynchronously by other host threads, with nothing but existing
+# mechanisms (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md's
+# NAME_main, EVENT-LOOP-MILESTONE-1.md's Linux driver and its native
+# integration ABI, NATIVE-LIBRARY-MILESTONE-1.md's exports, C byte
+# borrowing). Evidence, not a product.
+#
+# Built as the application library `svc`:
+#
+#   svc_main(argc, argv)   the service: installs its own loop, driver and
+#                          state, attaches its endpoint to port argv[1] and
+#                          runs until a request says "stop"; the VM is made
+#                          and dropped on the host thread that called it.
+#   svc_open_port()        a port (native/probe_bridge.c), before the
+#                          service starts;
+#   svc_submit(port, text) queue a request and wake the service: returns
+#                          its id at once (never waits for the service);
+#   svc_next_completion(port, ms)
+#                          block (a condition variable) until a completion
+#                          waits: "ID TEXT", or "" after MS milliseconds.
+#
+# The exports run in an instance on the calling host thread; the service's
+# state lives only in its own VM. Nothing but bytes crosses.
+import event_loop_linux
+import std::abi
+import std::abi::bytes
+import std::byte
+import std::event_loop
+import std::ffi::c
+import std::int
+import std::list
+import std::mutable_vector
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+extern c library "probe_bridge" static at "native/libprobe_bridge.a"
+
+extern c fn pb_open() -> std::ffi::c::Int
+extern c fn pb_submit(p: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, n: std::ffi::c::ULong) -> std::ffi::c::LongLong
+extern c fn pb_attach(p: std::ffi::c::Int, lp: std::ffi::c::Int, endpoint: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn pb_detach(p: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn pb_take_id(p: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn pb_take(p: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::Int
+extern c fn pb_complete(p: std::ffi::c::Int, id: std::ffi::c::LongLong, buf: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, n: std::ffi::c::ULong) -> std::ffi::c::Int
+extern c fn pb_wait(p: std::ffi::c::Int, timeout_ms: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn pb_done_id(p: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn pb_fetch(p: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::Int
+
+# The service's state: every accepted name, in acceptance order (a stand-in
+# for the domain's database, owned by the service VM's installed context);
+# element 0 is a placeholder (no typed empty MutableVector), so a name's
+# revision is its index.
+context struct Store:
+    names: MutableVector[str]
+
+private fn ci(x: int) -> std::ffi::c::Int:
+    if x < -2147483648:
+        -2147483648
+    elif x > 2147483647:
+        2147483647
+    else:
+        x
+
+private fn buffer() -> std::abi::bytes::MutableBytes:
+    std::abi::bytes::zeroed(std::abi::Usize {value: 4096})
+
+# The text of DATA's first N bytes (none for a negative N).
+private fn text(data: std::abi::bytes::MutableBytes, n: std::ffi::c::Int) -> str errors UpperOverrun, InvalidUtf8:
+    count = if n < 0:
+        0
+    else:
+        n
+    data.freeze_prefix(std::abi::Usize {value: count}).decode_utf8()
+
+private fn encoded(s: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(s))
+
+private fn complete(port: int, id: int, reply: str) -> int:
+    b = encoded(reply)
+    if id < -9223372036854775808 or id > 9223372036854775807:
+        return -22
+    ci(port).pb_complete(id, b, std::abi::bytes::length(b).value)
+
+exported c fn open_port() -> int:
+    pb_open()
+
+exported c fn submit(port: int, request: str) -> int:
+    b = encoded(request)
+    ci(port).pb_submit(b, std::abi::bytes::length(b).value)
+
+exported c fn next_completion(port: int, timeout_ms: int) -> str:
+    n = ci(port).pb_wait(ci(timeout_ms))
+    if n < 0:
+        return ""
+    id = ci(port).pb_done_id()
+    r = ci(port).pb_fetch(buffer(), 4096)
+    t = r.buf.text(r.result):
+        on UpperOverrun:
+            "(?)"
+        on InvalidUtf8:
+            "(?)"
+    std::int::to_string(id).append_char(' ').concat(t)
+
+# Take and answer every queued request; true once one said "stop".
+private fn drain(port: int, context s: Store) -> bool:
+    loop:
+        id = ci(port).pb_take_id()
+        if id == 0:
+            break
+        r = ci(port).pb_take(buffer(), 4096)
+        t = r.buf.text(r.result):
+            on UpperOverrun:
+                "(?)"
+            on InvalidUtf8:
+                "(?)"
+        if t == "stop":
+            port.complete(id, "stopped")
+            return true
+        s.names.push(t)
+        revision = s.names.length() - 1
+        port.complete(id, "ok ".concat(std::int::to_string(revision)).append_char(' ').concat(t))
+    false
+
+# The service task: wakes on the port's records, never polls.
+private fn serve(port: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native, s: Store) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    r = std::event_loop::source(Delivery::Reliable, 64, :keep_alive)
+    e = event_loop_linux::endpoint(64)
+    attached = ci(port).pb_attach(ci(event_loop_linux::loop_handle()), ci(event_loop_linux::endpoint_id(e)), ci(std::event_loop::native_slot(r)), ci(std::event_loop::native_generation(r)))
+    if attached != 0:
+        return attached
+    loop:
+        w = std::event_loop::wait(r)
+        if w.reason != Wake::Event:
+            break
+        if port.drain():
+            break
+    ci(port).pb_detach()
+    event_loop_linux::close_endpoint(e)
+    std::event_loop::stop()
+    s.names.length() - 1
+
+# Adopt the service task and run the loop until the task stops it.
+private fn run_service(port: int, context ev: std::event_loop::Loop, d: std::event_loop::Driver, n: event_loop_linux::Native, s: Store) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    coroutine {step, first} = serve(port)
+    std::event_loop::adopt(step, first)
+    std::event_loop::run()
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+port_text = args.get(1, "-1")
+port = std::int::from_string(port_text):
+    on InvalidIntegerText:
+        0
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context Store {names: std::mutable_vector::from_list([""])}
+
+run_service(port):
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault {code}:
+        code
+    on std::event_loop::LoopReentered:
+        -2

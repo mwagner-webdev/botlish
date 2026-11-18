@@ -16,11 +16,15 @@
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 
+# The driver's own build directory (BOTLISH_NATIVE_BIN's, else the
+# checkout's native/target/release): the stub and the runtime it links are
+# its build's, whose ABI its images carry.
+set ::stubRelease [expr {[catch {native::binary} driver] ? [file join $native::home target release] : [file dirname $driver]}]
 testConstraint stubLinker [expr {$::tcl_platform(os) eq "Linux" &&
     $::tcl_platform(machine) in {x86_64 amd64} &&
-    [file executable [file join $native::home target release botlish-aot-stub]]}]
+    [file executable [file join $::stubRelease botlish-aot-stub]]}]
 testConstraint rustcAvailable [expr {[testConstraint stubLinker] && [auto_execok rustc] ne "" &&
-    [file isfile [file join $native::home target release libbotlish_native.rlib]]}]
+    [file isfile [file join $::stubRelease libbotlish_native.rlib]]}]
 
 # Runs BODY with the environment variables NAME VALUE ... set (VALUE {} unsets
 # NAME), restoring them afterwards.
@@ -197,7 +201,7 @@ test stub-linker-outcomes {stub-linked executables print nothing of their own (t
 
 test stub-linker-image {a stub-linked executable is the stub's own bytes, then the program image, its length and the magic; the bare stub refuses to run} -constraints stubLinker -body {
     set dir [makeDirectory stub-linker-image]
-    set stub [file join $native::home target release botlish-aot-stub]
+    set stub [file join $::stubRelease botlish-aot-stub]
     set exe [file join $dir program]
     linkWith stub [surface::compile "1 + 2" one.bot] $exe
     set channel [open $exe rb]; set bytes [read $channel]; close $channel

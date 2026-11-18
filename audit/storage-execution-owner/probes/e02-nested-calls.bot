@@ -1,0 +1,35 @@
+# E02 -- nested calls: which caller values stay live while a callee uses
+# scratch storage? `outer` keeps `a` across a non-suspending call (`inner`,
+# whose own temporaries die inside it) and across a suspending one
+# (`inner_y`, a yielding callee: a deep yield suspends outer's coroutine
+# while `a` and the pending `std::str::length(b)` wait).
+import std::coroutine
+import std::int
+import std::str
+
+fn inner(i: int) -> int:
+    t = std::int::to_string(i).concat(" inner")
+    std::str::length(t)
+
+fn outer(i: int) -> int:
+    a = std::int::to_string(i).concat(" outer")
+    n = inner(i)
+    std::str::length(a) + n
+
+fn inner_y(i: int) -> int:
+    t = std::int::to_string(i).concat(" inner_y")
+    yield std::str::length(t)
+    i
+
+fn outer_y(i: int) -> int:
+    a = std::int::to_string(i).concat(" outer_y")
+    b = std::int::to_string(i * 3)
+    m = std::str::length(b) + inner_y(i)
+    std::str::length(a) + m
+
+fn drive(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        coroutine {step, first} = outer_y(i)
+        acc + outer(i) + first + step()
+
+drive(1000)

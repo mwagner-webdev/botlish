@@ -1,0 +1,33 @@
+# E13 -- nested owners: a parent execution (`parent`, itself a coroutine)
+# constructs a child coroutine and resumes it; the child keeps a String
+# across its suspensions, and the parent keeps its own String across its
+# own suspension while the child is suspended inside the parent's frame.
+# Can a child's storage come from its parent without corrupting the
+# parent's state? Both persist at once; the child's handle -- and with it
+# its storage -- is owned by the parent's frame and released at its last
+# use there.
+import std::coroutine
+import std::int
+import std::str
+
+fn child(seed: int) -> int:
+    held = std::int::to_string(seed).concat(" child")
+    yield std::str::length(held)
+    yield seed
+    std::str::length(held)
+
+fn parent(seed: int) -> int:
+    mine = std::int::to_string(seed).concat(" parent")
+    coroutine {step, first} = child(seed * 10)
+    yield first
+    second = step()
+    yield second
+    third = step()
+    std::str::length(mine) + third + step()
+
+fn drive(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        coroutine {step, first} = parent(i)
+        acc + first + step() + step()
+
+drive(1000)

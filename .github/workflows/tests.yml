@@ -400,6 +400,86 @@ jobs:
       - name: Golden suites and their Tcl originals, side by side
         run: tclsh9.0 audit/golden/tools/check.tcl -shard ${{ matrix.shard }}/4 -jobs 2
 
+  resumable:
+    name: tests (fallback roots, resumable coroutines)
+    needs: canary
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    # The native backend's other general coroutine mechanism and root plan
+    # (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md): a driver built
+    # with the `fallback-roots` feature -- the ShadowOnly root plan, no stack
+    # switch, every coroutine lowered to resumable heap frames, the mechanism
+    # WebAssembly will run -- on a host where stack switching exists, so the
+    # alternate mechanism has continuous coverage of its own. Its first test
+    # step proves which mechanism it runs from the driver itself, never from
+    # this job's name. The golden suites run with fusion off (every
+    # coroutine on the general mechanism, the one under test); the focused
+    # files compare fused and unfused runs themselves; the GC-stress step
+    # and tests/resumable-coroutines.test's stressed tests run the
+    # collector at every allocation; the mutants step runs the report's M1
+    # and M2 and the leaf re-entry mutant of the catalog
+    # (audit/resumable-coroutines/tools/mutants.txt; the whole catalog is
+    # its harness's, run by hand).
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      - name: Build native (Cranelift) backend
+        id: build
+        uses: ./.github/actions/build-native
+
+      - name: Cache the fallback-roots build
+        uses: actions/cache@v4
+        with:
+          path: native/target-fallback
+          key: native-fallback-${{ runner.os }}-${{ runner.arch }}-${{ steps.build.outputs.rustc }}-${{ hashFiles('native/Cargo.lock') }}
+          restore-keys: native-fallback-${{ runner.os }}-${{ runner.arch }}-${{ steps.build.outputs.rustc }}-
+
+      - name: Build the fallback-roots driver
+        run: cargo build --release --manifest-path native/Cargo.toml --features fallback-roots --target-dir native/target-fallback
+
+      - name: The driver runs resumable coroutines on the ShadowOnly root plan
+        run: |
+          caps=$(native/target-fallback/release/botlish-native capabilities)
+          printf '%s\n' "$caps"
+          printf '%s\n' "$caps" | grep -qx 'roots shadow-only'
+          printf '%s\n' "$caps" | grep -qx 'coroutines resumable'
+
+      - name: The fallback build's Rust tests
+        run: cargo test --release --manifest-path native/Cargo.toml --features fallback-roots --target-dir native/target-fallback --lib --bins
+
+      - name: Golden suites, every coroutine on the resumable mechanism
+        env:
+          BOTLISH_NATIVE_BIN: ${{ github.workspace }}/native/target-fallback/release/botlish-native
+          BOTLISH_NATIVE_COROUTINE_FUSION: "0"
+        run: tclsh9.0 tests/golden/run.tcl -backends cranelift,cranelift-generic -quiet
+
+      - name: Coroutine, actor, event-loop, recognizer, resource, context and root-plan tests
+        if: ${{ !cancelled() }}
+        env:
+          BOTLISH_NATIVE_BIN: ${{ github.workspace }}/native/target-fallback/release/botlish-native
+        run: tclsh9.0 tests/all.tcl -file "resumable-coroutines.test coroutines.test coroutine-fusion.test actor.test event-loop.test dfa.test resources.test affine.test context-affine.test contexts.test golden-framework.test native-root-storage.test native-stack-map.test native-stack-overflow.test scratch-storage.test native-library.test"
+
+      - name: Under GC stress
+        if: ${{ !cancelled() }}
+        env:
+          BOTLISH_NATIVE_BIN: ${{ github.workspace }}/native/target-fallback/release/botlish-native
+          BOTLISH_NATIVE_COROUTINE_FUSION: "0"
+          BOTLISH_NATIVE_GC_STRESS: "1"
+        run: |
+          cargo test --release --manifest-path native/Cargo.toml --features fallback-roots --target-dir native/target-fallback --lib --bins -- resumable fallback_tests roots capabilities
+          tclsh9.0 tests/golden/run.tcl -backends cranelift -quiet tests/golden/coroutines.bot tests/golden/tree-struct.bot
+
+      - name: Mutants of the resumable mechanism (M1, M2, leaf re-entry)
+        if: ${{ !cancelled() }}
+        run: tclsh9.0 audit/resumable-coroutines/tools/mutate.tcl -only tagged-slots-untraced,live-register-unsaved,leaf-roots-unscanned -tcl 0 -seed-target native/target-fallback
+
   gc-stress:
     name: tests (native GC-stress, ${{ matrix.backend }})
     needs: canary

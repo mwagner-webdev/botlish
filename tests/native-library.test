@@ -932,7 +932,10 @@ main thread: then depth(1000) status 0 = 1000
 1 MiB thread: then depth(1000) status 0 = 1000}
 
 # The same inside a coroutine, whose body runs on the coroutine's own stack
-# (8 MiB by default) and is bounded by it: the check's limit follows every
+# (8 MiB by default) and is bounded by it -- where coroutines switch stacks;
+# a resumable coroutine (a `fallback-roots` driver,
+# WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md) has no stack of its
+# own, so its recursion is the thread's, bounded as `depth` is: the check's limit follows every
 # switch (Vm::publish_active_stack). `in_coroutine` hands its handle to
 # another function, so its coroutine keeps the general runtime and really
 # runs on a coroutine stack (codegen::fusion); the call runs on a 512 KiB
@@ -941,7 +944,7 @@ main thread: then depth(1000) status 0 = 1000
 # coroutine in place, which fusion inlines into it, on the thread's stack --
 # and a library with a fused coroutine keeps its other exports' code
 # (`depth`; codegen::fusion's drop_unreferenced).
-test nl-stack-safety-coroutine {recursion on a coroutine's stack inside a call is bounded by that stack, not the thread's} -constraints {nativeLibraries nativeCoroutines} -body {
+test nl-stack-safety-coroutine {recursion on a coroutine's stack inside a call is bounded by that stack, not the thread's -- where coroutines switch stacks; a resumable coroutine's activations run on the thread's stack and are bounded by it, as `depth` is (nativeResumableCoroutines)} -constraints {nativeLibraries nativeCoroutines} -body {
     set dir [nlDir]
     set built [nlLibrary $dir sc "$::nlDepth
 struct Go:
@@ -996,14 +999,14 @@ int main(void) {
 }
 " [list [nlLink $built]] -pthread]
     nlRunBoth $exe
-} -result {depth(3000) = 3000
+} -result [string map [list IN_COROUTINE_50000 [if {[testConstraint nativeStackfulCoroutines]} {string cat "in_coroutine(50000) = 50000"} else {string cat "in_coroutine(50000): status 2 NATIVE LIMIT STACK"}]] {depth(3000) = 3000
 depth(50000): status 2 NATIVE LIMIT STACK
-in_coroutine(50000) = 50000
+IN_COROUTINE_50000
 in_coroutine(100000000): status 2 NATIVE LIMIT STACK
 fused(3000) = 3000
 fused(50000): status 2 NATIVE LIMIT STACK
 in_coroutine(500) = 500
-depth(1000) = 1000}
+depth(1000) = 1000}]
 
 # A call made on a stack the instance did not make -- a host's own coroutine
 # or fiber stack, here a ucontext on mapped memory -- has no limit of ours
@@ -1638,7 +1641,7 @@ static int nl_stacks(void) {
 }
 }
 
-test nl-coroutine-stacks-released {a thread's coroutine stacks are pooled while it has an instance, and freed with its last one} -constraints {nativeLibraries nativeCoroutines} -setup {
+test nl-coroutine-stacks-released {a thread's coroutine stacks are pooled while it has an instance, and freed with its last one (the stackful runtime's stacks: nativeStackfulCoroutines)} -constraints {nativeLibraries nativeStackfulCoroutines} -setup {
     set savedStack [array get ::env BOTLISH_NATIVE_COROUTINE_STACK_BYTES]
     set ::env(BOTLISH_NATIVE_COROUTINE_STACK_BYTES) 13107200
 } -body {

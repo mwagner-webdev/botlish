@@ -1,6 +1,8 @@
 # Native root storage remains independent of overflow protection.
-# x86-64/Linux uses native slots and a pthread guard. Other targets retain
-# their RuntimeStack root and depth fallback.
+# x86-64/Linux uses native slots and a pthread guard. The fallback-roots
+# build's ShadowOnly plan keeps every function's roots in the shadow stack,
+# leaf or not, with a depth token only where no stack guard bounds recursion
+# (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-MILESTONE-1.md, section 6).
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -98,16 +100,24 @@ proc underGcStress {body} {
 
 set nirHeader "nir 1\n\n"
 
+# Where a function without a Botlish call keeps its roots: its own native
+# frame where native frames hold roots (nativeFrameRoots); elsewhere the
+# ShadowOnly plan's shadow stack, like every other function -- the old
+# fallback plan's leaf exception, a leaf's native-frame roots published
+# through one Vm pointer, is gone (WASM-RESUMABLE-COROUTINES-SHADOW-ROOTS-
+# MILESTONE-1.md, section 7).
+set leafStorage [if {[testConstraint nativeFrameRoots]} {string cat "native frame"} else {string cat "runtime stack"}]
+
 # ---------------------------------------------------------------------------
 # A function with no roots and no Botlish calls: full elimination. Neither
 # the shared shadow-stack bump/limit-check nor rt_stack_overflow appears in
 # its own CLIF at all.
 
-test storage-no-roots-1 {a function with no roots and no calls uses NativeFrame with zero slots} -body {
+test storage-no-roots-1 {a function with no roots and no calls has zero slots in the host's leaf storage (NativeFrame where native frames hold roots, the shadow stack elsewhere: nothing reserved either way)} -body {
     set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"0 1 2\"\n    %0 = rawint 3\n    %1 = rawint 4\n    %2 = op riadd %0 %1\n    %3 = op rbox %2\n    ret %3\nend\n"
     set report [rootsOfNir $text]
     list [runNir $text] [storageOf $report "<program>"] [slotsOf $report "<program>"]
-} -result {{value {int 7}} {native frame} 0}
+} -result [list {value {int 7}} $leafStorage 0]
 
 test storage-no-roots-2 {a NativeFrame function's own CLIF never imports rt_stack_overflow} -body {
     set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"0 1 2\"\n    %0 = rawint 3\n    %1 = rawint 4\n    %2 = op riadd %0 %1\n    %3 = op rbox %2\n    ret %3\nend\n"
@@ -121,11 +131,11 @@ test storage-no-roots-2 {a NativeFrame function's own CLIF never imports rt_stac
 # rooted value still physically survives a real collection forced at the
 # one safepoint that could reach it.
 
-test storage-one-root-1 {a rooted value with one internal safepoint and no calls uses NativeFrame} -body {
+test storage-one-root-1 {a rooted value with one internal safepoint and no calls uses the host's leaf storage (NativeFrame where native frames hold roots, the shadow stack elsewhere)} -body {
     set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"kept\"\n    %1 = op listnew\n    %2 = op streq %0 %0\n    ret %2\nend\n"
     set report [rootsOfNir $text]
     list [storageOf $report "<program>"] [slotsOf $report "<program>"] [underGcStress {runNir $text}]
-} -result {{native frame} 1 {value {bool true}}}
+} -result [list $leafStorage 1 {value {bool true}}]
 
 test storage-one-root-2 {that same NativeFrame function's CLIF never imports rt_stack_overflow} -body {
     set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"kept\"\n    %1 = op listnew\n    %2 = op streq %0 %0\n    ret %2\nend\n"
@@ -140,17 +150,17 @@ test storage-one-root-2 {that same NativeFrame function's CLIF never imports rt_
 # (the second pair's value must survive even though it shares a physical
 # slot with the first, now-dead, pair).
 
-test storage-multi-root-1 {non-overlapping roots reuse one NativeFrame slot, correctly, under GC stress} -body {
+test storage-multi-root-1 {non-overlapping roots reuse one slot of the host's leaf storage, correctly, under GC stress} -body {
     set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=6 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = str \"z\"\n    %2 = op strcat %0 %1\n    %3 = str \"b\"\n    %4 = str \"c\"\n    %5 = op strcat %3 %4\n    ret %5\nend\n"
     set report [rootsOfNir $text]
     list [storageOf $report "<program>"] [expr {[slotsOf $report "<program>"] < 4}] [underGcStress {runNir $text}]
-} -result {{native frame} 1 {value {str bc}}}
+} -result [list $leafStorage 1 {value {str bc}}]
 
-test storage-multi-root-2 {two simultaneously live NativeFrame roots never share a slot, and survive stress} -body {
+test storage-multi-root-2 {two simultaneously live roots never share a slot of the host's leaf storage, and survive stress} -body {
     set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = op listnew\n    %3 = op streq %0 %1\n    ret %3\nend\n"
     set report [rootsOfNir $text]
     list [storageOf $report "<program>"] [slotsOf $report "<program>"] [underGcStress {runNir $text}]
-} -result {{native frame} 2 {value {bool false}}}
+} -result [list $leafStorage 2 {value {bool false}}]
 
 # ---------------------------------------------------------------------------
 # A function containing a Botlish call now gets NativeFrame storage too

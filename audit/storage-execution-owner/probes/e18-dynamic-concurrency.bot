@@ -1,0 +1,33 @@
+# E18 -- dynamic concurrency: what prevents a finite bound on simultaneous
+# storage? The number of request coroutines suspended at once is a run-time
+# value (derived from the program's arguments): every one keeps its own
+# String across its suspension, so the retained storage is proportional to
+# a count no analysis knows. E08 is the same shape with a constant count.
+import std::coroutine
+import std::int
+import std::list
+import std::mutable_vector
+import std::str
+
+fn request(id: int) -> int:
+    head = "GET /items/".concat(std::int::to_string(id))
+    yield std::str::length(head)
+    std::str::length(head.concat(" done"))
+
+fn empty_pending() -> MutableVector[Coroutine{args: [], return: int, errors: []}]:
+    std::mutable_vector::from_list([])
+
+fn burst(k: int) -> int:
+    pending = empty_pending()
+    opened = fold i from 0 to k with intermediate acc 0:
+        coroutine {step, first} = request(i)
+        pending.push(step)
+        acc + first
+    loop h in pending:
+        h()
+    opened
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+burst(std::list::length(args) * 16 + 16)
